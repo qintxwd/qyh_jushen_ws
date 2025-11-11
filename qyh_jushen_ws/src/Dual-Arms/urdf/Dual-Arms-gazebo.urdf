@@ -1089,7 +1089,7 @@
   <!-- Gazebo ROS2 Control Plugin -->
   <gazebo>
     <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
-      <parameters>$(find dual_arms)/config/dual_arms_controllers.yaml</parameters>
+      <robot_param_node>robot_description</robot_param_node>
     </plugin>
   </gazebo>
 

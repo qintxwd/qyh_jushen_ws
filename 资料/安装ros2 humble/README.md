@@ -59,3 +59,6 @@ sudo apt install -y \
 ```bash
 ros2 --version
 ```
+```bash
+sudo apt install -y ros-humble-gazebo-ros-pkgs ros-humble-gazebo-ros2-control
+```
