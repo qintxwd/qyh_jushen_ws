@@ -1,0 +1,8 @@
+# Request
+---
+# Response
+bool powered_on
+bool servo_enabled
+bool estoped
+bool in_error
+string error_message

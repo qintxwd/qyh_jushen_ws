@@ -1,0 +1,160 @@
+<?xml version="1.0"?>
+<robot name="dual_arms" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Include Gazebo-specific elements -->
+  <xacro:include filename="$(find dual_arms)/urdf/Dual-Arms.gazebo.xacro"/>
+
+  <!-- Load the updated URDF with proper joint limits -->
+  <xacro:property name="urdf_path" value="$(find dual_arms)/urdf/Dual-Arms-gazebo.urdf"/>
+
+  <!-- ros2_control tag -->
+  <ros2_control name="dual_arms_system" type="system">
+    <hardware>
+      <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+    
+    <!-- Right arm joints -->
+    <joint name="r-j1">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="r-j2">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="r-j3">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="r-j4">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="r-j5">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="r-j6">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="r-j7">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <!-- Left arm joints -->
+    <joint name="l-j1">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="l-j2">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="l-j3">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="l-j4">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="l-j5">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="l-j6">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+    <joint name="l-j7">
+      <command_interface name="position">
+        <param name="min">-6.2832</param>
+        <param name="max">6.2832</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+    
+  </ros2_control>
+
+</robot>

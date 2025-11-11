@@ -1,0 +1,10 @@
+# Request
+int32 filter_type  # 0: 不使用滤波器, 1: 关节LPF, 2: 关节NLF, 3: 笛卡尔NLF, 4: 关节MMF
+float64 cutoff_freq  # 截止频率 (用于LPF)
+float64[6] nlf_params  # 非线性滤波器参数 [max_vp, max_ap, max_jp, max_vr, max_ar, max_jr]
+int32 max_buf  # 缓冲区大小 (用于MMF)
+float64[3] mmf_params  # MMF参数 [kp, kv, ka]
+---
+# Response
+bool success
+string message

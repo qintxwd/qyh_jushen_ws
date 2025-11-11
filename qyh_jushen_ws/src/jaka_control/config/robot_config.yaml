@@ -1,0 +1,39 @@
+# JAKA Robot Configuration
+
+# Robot IP address
+robot_ip: "192.168.2.200"
+
+# Status publishing rate (Hz)
+status_publish_rate: 10.0
+
+# Auto-connection settings
+auto_connect: true
+auto_power_on: false
+auto_enable: false
+
+# Motion parameters (defaults)
+default_joint_velocity: 0.5  # rad/s
+default_joint_acceleration: 1.0  # rad/s^2
+default_cartesian_velocity: 100.0  # mm/s
+default_cartesian_acceleration: 200.0  # mm/s^2
+
+# Collision detection level (0-5)
+# 0: disabled, 1-5: increasing sensitivity
+default_collision_level: 2
+
+# Tool offset (default: no offset)
+tool_offset:
+  left_arm:
+    x: 0.0  # mm
+    y: 0.0  # mm
+    z: 0.0  # mm
+    rx: 0.0  # rad
+    ry: 0.0  # rad
+    rz: 0.0  # rad
+  right_arm:
+    x: 0.0  # mm
+    y: 0.0  # mm
+    z: 0.0  # mm
+    rx: 0.0  # rad
+    ry: 0.0  # rad
+    rz: 0.0  # rad
