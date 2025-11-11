@@ -2,7 +2,8 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, RegisterEventHandler, TimerAction
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
@@ -53,52 +54,41 @@ def generate_launch_description():
         output='screen'
     )
 
-    # START ros2_control_node immediately (BYPASSES gazebo_ros2_control slow init)
-    ros2_control_node = Node(
-        package='controller_manager',
-        executable='ros2_control_node',
-        parameters=[controllers_file],
-        output='screen'
-    )
-
-    # Spawner with SHORT delays (only waiting for robot to spawn, not for plugin)
+    # Controller Manager (延迟启动，等待Gazebo和机器人准备好)
     load_joint_state_broadcaster = TimerAction(
-        period=2.0,
+        period=3.0,
         actions=[
             Node(
                 package='controller_manager',
                 executable='spawner',
                 arguments=['joint_state_broadcaster', 
-                          '--controller-manager', '/controller_manager',
-                          '--controller-manager-timeout', '10'],
+                          '--controller-manager', '/controller_manager'],
                 output='screen'
             )
         ]
     )
 
     load_right_arm_controller = TimerAction(
-        period=3.0,
+        period=4.0,
         actions=[
             Node(
                 package='controller_manager',
                 executable='spawner',
                 arguments=['right_arm_controller',
-                          '--controller-manager', '/controller_manager',
-                          '--controller-manager-timeout', '10'],
+                          '--controller-manager', '/controller_manager'],
                 output='screen'
             )
         ]
     )
 
     load_left_arm_controller = TimerAction(
-        period=4.0,
+        period=4.5,
         actions=[
             Node(
                 package='controller_manager',
                 executable='spawner',
                 arguments=['left_arm_controller',
-                          '--controller-manager', '/controller_manager',
-                          '--controller-manager-timeout', '10'],
+                          '--controller-manager', '/controller_manager'],
                 output='screen'
             )
         ]
@@ -107,7 +97,6 @@ def generate_launch_description():
     return LaunchDescription([
         gazebo,
         robot_state_publisher,
-        ros2_control_node,
         spawn_entity,
         load_joint_state_broadcaster,
         load_right_arm_controller,

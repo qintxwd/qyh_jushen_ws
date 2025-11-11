@@ -1087,6 +1087,7 @@
   </ros2_control>
   <gazebo>
     <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+      <parameters>$(find dual_arms)/config/dual_arms_controllers.yaml</parameters>
     </plugin>
   </gazebo>
 </robot>

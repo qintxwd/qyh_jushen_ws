@@ -1087,6 +1087,7 @@
   </ros2_control>
   <gazebo>
     <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+      <parameters>/home/qyh/qyh_jushen_ws/qyh_jushen_ws/src/Dual-Arms/config/dual_arms_controllers.yaml</parameters>
     </plugin>
   </gazebo>
 </robot>
