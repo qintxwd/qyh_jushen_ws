@@ -2,3 +2,7 @@ build/
 install/
 *.log
 log/
+
+.trae/
+.vscode/
+.vs/

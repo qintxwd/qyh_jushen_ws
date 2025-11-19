@@ -8,19 +8,26 @@ namespace qyh_standard_robot
 StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
 : Node("standard_robot_node", options),
   modbus_ctx_(nullptr),
-  is_connected_(false)
+  is_connected_(false),
+  is_manual_control_(false),
+  last_cmd_(nullptr)
 {
   // Declare parameters
   this->declare_parameter<std::string>("modbus_ip", "192.168.1.100");
   this->declare_parameter<int>("modbus_port", 502);
   this->declare_parameter<int>("slave_id", 1);
   this->declare_parameter<double>("publish_rate", 10.0);
+  this->declare_parameter<double>("manual_control_rate", 20.0);
+  this->declare_parameter<int>("manual_command_timeout_ms", 200);
   
   // Get parameters
   modbus_ip_ = this->get_parameter("modbus_ip").as_string();
   modbus_port_ = this->get_parameter("modbus_port").as_int();
   slave_id_ = this->get_parameter("slave_id").as_int();
   publish_rate_ = this->get_parameter("publish_rate").as_double();
+  manual_control_rate_ = this->get_parameter("manual_control_rate").as_double();
+  manual_command_timeout_ms_ = this->get_parameter("manual_command_timeout_ms").as_int();
+  last_cmd_time_ = std::chrono::steady_clock::now();
   
   RCLCPP_INFO(this->get_logger(), "Starting Standard Robot Node");
   RCLCPP_INFO(this->get_logger(), "Modbus IP: %s, Port: %d, Slave ID: %d", 
@@ -40,6 +47,66 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
   timer_ = this->create_wall_timer(
     std::chrono::duration_cast<std::chrono::milliseconds>(timer_period),
     std::bind(&StandardRobotNode::timer_callback, this));
+
+  srv_pause_move_ = this->create_service<qyh_standard_robot_msgs::srv::ControlPauseMove>(
+    "control_pause_move",
+    std::bind(&StandardRobotNode::handle_pause_move, this, std::placeholders::_1, std::placeholders::_2));
+  srv_resume_move_ = this->create_service<qyh_standard_robot_msgs::srv::ControlResumeMove>(
+    "control_resume_move",
+    std::bind(&StandardRobotNode::handle_resume_move, this, std::placeholders::_1, std::placeholders::_2));
+  srv_stop_move_ = this->create_service<qyh_standard_robot_msgs::srv::ControlStopMove>(
+    "control_stop_move",
+    std::bind(&StandardRobotNode::handle_stop_move, this, std::placeholders::_1, std::placeholders::_2));
+  srv_stop_localization_ = this->create_service<qyh_standard_robot_msgs::srv::ControlStopLocalization>(
+    "control_stop_localization",
+    std::bind(&StandardRobotNode::handle_stop_localization, this, std::placeholders::_1, std::placeholders::_2));
+  srv_emergency_stop_ = this->create_service<qyh_standard_robot_msgs::srv::ControlEmergencyStop>(
+    "control_emergency_stop",
+    std::bind(&StandardRobotNode::handle_emergency_stop, this, std::placeholders::_1, std::placeholders::_2));
+  srv_release_emergency_stop_ = this->create_service<qyh_standard_robot_msgs::srv::ControlReleaseEmergencyStop>(
+    "control_release_emergency_stop",
+    std::bind(&StandardRobotNode::handle_release_emergency_stop, this, std::placeholders::_1, std::placeholders::_2));
+  srv_start_charging_ = this->create_service<qyh_standard_robot_msgs::srv::ControlStartCharging>(
+    "control_start_charging",
+    std::bind(&StandardRobotNode::handle_start_charging, this, std::placeholders::_1, std::placeholders::_2));
+  srv_stop_charging_ = this->create_service<qyh_standard_robot_msgs::srv::ControlStopCharging>(
+    "control_stop_charging",
+    std::bind(&StandardRobotNode::handle_stop_charging, this, std::placeholders::_1, std::placeholders::_2));
+  srv_enter_low_power_ = this->create_service<qyh_standard_robot_msgs::srv::ControlEnterLowPowerMode>(
+    "control_enter_low_power_mode",
+    std::bind(&StandardRobotNode::handle_enter_low_power, this, std::placeholders::_1, std::placeholders::_2));
+  srv_exit_low_power_ = this->create_service<qyh_standard_robot_msgs::srv::ControlExitLowPowerMode>(
+    "control_exit_low_power_mode",
+    std::bind(&StandardRobotNode::handle_exit_low_power, this, std::placeholders::_1, std::placeholders::_2));
+  srv_system_reset_ = this->create_service<qyh_standard_robot_msgs::srv::ControlSystemReset>(
+    "control_system_reset",
+    std::bind(&StandardRobotNode::handle_system_reset, this, std::placeholders::_1, std::placeholders::_2));
+  srv_start_manual_ = this->create_service<qyh_standard_robot_msgs::srv::ControlStartManualControl>(
+    "control_start_manual_control",
+    std::bind(&StandardRobotNode::handle_start_manual, this, std::placeholders::_1, std::placeholders::_2));
+  srv_stop_manual_ = this->create_service<qyh_standard_robot_msgs::srv::ControlStopManualControl>(
+    "control_stop_manual_control",
+    std::bind(&StandardRobotNode::handle_stop_manual, this, std::placeholders::_1, std::placeholders::_2));
+  srv_pause_mission_ = this->create_service<qyh_standard_robot_msgs::srv::ControlPauseMission>(
+    "control_pause_mission",
+    std::bind(&StandardRobotNode::handle_pause_mission, this, std::placeholders::_1, std::placeholders::_2));
+  srv_resume_mission_ = this->create_service<qyh_standard_robot_msgs::srv::ControlResumeMission>(
+    "control_resume_mission",
+    std::bind(&StandardRobotNode::handle_resume_mission, this, std::placeholders::_1, std::placeholders::_2));
+  srv_cancel_mission_ = this->create_service<qyh_standard_robot_msgs::srv::ControlCancelMission>(
+    "control_cancel_mission",
+    std::bind(&StandardRobotNode::handle_cancel_mission, this, std::placeholders::_1, std::placeholders::_2));
+
+  manual_motion_sub_ = this->create_subscription<qyh_standard_robot_msgs::msg::ManualMotionCommand>(
+    "manual_motion_cmd", 10,
+    [this](const qyh_standard_robot_msgs::msg::ManualMotionCommand::SharedPtr msg) {
+      last_cmd_ = msg;
+      last_cmd_time_ = std::chrono::steady_clock::now();
+    });
+  auto cmd_period = std::chrono::duration<double>(1.0 / manual_control_rate_);
+  command_timer_ = this->create_wall_timer(
+    std::chrono::duration_cast<std::chrono::milliseconds>(cmd_period),
+    std::bind(&StandardRobotNode::command_timer_callback, this));
 }
 
 StandardRobotNode::~StandardRobotNode()
@@ -305,6 +372,180 @@ bool StandardRobotNode::read_robot_status()
     RCLCPP_ERROR(this->get_logger(), "Exception while reading: %s", e.what());
     return false;
   }
+}
+
+bool StandardRobotNode::write_coil(uint16_t addr)
+{
+  if (!is_connected_ || !modbus_ctx_) {
+    return false;
+  }
+  try {
+    modbus_ctx_->write_coil(addr, true);
+    return true;
+  } catch (const modbus::Exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Modbus exception while writing coil %u: %s", addr, e.what());
+    return false;
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Exception while writing coil %u: %s", addr, e.what());
+    return false;
+  }
+}
+
+void StandardRobotNode::command_timer_callback()
+{
+  if(!is_manual_control_||!last_cmd_) {
+    return;
+  }
+  auto now = std::chrono::steady_clock::now();
+  if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cmd_time_).count() > manual_command_timeout_ms_) {
+    return;
+  }
+  if (last_cmd_->forward && !last_cmd_->backward > 0) {
+    write_coil(17);
+  } else if (last_cmd_->backward && !last_cmd_->forward ) {
+    write_coil(18);
+  }
+  if (last_cmd_->rotate_left && !last_cmd_->rotate_right) {
+    write_coil(19);
+  } else if (last_cmd_->rotate_right && !last_cmd_->rotate_left ) {
+    write_coil(20);
+  }
+}
+
+void StandardRobotNode::handle_pause_move(const qyh_standard_robot_msgs::srv::ControlPauseMove::Request::SharedPtr,
+                                          qyh_standard_robot_msgs::srv::ControlPauseMove::Response::SharedPtr res)
+{
+  bool ok = write_coil(1);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_resume_move(const qyh_standard_robot_msgs::srv::ControlResumeMove::Request::SharedPtr,
+                                           qyh_standard_robot_msgs::srv::ControlResumeMove::Response::SharedPtr res)
+{
+  bool ok = write_coil(2);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_stop_move(const qyh_standard_robot_msgs::srv::ControlStopMove::Request::SharedPtr,
+                                         qyh_standard_robot_msgs::srv::ControlStopMove::Response::SharedPtr res)
+{
+  bool ok = write_coil(3);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_stop_localization(const qyh_standard_robot_msgs::srv::ControlStopLocalization::Request::SharedPtr,
+                                                 qyh_standard_robot_msgs::srv::ControlStopLocalization::Response::SharedPtr res)
+{
+  bool ok = write_coil(4);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_emergency_stop(const qyh_standard_robot_msgs::srv::ControlEmergencyStop::Request::SharedPtr,
+                                              qyh_standard_robot_msgs::srv::ControlEmergencyStop::Response::SharedPtr res)
+{
+  bool ok = write_coil(6);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_release_emergency_stop(const qyh_standard_robot_msgs::srv::ControlReleaseEmergencyStop::Request::SharedPtr,
+                                                      qyh_standard_robot_msgs::srv::ControlReleaseEmergencyStop::Response::SharedPtr res)
+{
+  bool ok = write_coil(7);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_start_charging(const qyh_standard_robot_msgs::srv::ControlStartCharging::Request::SharedPtr,
+                                              qyh_standard_robot_msgs::srv::ControlStartCharging::Response::SharedPtr res)
+{
+  bool ok = write_coil(8);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_stop_charging(const qyh_standard_robot_msgs::srv::ControlStopCharging::Request::SharedPtr,
+                                             qyh_standard_robot_msgs::srv::ControlStopCharging::Response::SharedPtr res)
+{
+  bool ok = write_coil(9);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_enter_low_power(const qyh_standard_robot_msgs::srv::ControlEnterLowPowerMode::Request::SharedPtr,
+                                               qyh_standard_robot_msgs::srv::ControlEnterLowPowerMode::Response::SharedPtr res)
+{
+  bool ok = write_coil(10);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_exit_low_power(const qyh_standard_robot_msgs::srv::ControlExitLowPowerMode::Request::SharedPtr,
+                                              qyh_standard_robot_msgs::srv::ControlExitLowPowerMode::Response::SharedPtr res)
+{
+  bool ok = write_coil(11);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_system_reset(const qyh_standard_robot_msgs::srv::ControlSystemReset::Request::SharedPtr,
+                                            qyh_standard_robot_msgs::srv::ControlSystemReset::Response::SharedPtr res)
+{
+  bool ok = write_coil(12);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_start_manual(const qyh_standard_robot_msgs::srv::ControlStartManualControl::Request::SharedPtr,
+                                            qyh_standard_robot_msgs::srv::ControlStartManualControl::Response::SharedPtr res)
+{
+  bool ok = write_coil(15);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+  if(ok)
+  {
+    is_manual_control_ = true;
+  }
+}
+
+void StandardRobotNode::handle_stop_manual(const qyh_standard_robot_msgs::srv::ControlStopManualControl::Request::SharedPtr,
+                                           qyh_standard_robot_msgs::srv::ControlStopManualControl::Response::SharedPtr res)
+{
+  bool ok = write_coil(16);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+  if(ok)
+  {
+    is_manual_control_ = false;
+  }
+}
+
+void StandardRobotNode::handle_pause_mission(const qyh_standard_robot_msgs::srv::ControlPauseMission::Request::SharedPtr,
+                                             qyh_standard_robot_msgs::srv::ControlPauseMission::Response::SharedPtr res)
+{
+  bool ok = write_coil(97);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_resume_mission(const qyh_standard_robot_msgs::srv::ControlResumeMission::Request::SharedPtr,
+                                              qyh_standard_robot_msgs::srv::ControlResumeMission::Response::SharedPtr res)
+{
+  bool ok = write_coil(98);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
+}
+
+void StandardRobotNode::handle_cancel_mission(const qyh_standard_robot_msgs::srv::ControlCancelMission::Request::SharedPtr,
+                                              qyh_standard_robot_msgs::srv::ControlCancelMission::Response::SharedPtr res)
+{
+  bool ok = write_coil(99);
+  res->success = ok;
+  res->message = ok ? "ok" : "failed";
 }
 
 }  // namespace qyh_standard_robot
