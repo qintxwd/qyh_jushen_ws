@@ -17,7 +17,7 @@ def generate_launch_description():
     # Declare launch arguments
     modbus_ip_arg = DeclareLaunchArgument(
         'modbus_ip',
-        default_value='192.168.1.100',
+        default_value='192.168.10.10',
         description='IP address of the Standard robot chassis'
     )
     

@@ -121,7 +121,7 @@ bool StandardRobotNode::read_robot_status()
   try {
     // Read discrete inputs (10001-10136)
     // Note: Modbus addressing starts from 0, so 10001 -> 0, 10002 -> 1, etc.
-    std::vector<uint8_t> discrete_inputs = modbus_ctx_->read_discrete_inputs(0, 136);
+    std::vector<uint8_t> discrete_inputs = modbus_ctx_->read_discrete_inputs(10001, 136);
     
     // Parse discrete inputs
     status_msg_.is_emergency_stopped = discrete_inputs[0];
@@ -139,7 +139,7 @@ bool StandardRobotNode::read_robot_status()
     
     // Read input registers (30001-30122)
     // Modbus function 0x04 - Read Input Registers
-    std::vector<uint16_t> tab_reg = modbus_ctx_->read_input_registers(0, 122);
+    std::vector<uint16_t> tab_reg = modbus_ctx_->read_input_registers(30001, 122);
     
     // Parse input registers (30001 -> tab_reg[0], 30002 -> tab_reg[1], etc.)
     // 30001 系统状态

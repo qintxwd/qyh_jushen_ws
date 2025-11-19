@@ -1,7 +1,7 @@
 standard_robot_node:
   ros__parameters:
     # Modbus TCP connection parameters
-    modbus_ip: "192.168.1.100"  # IP address of the Standard robot chassis
+    modbus_ip: "192.168.10.10"  # IP address of the Standard robot chassis
     modbus_port: 502             # Modbus TCP port (default 502)
     slave_id: 1                  # Modbus slave ID
     
