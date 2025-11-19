@@ -40,38 +40,50 @@ class RobotMonitorGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Standard Robot Monitor')
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1400, 900)
         
-        # 设置样式
+        # 设置优化的样式
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #f0f0f0;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #e8f4f8, stop:1 #d5e8f0);
             }
             QGroupBox {
                 font-weight: bold;
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                font-size: 11pt;
+                border: 2px solid #4a90e2;
+                border-radius: 8px;
+                margin-top: 16px;
+                padding-top: 12px;
+                background-color: white;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
+                subcontrol-position: top left;
+                left: 15px;
+                padding: 0 8px 0 8px;
+                color: #2c5aa0;
+                background-color: white;
             }
             QLabel {
-                padding: 2px;
+                padding: 3px;
+                color: #333;
             }
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
                 border: none;
-                padding: 8px;
-                border-radius: 4px;
+                padding: 10px;
+                border-radius: 5px;
                 font-weight: bold;
+                font-size: 10pt;
             }
             QPushButton:hover {
                 background-color: #45a049;
+            }
+            QScrollArea {
+                border: none;
+                background-color: transparent;
             }
         """)
         
@@ -98,20 +110,42 @@ class RobotMonitorGUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # 标题栏
+        header_widget = QWidget()
+        header_widget.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                      stop:0 #2c5aa0, stop:1 #4a90e2);
+            border-radius: 10px;
+            padding: 15px;
+        """)
+        header_layout = QHBoxLayout(header_widget)
         
         # 标题
-        title_label = QLabel('Standard Robot Status Monitor')
+        title_label = QLabel('◆ 机器人状态实时监控系统 ◆')
         title_font = QFont()
-        title_font.setPointSize(18)
+        title_font.setPointSize(20)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
+        title_label.setStyleSheet('color: white; background: transparent;')
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
         
         # 连接状态
-        self.connection_label = QLabel('状态: 等待连接...')
-        self.connection_label.setStyleSheet('background-color: #ffeb3b; padding: 5px; border-radius: 3px;')
-        main_layout.addWidget(self.connection_label)
+        self.connection_label = QLabel('● 等待连接...')
+        self.connection_label.setFont(QFont('', 11, QFont.Bold))
+        self.connection_label.setStyleSheet("""
+            background-color: #ff9800; 
+            color: white; 
+            padding: 8px 15px; 
+            border-radius: 5px;
+        """)
+        header_layout.addWidget(self.connection_label)
+        
+        main_layout.addWidget(header_widget)
         
         # 创建滚动区域
         scroll_area = QScrollArea()
@@ -120,7 +154,10 @@ class RobotMonitorGUI(QMainWindow):
         
         # 滚动区域内容widget
         scroll_content = QWidget()
+        scroll_content.setStyleSheet('background-color: transparent;')
         scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(15)
+        scroll_layout.setContentsMargins(5, 5, 5, 5)
         
         # 创建所有内容组
         self.create_all_content(scroll_layout)
@@ -138,9 +175,9 @@ class RobotMonitorGUI(QMainWindow):
         
         # 第二行：速度信息、电池状态和统计信息
         row2 = QHBoxLayout()
-        row2.addWidget(self.create_velocity_group())
-        row2.addWidget(self.create_battery_group())
-        row2.addWidget(self.create_statistics_group())
+        row2.addWidget(self.create_velocity_group(), 2)
+        row2.addWidget(self.create_battery_group(), 3)
+        row2.addWidget(self.create_statistics_group(), 2)
         parent_layout.addLayout(row2)
         
         # 第三行：任务信息
@@ -159,7 +196,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_system_status_group(self):
         """创建系统状态组"""
-        group = QGroupBox('系统状态')
+        group = QGroupBox('▣ 系统状态')
         grid = QGridLayout()
         
         self.sys_status_label = self.create_value_label('未知')
@@ -199,7 +236,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_pose_group(self):
         """创建位姿信息组"""
-        group = QGroupBox('位姿信息')
+        group = QGroupBox('※ 位姿信息')
         grid = QGridLayout()
         
         self.pos_x_label = self.create_value_label('0.00 m')
@@ -221,7 +258,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_velocity_group(self):
         """创建速度信息组"""
-        group = QGroupBox('速度信息')
+        group = QGroupBox('▶ 速度信息')
         grid = QGridLayout()
         
         self.vel_x_label = self.create_value_label('0.00 m/s')
@@ -240,30 +277,42 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_battery_group(self):
         """创建电池状态组"""
-        group = QGroupBox('电池状态')
+        group = QGroupBox('◈ 电池状态')
         layout = QVBoxLayout()
+        layout.setSpacing(10)
         
-        # 电量进度条
+        # 电量进度条容器
+        progress_container = QWidget()
+        progress_layout = QVBoxLayout(progress_container)
+        progress_layout.setContentsMargins(5, 5, 5, 5)
+        
         self.battery_progress = QProgressBar()
         self.battery_progress.setMinimum(0)
         self.battery_progress.setMaximum(100)
         self.battery_progress.setTextVisible(True)
-        self.battery_progress.setFormat('%p%')
+        self.battery_progress.setFormat('电量 %p%')
         self.battery_progress.setStyleSheet("""
             QProgressBar {
-                border: 2px solid grey;
-                border-radius: 5px;
+                border: 2px solid #ddd;
+                border-radius: 8px;
                 text-align: center;
-                height: 25px;
+                height: 35px;
+                background-color: #f0f0f0;
+                font-size: 12pt;
+                font-weight: bold;
             }
             QProgressBar::chunk {
-                background-color: #4CAF50;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #4CAF50, stop:1 #81C784);
+                border-radius: 6px;
             }
         """)
-        layout.addWidget(self.battery_progress)
+        progress_layout.addWidget(self.battery_progress)
+        layout.addWidget(progress_container)
         
         # 电池详细信息
         grid = QGridLayout()
+        grid.setSpacing(8)
         
         self.battery_voltage_label = self.create_value_label('0.00 V')
         self.battery_current_label = self.create_value_label('0.00 A')
@@ -273,6 +322,7 @@ class RobotMonitorGUI(QMainWindow):
         self.battery_cycles_label = self.create_value_label('0')
         self.battery_capacity_label = self.create_value_label('0 mAh')
         
+        # 使用简洁标签
         grid.addWidget(QLabel('电压:'), 0, 0)
         grid.addWidget(self.battery_voltage_label, 0, 1)
         grid.addWidget(QLabel('电流:'), 1, 0)
@@ -294,7 +344,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_statistics_group(self):
         """创建统计信息组"""
-        group = QGroupBox('统计信息')
+        group = QGroupBox('■ 统计信息')
         grid = QGridLayout()
         
         self.total_distance_label = self.create_value_label('0 m')
@@ -313,7 +363,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_mission_group(self):
         """创建Mission信息组"""
-        group = QGroupBox('Mission 状态')
+        group = QGroupBox('◆ Mission 状态')
         grid = QGridLayout()
         
         self.mission_id_label = self.create_value_label('0')
@@ -335,7 +385,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_move_task_group(self):
         """创建移动任务信息组"""
-        group = QGroupBox('移动任务状态')
+        group = QGroupBox('► 移动任务状态')
         grid = QGridLayout()
         
         self.move_task_no_label = self.create_value_label('0')
@@ -363,7 +413,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_status_flags_group(self):
         """创建机器人状态标志组"""
-        group = QGroupBox('机器人状态')
+        group = QGroupBox('▼ 机器人状态')
         grid = QGridLayout()
         
         self.emergency_led = self.create_led_indicator()
@@ -391,7 +441,7 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_obstacle_flags_group(self):
         """创建避障传感器状态组"""
-        group = QGroupBox('避障传感器触发')
+        group = QGroupBox('◇ 避障传感器触发')
         grid = QGridLayout()
         
         self.obs_main_radar_led = self.create_led_indicator()
@@ -420,7 +470,15 @@ class RobotMonitorGUI(QMainWindow):
     def create_value_label(self, text):
         """创建值显示标签"""
         label = QLabel(text)
-        label.setStyleSheet('background-color: white; padding: 5px; border: 1px solid #ccc; border-radius: 3px;')
+        label.setStyleSheet("""
+            background-color: #f8f9fa; 
+            padding: 8px 12px; 
+            border: 1px solid #dee2e6; 
+            border-radius: 5px;
+            font-size: 10pt;
+            color: #495057;
+        """)
+        label.setMinimumHeight(30)
         return label
     
     def create_led_indicator(self):
@@ -428,25 +486,49 @@ class RobotMonitorGUI(QMainWindow):
         label = QLabel('●')
         label.setAlignment(Qt.AlignCenter)
         font = QFont()
-        font.setPointSize(20)
+        font.setPointSize(24)
         font.setBold(True)
         label.setFont(font)
-        label.setStyleSheet('color: #cccccc;')  # 默认灰色（关闭）
-        label.setFixedSize(40, 40)
+        label.setStyleSheet("""
+            color: #cccccc; 
+            background-color: #f5f5f5; 
+            border: 2px solid #e0e0e0;
+            border-radius: 22px;
+        """)
+        label.setFixedSize(44, 44)
         return label
     
     def set_led_status(self, led, active):
         """设置LED指示器状态"""
         if active:
-            led.setStyleSheet('color: #4CAF50; background-color: #e8f5e9; border-radius: 20px;')  # 绿色（激活）
+            led.setStyleSheet("""
+                color: #4CAF50; 
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.8,
+                                           fx:0.5, fy:0.5,
+                                           stop:0 #81C784, stop:1 #4CAF50);
+                border: 2px solid #2E7D32;
+                border-radius: 22px;
+            """)
         else:
-            led.setStyleSheet('color: #cccccc; background-color: #f5f5f5; border-radius: 20px;')  # 灰色（关闭）
+            led.setStyleSheet("""
+                color: #bdbdbd; 
+                background-color: #f5f5f5; 
+                border: 2px solid #e0e0e0;
+                border-radius: 22px;
+            """)
     
     def update_status(self, msg):
         """更新所有状态显示"""
         # 连接状态
-        self.connection_label.setText('状态: 已连接')
-        self.connection_label.setStyleSheet('background-color: #4CAF50; color: white; padding: 5px; border-radius: 3px;')
+        self.connection_label.setText('● 已连接')
+        self.connection_label.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                      stop:0 #4CAF50, stop:1 #81C784);
+            color: white; 
+            padding: 8px 15px; 
+            border-radius: 5px;
+            font-weight: bold;
+        """)
         
         # 系统状态
         self.sys_status_label.setText(self.get_system_status_text(msg.system_status))
@@ -482,18 +564,39 @@ class RobotMonitorGUI(QMainWindow):
         self.battery_progress.setValue(int(msg.battery_remaining_percentage))
         if msg.battery_remaining_percentage < 20:
             self.battery_progress.setStyleSheet("""
-                QProgressBar {border: 2px solid grey; border-radius: 5px; text-align: center; height: 30px;}
-                QProgressBar::chunk {background-color: #f44336;}
+                QProgressBar {
+                    border: 2px solid #ddd; border-radius: 8px; text-align: center; 
+                    height: 35px; background-color: #f0f0f0; font-size: 12pt; font-weight: bold;
+                }
+                QProgressBar::chunk {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                              stop:0 #f44336, stop:1 #e57373);
+                    border-radius: 6px;
+                }
             """)
         elif msg.battery_remaining_percentage < 50:
             self.battery_progress.setStyleSheet("""
-                QProgressBar {border: 2px solid grey; border-radius: 5px; text-align: center; height: 30px;}
-                QProgressBar::chunk {background-color: #ff9800;}
+                QProgressBar {
+                    border: 2px solid #ddd; border-radius: 8px; text-align: center; 
+                    height: 35px; background-color: #f0f0f0; font-size: 12pt; font-weight: bold;
+                }
+                QProgressBar::chunk {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                              stop:0 #ff9800, stop:1 #ffb74d);
+                    border-radius: 6px;
+                }
             """)
         else:
             self.battery_progress.setStyleSheet("""
-                QProgressBar {border: 2px solid grey; border-radius: 5px; text-align: center; height: 30px;}
-                QProgressBar::chunk {background-color: #4CAF50;}
+                QProgressBar {
+                    border: 2px solid #ddd; border-radius: 8px; text-align: center; 
+                    height: 35px; background-color: #f0f0f0; font-size: 12pt; font-weight: bold;
+                }
+                QProgressBar::chunk {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                              stop:0 #4CAF50, stop:1 #81C784);
+                    border-radius: 6px;
+                }
             """)
         
         self.battery_voltage_label.setText(f'{msg.battery_voltage:.2f} V')

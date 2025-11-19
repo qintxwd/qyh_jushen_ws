@@ -1,0 +1,1 @@
+ros2 run qyh_standard_robot_gui standard_robot_monitor
