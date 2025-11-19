@@ -45,11 +45,31 @@ target_link_libraries(${PROJECT_NAME}_node
 
 rclcpp_components_register_nodes(${PROJECT_NAME}_node "qyh_standard_robot::StandardRobotNode")
 
+# Add executable
+add_executable(${PROJECT_NAME}_node_exe
+  src/standard_robot_node_main.cpp
+)
+
+target_compile_features(${PROJECT_NAME}_node_exe PUBLIC c_std_99 cxx_std_17)
+
+ament_target_dependencies(${PROJECT_NAME}_node_exe
+  rclcpp
+  rclcpp_components
+  std_msgs
+  geometry_msgs
+  qyh_standard_robot_msgs
+)
+
+target_link_libraries(${PROJECT_NAME}_node_exe
+  ${PROJECT_NAME}_node
+  modbus
+)
+
 # Install
-install(TARGETS ${PROJECT_NAME}_node
+install(TARGETS ${PROJECT_NAME}_node ${PROJECT_NAME}_node_exe
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY include/

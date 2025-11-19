@@ -622,18 +622,28 @@ class RobotMonitorGUI(QMainWindow):
 def main(args=None):
     # 设置UTF-8编码
     import locale
+    import os
+    
+    # 强制设置环境变量
+    os.environ['LANG'] = 'zh_CN.UTF-8'
+    os.environ['LC_ALL'] = 'zh_CN.UTF-8'
+    
     try:
         locale.setlocale(locale.LC_ALL, 'zh_CN.UTF-8')
     except:
-        pass
+        try:
+            locale.setlocale(locale.LC_ALL, 'C.UTF-8')
+        except:
+            pass
     
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # 使用Fusion样式以获得更好的跨平台外观
     
-    # 设置字体
+    # 设置字体 - 使用更常见的中文字体
     font = QFont()
-    font.setFamily("Microsoft YaHei, SimHei, Sans Serif")
-    font.setPointSize(9)
+    # 在 Linux 中常见的中文字体
+    font.setFamily("Noto Sans CJK SC, WenQuanYi Micro Hei, Droid Sans Fallback, Arial Unicode MS, Sans Serif")
+    font.setPointSize(10)
     app.setFont(font)
     
     window = RobotMonitorGUI()

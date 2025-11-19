@@ -36,7 +36,7 @@ def generate_launch_description():
     # Standard robot node
     standard_robot_node = Node(
         package='qyh_standard_robot',
-        executable='standard_robot_node',
+        executable='qyh_standard_robot_node_exe',
         name='standard_robot_node',
         output='screen',
         parameters=[

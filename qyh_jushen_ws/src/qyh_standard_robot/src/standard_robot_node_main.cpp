@@ -6,7 +6,8 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   
-  auto node = std::make_shared<qyh_standard_robot::StandardRobotNode>();
+  rclcpp::NodeOptions options;
+  auto node = std::make_shared<qyh_standard_robot::StandardRobotNode>(options);
   
   rclcpp::spin(node);
   rclcpp::shutdown();
