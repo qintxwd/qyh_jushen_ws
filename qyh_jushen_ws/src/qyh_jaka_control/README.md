@@ -40,6 +40,10 @@
     - 伺服控制回路的实时状态（10Hz）。
 - `/jaka/vr/status` (`qyh_jaka_control_msgs/msg/VRFollowStatus`)
     - VR跟随模式的状态（仅在跟随模式下发布）。
+- `/jaka/robot_state` (`qyh_jaka_control_msgs/msg/RobotState`)
+    - 机器人完整状态（包括关节位置、笛卡尔位姿、错误信息等，10Hz）。
+- `/joint_states` (`sensor_msgs/msg/JointState`)
+    - 标准ROS关节状态消息（用于RViz可视化，10Hz）。
 
 ### 服务接口 (Services)
 
@@ -62,6 +66,15 @@
 - `/jaka/vr/start_recording` (`qyh_jaka_control_msgs/srv/StartRecording`)：开始录制数据。
 - `/jaka/vr/stop_recording` (`qyh_jaka_control_msgs/srv/StopRecording`)：停止录制并保存。
 
+#### 点到点运动
+- `/jaka/move_j` (`qyh_jaka_control_msgs/srv/MoveJ`)：关节空间点到点运动。
+- `/jaka/move_l` (`qyh_jaka_control_msgs/srv/MoveL`)：笛卡尔空间直线运动。
+
+#### 配置与查询
+- `/jaka/set_collision_level` (`qyh_jaka_control_msgs/srv/SetCollisionLevel`)：设置碰撞检测等级。
+- `/jaka/set_tool_offset` (`qyh_jaka_control_msgs/srv/SetToolOffset`)：设置工具坐标系偏移。
+- `/jaka/get_robot_state` (`qyh_jaka_control_msgs/srv/GetRobotState`)：主动查询机器人状态。
+
 ## 使用方法
 
 ### 启动节点
@@ -75,31 +88,86 @@ ros2 run qyh_jaka_control jaka_control_node --ros-args -p robot_ip:="192.168.1.1
 
 ### 典型操作流程
 
-1. **启动与连接**
-   ```bash
-   ros2 run qyh_jaka_control jaka_control_node
-   ros2 service call /jaka/robot/power_on std_srvs/srv/Trigger
-   ros2 service call /jaka/robot/enable std_srvs/srv/Trigger
-   ```
+#### 1. 基础运动控制（点到点）
+```bash
+# 启动节点
+ros2 run qyh_jaka_control jaka_control_node
 
-2. **开启伺服控制**
-   ```bash
-   ros2 service call /jaka/servo/start qyh_jaka_control_msgs/srv/StartServo
-   ```
+# 上电
+ros2 service call /jaka/robot/power_on std_srvs/srv/Trigger
 
-3. **VR遥操作与录制**
-   ```bash
-   # 开启VR跟随
-   ros2 service call /jaka/vr/enable qyh_jaka_control_msgs/srv/EnableVRFollow "{enable: true}"
-   
-   # 开始录制
-   ros2 service call /jaka/vr/start_recording qyh_jaka_control_msgs/srv/StartRecording "{output_path: '/home/user/data'}"
-   
-   # ... 进行操作 ...
-   
-   # 停止录制
-   ros2 service call /jaka/vr/stop_recording qyh_jaka_control_msgs/srv/StopRecording
-   ```
+# 使能
+ros2 service call /jaka/robot/enable std_srvs/srv/Trigger
+
+# 执行关节运动（移动到指定关节角度）
+ros2 service call /jaka/move_j qyh_jaka_control_msgs/srv/MoveJ \
+  "{robot_id: 0, joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], \
+    move_mode: false, velocity: 1.0, acceleration: 0.5, is_block: true}"
+
+# 执行笛卡尔直线运动
+ros2 service call /jaka/move_l qyh_jaka_control_msgs/srv/MoveL \
+  "{robot_id: 0, target_pose: {position: {x: 0.5, y: 0.0, z: 0.3}, \
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, \
+    move_mode: false, velocity: 100.0, acceleration: 50.0, is_block: true}"
+```
+
+#### 2. 实时伺服控制
+```bash
+# 启动与使能（同上）
+
+# 开启伺服模式
+ros2 service call /jaka/servo/start qyh_jaka_control_msgs/srv/StartServo
+
+# 通过话题发送实时控制指令
+ros2 topic pub /jaka/servo/joint_cmd qyh_jaka_control_msgs/msg/JakaDualJointServo ...
+
+# 停止伺服模式
+ros2 service call /jaka/servo/stop qyh_jaka_control_msgs/srv/StopServo
+```
+
+#### 3. VR遥操作与录制
+```bash
+# 开启伺服模式后
+
+# 校准VR坐标系（首次使用）
+ros2 service call /jaka/vr/calibrate qyh_jaka_control_msgs/srv/CalibrateVR
+
+# 启用VR跟随
+ros2 service call /jaka/vr/enable qyh_jaka_control_msgs/srv/EnableVRFollow "{enable: true}"
+
+# 开始录制
+ros2 service call /jaka/vr/start_recording qyh_jaka_control_msgs/srv/StartRecording \
+  "{output_path: '/home/user/data'}"
+
+# ... 进行操作 ...
+
+# 停止录制
+ros2 service call /jaka/vr/stop_recording qyh_jaka_control_msgs/srv/StopRecording
+```
+
+#### 4. 配置机器人参数
+```bash
+# 设置碰撞检测等级（0-5，0最灵敏）
+ros2 service call /jaka/set_collision_level qyh_jaka_control_msgs/srv/SetCollisionLevel \
+  "{robot_id: 0, level: 3}"
+
+# 设置工具坐标系偏移
+ros2 service call /jaka/set_tool_offset qyh_jaka_control_msgs/srv/SetToolOffset \
+  "{robot_id: 0, tool_offset: {position: {x: 0.0, y: 0.0, z: 0.15}, \
+    orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
+```
+
+#### 5. 查询机器人状态
+```bash
+# 主动查询状态
+ros2 service call /jaka/get_robot_state qyh_jaka_control_msgs/srv/GetRobotState
+
+# 订阅状态话题（持续接收）
+ros2 topic echo /jaka/robot_state
+
+# 在RViz中可视化（订阅/joint_states）
+rviz2
+```
 
 ## 数据格式
 录制的CSV文件包含以下字段：

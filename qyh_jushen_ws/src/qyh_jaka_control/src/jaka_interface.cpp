@@ -206,6 +206,12 @@ bool JakaInterface::getRobotState(RobotState& state)
     return checkReturn(ret, "get_robot_state");
 }
 
+bool JakaInterface::getLastError(ErrorCode& error_code)
+{
+    errno_t ret = robot_->get_last_error(&error_code);
+    return checkReturn(ret, "get_last_error");
+}
+
 bool JakaInterface::isInError(int error[2])
 {
     errno_t ret = robot_->robot_is_in_error(error);
@@ -216,6 +222,81 @@ bool JakaInterface::isInPosition(int inpos[2])
 {
     errno_t ret = robot_->robot_is_inpos(inpos);
     return checkReturn(ret, "is_in_pos");
+}
+
+bool JakaInterface::getJointPositions(int robot_id, JointValue& joint_pos)
+{
+    errno_t ret = robot_->get_joint_position(robot_id, &joint_pos);
+    return checkReturn(ret, "get_joint_position");
+}
+
+bool JakaInterface::getCartesianPose(int robot_id, CartesianPose& cartesian_pose)
+{
+    errno_t ret = robot_->get_tcp_position(robot_id, &cartesian_pose);
+    return checkReturn(ret, "get_tcp_position");
+}
+
+bool JakaInterface::moveJ(int robot_id, const std::vector<double>& joint_positions,
+                          bool move_mode, double velocity, double acceleration, bool is_block)
+{
+    if (joint_positions.size() != 14 && joint_positions.size() != 7) {
+        RCLCPP_ERROR(logger_, "Invalid joint positions size: %zu, expected 7 or 14", joint_positions.size());
+        return false;
+    }
+
+    JointValue jpos[2];
+    memset(&jpos, 0, sizeof(jpos));
+
+    if (joint_positions.size() == 14) {
+        // Dual arm control
+        for (size_t i = 0; i < 7; ++i) {
+            jpos[0].jVal[i] = joint_positions[i];
+            jpos[1].jVal[i] = joint_positions[i + 7];
+        }
+
+        errno_t ret;
+        if (robot_id == -1 || robot_id == 0) {
+            ret = robot_->joint_move(0, &jpos[0], move_mode ? INCR : ABS, velocity, acceleration, is_block);
+            if (!checkReturn(ret, "move_j left")) return false;
+        }
+        if (robot_id == -1 || robot_id == 1) {
+            ret = robot_->joint_move(1, &jpos[1], move_mode ? INCR : ABS, velocity, acceleration, is_block);
+            if (!checkReturn(ret, "move_j right")) return false;
+        }
+        return true;
+    } else {
+        // Single arm control
+        for (size_t i = 0; i < 7; ++i) {
+            jpos[0].jVal[i] = joint_positions[i];
+        }
+        errno_t ret = robot_->joint_move(robot_id, &jpos[0], move_mode ? INCR : ABS, velocity, acceleration, is_block);
+        return checkReturn(ret, "move_j");
+    }
+}
+
+bool JakaInterface::moveL(int robot_id, const geometry_msgs::msg::Pose& target_pose,
+                          bool move_mode, double velocity, double acceleration, bool is_block)
+{
+    CartesianPose jaka_pose = rosPoseToJaka(target_pose);
+    errno_t ret = robot_->linear_move(robot_id, &jaka_pose, move_mode ? INCR : ABS, velocity, acceleration, is_block);
+    return checkReturn(ret, "move_l");
+}
+
+bool JakaInterface::setCollisionLevel(int robot_id, int level)
+{
+    if (level < 0 || level > 5) {
+        RCLCPP_ERROR(logger_, "Invalid collision level: %d, must be 0-5", level);
+        return false;
+    }
+    errno_t ret = robot_->set_collision_level(robot_id, level);
+    return checkReturn(ret, "set_collision_level");
+}
+
+bool JakaInterface::setToolOffset(int robot_id, const geometry_msgs::msg::Pose& tool_offset)
+{
+    CartesianPose jaka_offset = rosPoseToJaka(tool_offset);
+    errno_t ret = robot_->set_tool_offset(robot_id, &jaka_offset);
+    return checkReturn(ret, "set_tool_offset");
 }
 
 CartesianPose JakaInterface::rosPoseToJaka(const geometry_msgs::msg::Pose& ros_pose)

@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/JakaServoStatus.msg"
   "msg/VRPose.msg"
   "msg/VRFollowStatus.msg"
+  "msg/RobotState.msg"
   "srv/StartServo.srv"
   "srv/StopServo.srv"
   "srv/ZeroFT.srv"
@@ -25,6 +26,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StartRecording.srv"
   "srv/StopRecording.srv"
   "srv/CalibrateVR.srv"
+  "srv/MoveJ.srv"
+  "srv/MoveL.srv"
+  "srv/SetCollisionLevel.srv"
+  "srv/SetToolOffset.srv"
+  "srv/GetRobotState.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

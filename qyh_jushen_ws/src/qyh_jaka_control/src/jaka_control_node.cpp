@@ -1,11 +1,13 @@
 #include "qyh_jaka_control/jaka_interface.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_dual_joint_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_dual_cartesian_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_servo_status.hpp>
 #include <qyh_jaka_control_msgs/msg/vr_pose.hpp>
 #include <qyh_jaka_control_msgs/msg/vr_follow_status.hpp>
+#include <qyh_jaka_control_msgs/msg/robot_state.hpp>
 #include <qyh_jaka_control_msgs/srv/start_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/stop_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/enable_vr_follow.hpp>
@@ -13,6 +15,11 @@
 #include <qyh_jaka_control_msgs/srv/stop_recording.hpp>
 #include <qyh_jaka_control_msgs/srv/calibrate_vr.hpp>
 #include <qyh_jaka_control_msgs/srv/set_filter.hpp>
+#include <qyh_jaka_control_msgs/srv/move_j.hpp>
+#include <qyh_jaka_control_msgs/srv/move_l.hpp>
+#include <qyh_jaka_control_msgs/srv/set_collision_level.hpp>
+#include <qyh_jaka_control_msgs/srv/set_tool_offset.hpp>
+#include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <fstream>
@@ -71,6 +78,10 @@ public:
             "/jaka/servo/status", 10);
         vr_status_pub_ = create_publisher<qyh_jaka_control_msgs::msg::VRFollowStatus>(
             "/jaka/vr/status", 10);
+        robot_state_pub_ = create_publisher<qyh_jaka_control_msgs::msg::RobotState>(
+            "/jaka/robot_state", 10);
+        joint_states_pub_ = create_publisher<sensor_msgs::msg::JointState>(
+            "/joint_states", 10);
 
         // Subscribers
         auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
@@ -144,6 +155,27 @@ public:
         srv_stop_recording_ = create_service<qyh_jaka_control_msgs::srv::StopRecording>(
             "/jaka/vr/stop_recording",
             std::bind(&JakaControlNode::handleStopRecording, this, std::placeholders::_1, std::placeholders::_2));
+
+        // 点到点运动服务
+        srv_move_j_ = create_service<qyh_jaka_control_msgs::srv::MoveJ>(
+            "/jaka/move_j",
+            std::bind(&JakaControlNode::handleMoveJ, this, std::placeholders::_1, std::placeholders::_2));
+        
+        srv_move_l_ = create_service<qyh_jaka_control_msgs::srv::MoveL>(
+            "/jaka/move_l",
+            std::bind(&JakaControlNode::handleMoveL, this, std::placeholders::_1, std::placeholders::_2));
+        
+        srv_set_collision_level_ = create_service<qyh_jaka_control_msgs::srv::SetCollisionLevel>(
+            "/jaka/set_collision_level",
+            std::bind(&JakaControlNode::handleSetCollisionLevel, this, std::placeholders::_1, std::placeholders::_2));
+        
+        srv_set_tool_offset_ = create_service<qyh_jaka_control_msgs::srv::SetToolOffset>(
+            "/jaka/set_tool_offset",
+            std::bind(&JakaControlNode::handleSetToolOffset, this, std::placeholders::_1, std::placeholders::_2));
+        
+        srv_get_robot_state_ = create_service<qyh_jaka_control_msgs::srv::GetRobotState>(
+            "/jaka/get_robot_state",
+            std::bind(&JakaControlNode::handleGetRobotState, this, std::placeholders::_1, std::placeholders::_2));
 
         // 自动连接和初始化
         if (auto_connect_) {
@@ -300,6 +332,80 @@ private:
         servo_msg.packet_loss_rate = 0.0;
         servo_msg.error_code = 0;
         status_pub_->publish(servo_msg);
+
+        // 机器人状态
+        auto robot_state_msg = qyh_jaka_control_msgs::msg::RobotState();
+        robot_state_msg.header.stamp = this->now();
+        robot_state_msg.header.frame_id = "world";
+
+        RobotState state;
+        if (jaka_interface_.getRobotState(state)) {
+            robot_state_msg.powered_on = state.poweredOn;
+            robot_state_msg.servo_enabled = state.servoEnabled;
+            robot_state_msg.estoped = state.estoped;
+
+            int error[2] = {0, 0};
+            jaka_interface_.isInError(error);
+            robot_state_msg.in_error = (error[0] || error[1]);
+
+            int inpos[2] = {0, 0};
+            jaka_interface_.isInPosition(inpos);
+            robot_state_msg.left_in_position = inpos[0];
+            robot_state_msg.right_in_position = inpos[1];
+
+            // 获取关节位置
+            JointValue left_joint, right_joint;
+            if (jaka_interface_.getJointPositions(0, left_joint)) {
+                for (int i = 0; i < 7; ++i) {
+                    robot_state_msg.left_joint_positions.push_back(left_joint.jVal[i]);
+                }
+            }
+            if (jaka_interface_.getJointPositions(1, right_joint)) {
+                for (int i = 0; i < 7; ++i) {
+                    robot_state_msg.right_joint_positions.push_back(right_joint.jVal[i]);
+                }
+            }
+
+            // 获取笛卡尔位姿
+            CartesianPose left_pose, right_pose;
+            if (jaka_interface_.getCartesianPose(0, left_pose)) {
+                robot_state_msg.left_cartesian_pose = jaka_interface_.jakaPoseToRos(left_pose);
+            }
+            if (jaka_interface_.getCartesianPose(1, right_pose)) {
+                robot_state_msg.right_cartesian_pose = jaka_interface_.jakaPoseToRos(right_pose);
+            }
+
+            // 错误信息
+            if (robot_state_msg.in_error) {
+                ErrorCode error_code;
+                if (jaka_interface_.getLastError(error_code)) {
+                    robot_state_msg.error_message = error_code.message;
+                }
+            }
+        }
+
+        robot_state_pub_->publish(robot_state_msg);
+
+        // 发布标准JointState消息（用于RViz）
+        auto joint_state_msg = sensor_msgs::msg::JointState();
+        joint_state_msg.header.stamp = this->now();
+        joint_state_msg.header.frame_id = "world";
+        
+        // 左臂关节名称
+        for (int i = 1; i <= 7; ++i) {
+            joint_state_msg.name.push_back("left_joint_" + std::to_string(i));
+        }
+        // 右臂关节名称
+        for (int i = 1; i <= 7; ++i) {
+            joint_state_msg.name.push_back("right_joint_" + std::to_string(i));
+        }
+        
+        joint_state_msg.position = robot_state_msg.left_joint_positions;
+        joint_state_msg.position.insert(joint_state_msg.position.end(),
+                                       robot_state_msg.right_joint_positions.begin(),
+                                       robot_state_msg.right_joint_positions.end());
+        
+        joint_states_pub_->publish(joint_state_msg);
 
         // VR跟随状态
         if (vr_following_) {
@@ -620,6 +726,79 @@ private:
         recording_ = false;
     }
 
+    // ==================== 点到点运动服务 ====================
+    void handleMoveJ(
+        const qyh_jaka_control_msgs::srv::MoveJ::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::MoveJ::Response::SharedPtr res)
+    {
+        if (!enabled_) {
+            res->success = false;
+            res->message = "Robot not enabled";
+            return;
+        }
+
+        std::vector<double> positions(req->joint_positions.begin(), req->joint_positions.end());
+        res->success = jaka_interface_.moveJ(
+            req->robot_id, positions, req->move_mode,
+            req->velocity, req->acceleration, req->is_block);
+        res->message = res->success ? "MoveJ executed successfully" : "Failed to execute MoveJ";
+    }
+
+    void handleMoveL(
+        const qyh_jaka_control_msgs::srv::MoveL::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::MoveL::Response::SharedPtr res)
+    {
+        if (!enabled_) {
+            res->success = false;
+            res->message = "Robot not enabled";
+            return;
+        }
+
+        res->success = jaka_interface_.moveL(
+            req->robot_id, req->target_pose, req->move_mode,
+            req->velocity, req->acceleration, req->is_block);
+        res->message = res->success ? "MoveL executed successfully" : "Failed to execute MoveL";
+    }
+
+    void handleSetCollisionLevel(
+        const qyh_jaka_control_msgs::srv::SetCollisionLevel::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::SetCollisionLevel::Response::SharedPtr res)
+    {
+        res->success = jaka_interface_.setCollisionLevel(req->robot_id, req->level);
+        res->message = res->success ? "Collision level set successfully" : "Failed to set collision level";
+    }
+
+    void handleSetToolOffset(
+        const qyh_jaka_control_msgs::srv::SetToolOffset::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::SetToolOffset::Response::SharedPtr res)
+    {
+        res->success = jaka_interface_.setToolOffset(req->robot_id, req->tool_offset);
+        res->message = res->success ? "Tool offset set successfully" : "Failed to set tool offset";
+    }
+
+    void handleGetRobotState(
+        const qyh_jaka_control_msgs::srv::GetRobotState::Request::SharedPtr,
+        qyh_jaka_control_msgs::srv::GetRobotState::Response::SharedPtr res)
+    {
+        RobotState state;
+        if (jaka_interface_.getRobotState(state)) {
+            res->powered_on = state.poweredOn;
+            res->servo_enabled = state.servoEnabled;
+            res->estoped = state.estoped;
+            
+            int error[2] = {0, 0};
+            jaka_interface_.isInError(error);
+            res->in_error = (error[0] || error[1]);
+            
+            if (res->in_error) {
+                ErrorCode error_code;
+                if (jaka_interface_.getLastError(error_code)) {
+                    res->error_message = error_code.message;
+                }
+            }
+        }
+    }
+
     // ==================== 成员变量 ====================
     qyh_jaka_control::JakaInterface jaka_interface_;
     
@@ -663,6 +842,8 @@ private:
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::VRFollowStatus>::SharedPtr vr_status_pub_;
+    rclcpp::Publisher<qyh_jaka_control_msgs::msg::RobotState>::SharedPtr robot_state_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_states_pub_;
     
     rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualJointServo>::SharedPtr joint_sub_;
     rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualCartesianServo>::SharedPtr cartesian_sub_;
@@ -687,6 +868,13 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::CalibrateVR>::SharedPtr srv_calibrate_vr_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::StartRecording>::SharedPtr srv_start_recording_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::StopRecording>::SharedPtr srv_stop_recording_;
+
+    // 点到点运动服务
+    rclcpp::Service<qyh_jaka_control_msgs::srv::MoveJ>::SharedPtr srv_move_j_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::MoveL>::SharedPtr srv_move_l_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::SetCollisionLevel>::SharedPtr srv_set_collision_level_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::SetToolOffset>::SharedPtr srv_set_tool_offset_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::GetRobotState>::SharedPtr srv_get_robot_state_;
 
     // 定时器
     rclcpp::TimerBase::SharedPtr main_timer_;

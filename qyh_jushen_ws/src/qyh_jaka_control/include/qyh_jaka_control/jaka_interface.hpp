@@ -58,10 +58,23 @@ public:
     bool kineInverse(int robot_id, const JointValue& ref_pos, 
                      const CartesianPose& cartesian_pose, JointValue& joint_pos);
 
+    // 点到点运动
+    bool moveJ(int robot_id, const std::vector<double>& joint_positions,
+               bool move_mode, double velocity, double acceleration, bool is_block);
+    bool moveL(int robot_id, const geometry_msgs::msg::Pose& target_pose,
+               bool move_mode, double velocity, double acceleration, bool is_block);
+
+    // 配置功能
+    bool setCollisionLevel(int robot_id, int level);
+    bool setToolOffset(int robot_id, const geometry_msgs::msg::Pose& tool_offset);
+
     // 状态查询
     bool getRobotState(RobotState& state);
+    bool getLastError(ErrorCode& error_code);
     bool isInError(int error[2]);
     bool isInPosition(int inpos[2]);
+    bool getJointPositions(int robot_id, JointValue& joint_pos);
+    bool getCartesianPose(int robot_id, CartesianPose& cartesian_pose);
 
     // 辅助函数：ROS消息转换
     CartesianPose rosPoseToJaka(const geometry_msgs::msg::Pose& ros_pose);
