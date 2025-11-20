@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QObject, QEvent, QPointF
 from PyQt5.QtGui import QFont, QPalette, QColor, QPainter
 from qyh_standard_robot_msgs.msg import ManualMotionCommand
+from qyh_standard_robot_msgs.msg import NavigationStatus
 from qyh_standard_robot_msgs.srv import (
     ControlStartManualControl,
     ControlStopManualControl,
@@ -27,12 +28,24 @@ from qyh_standard_robot_msgs.srv import (
     ControlPauseMission,
     ControlResumeMission,
     ControlCancelMission,
+    GoSetSpeedType,
+    GoNavigateToCoordinate,
+    GoExecuteActionTask,
+    GoSetManualControl,
+    GoSetObstacleStrategy,
+    GoSetCurrentSite,
+    GoSetSpeakerVolume,
+    GoSetCurrentMap,
+    GoForceLocalize,
+    GoNavigateToPoseWithTask,
+    GoNavigateToSiteWithTask,
 )
 
 
 class RobotStatusSignals(QObject):
     """信号类，用于线程安全的UI更新"""
     status_updated = pyqtSignal(object)
+    nav_status_updated = pyqtSignal(object)
 
 
 class ToggleSwitch(QCheckBox):
@@ -71,6 +84,7 @@ class StandardRobotMonitor(Node):
         super().__init__('standard_robot_monitor')
         self.signals = signals
         self.latest_status = None
+        self.latest_nav_status = None
         self.manual_pub = self.create_publisher(ManualMotionCommand, 'manual_motion_cmd', 10)
         self.cli_start_manual = self.create_client(ControlStartManualControl, 'control_start_manual_control')
         self.cli_stop_manual = self.create_client(ControlStopManualControl, 'control_stop_manual_control')
@@ -89,6 +103,19 @@ class StandardRobotMonitor(Node):
         self.cli_resume_mission = self.create_client(ControlResumeMission, 'control_resume_mission')
         self.cli_cancel_mission = self.create_client(ControlCancelMission, 'control_cancel_mission')
         
+        # Go series service clients
+        self.cli_go_set_speed = self.create_client(GoSetSpeedType, 'go_set_speed_level')
+        self.cli_go_nav_coord = self.create_client(GoNavigateToCoordinate, 'go_navigate_to_coordinate')
+        self.cli_go_nav_site = self.create_client(GoExecuteActionTask, 'go_navigate_to_site')
+        self.cli_go_manual = self.create_client(GoSetManualControl, 'go_set_manual_control')
+        self.cli_go_obstacle = self.create_client(GoSetObstacleStrategy, 'go_set_obstacle_strategy')
+        self.cli_go_current_site = self.create_client(GoSetCurrentSite, 'go_set_current_site')
+        self.cli_go_volume = self.create_client(GoSetSpeakerVolume, 'go_set_speaker_volume')
+        self.cli_go_map = self.create_client(GoSetCurrentMap, 'go_set_current_map')
+        self.cli_go_force_loc = self.create_client(GoForceLocalize, 'go_force_localize')
+        self.cli_go_nav_pose_task = self.create_client(GoNavigateToPoseWithTask, 'go_navigate_to_pose_with_task')
+        self.cli_go_nav_site_task = self.create_client(GoNavigateToSiteWithTask, 'go_navigate_to_site_with_task')
+        
         # 订阅机器人状态
         self.subscription = self.create_subscription(
             StandardRobotStatus,
@@ -96,11 +123,23 @@ class StandardRobotMonitor(Node):
             self.status_callback,
             10)
         
+        # 订阅导航状态
+        self.nav_subscription = self.create_subscription(
+            NavigationStatus,
+            'navigation_status',
+            self.nav_status_callback,
+            10)
+        
         self.get_logger().info('Standard Robot Monitor started')
     
     def status_callback(self, msg):
         self.latest_status = msg
         self.signals.status_updated.emit(msg)
+    
+    def nav_status_callback(self, msg):
+        self.latest_nav_status = msg
+        self.signals.nav_status_updated.emit(msg)
+    
     def publish_manual(self, cmd):
         self.manual_pub.publish(cmd)
     def call_service(self, client, request):
@@ -178,6 +217,7 @@ class RobotMonitorGUI(QMainWindow):
         # 初始化ROS2
         self.signals = RobotStatusSignals()
         self.signals.status_updated.connect(self.update_status)
+        self.signals.nav_status_updated.connect(self.update_nav_status)
         
         rclpy.init()
         self.ros_node = StandardRobotMonitor(self.signals)
@@ -299,10 +339,17 @@ class RobotMonitorGUI(QMainWindow):
         row4.addWidget(self.create_status_flags_group())
         row4.addWidget(self.create_obstacle_flags_group())
         parent_layout.addLayout(row4)
+        
+        # 第五行：手动控制和控制服务
         row5 = QHBoxLayout()
         row5.addWidget(self.create_manual_control_group(), 2)
         row5.addWidget(self.create_control_services_group(), 3)
         parent_layout.addLayout(row5)
+        
+        # 第六行：导航控制
+        row6 = QHBoxLayout()
+        row6.addWidget(self.create_navigation_control_group())
+        parent_layout.addLayout(row6)
         
         parent_layout.addStretch()
     
@@ -651,6 +698,247 @@ class RobotMonitorGUI(QMainWindow):
                 r += 1
         group.setLayout(grid)
         return group
+    
+    def create_navigation_control_group(self):
+        """创建导航控制组"""
+        from PyQt5.QtWidgets import QLineEdit, QComboBox
+        
+        group = QGroupBox('◆ 导航控制 (Go服务)')
+        group.setObjectName('navigationControl')
+        main_layout = QHBoxLayout()
+        
+        # 左侧：输入控件
+        input_widget = QWidget()
+        input_layout = QVBoxLayout(input_widget)
+        
+        # 位姿导航
+        pose_group = QGroupBox('位姿导航')
+        pose_layout = QGridLayout()
+        
+        self.nav_x_input = QLineEdit('0.0')
+        self.nav_y_input = QLineEdit('0.0')
+        self.nav_yaw_input = QLineEdit('0.0')
+        self.nav_pose_type = QComboBox()
+        self.nav_pose_type.addItems(['通讯位姿 (40001-40006)', '自主导航 (40008-40013)'])
+        
+        pose_layout.addWidget(QLabel('X (米):'), 0, 0)
+        pose_layout.addWidget(self.nav_x_input, 0, 1)
+        pose_layout.addWidget(QLabel('Y (米):'), 1, 0)
+        pose_layout.addWidget(self.nav_y_input, 1, 1)
+        pose_layout.addWidget(QLabel('Yaw (弧度):'), 2, 0)
+        pose_layout.addWidget(self.nav_yaw_input, 2, 1)
+        pose_layout.addWidget(QLabel('类型:'), 3, 0)
+        pose_layout.addWidget(self.nav_pose_type, 3, 1)
+        
+        btn_nav_coord = QPushButton('导航到坐标')
+        btn_nav_coord.clicked.connect(self.on_navigate_to_coordinate)
+        pose_layout.addWidget(btn_nav_coord, 4, 0, 1, 2)
+        
+        btn_force_loc = QPushButton('强制定位')
+        btn_force_loc.clicked.connect(self.on_force_localize)
+        pose_layout.addWidget(btn_force_loc, 5, 0, 1, 2)
+        
+        pose_group.setLayout(pose_layout)
+        input_layout.addWidget(pose_group)
+        
+        # 站点导航
+        site_group = QGroupBox('站点导航')
+        site_layout = QGridLayout()
+        
+        self.nav_site_input = QLineEdit('0')
+        self.nav_site_type = QComboBox()
+        self.nav_site_type.addItems(['通讯站点 (40007)', '自主导航站点 (40015)'])
+        
+        site_layout.addWidget(QLabel('站点ID:'), 0, 0)
+        site_layout.addWidget(self.nav_site_input, 0, 1)
+        site_layout.addWidget(QLabel('类型:'), 1, 0)
+        site_layout.addWidget(self.nav_site_type, 1, 1)
+        
+        btn_nav_site = QPushButton('导航到站点')
+        btn_nav_site.clicked.connect(self.on_navigate_to_site)
+        site_layout.addWidget(btn_nav_site, 2, 0, 1, 2)
+        
+        site_group.setLayout(site_layout)
+        input_layout.addWidget(site_group)
+        
+        # 参数设置
+        param_group = QGroupBox('参数设置')
+        param_layout = QGridLayout()
+        
+        self.speed_level_input = QLineEdit('50')
+        self.obstacle_strategy_input = QLineEdit('0')
+        self.current_site_input = QLineEdit('0')
+        self.speaker_volume_input = QLineEdit('50')
+        self.current_map_input = QLineEdit('12')
+        
+        param_layout.addWidget(QLabel('速度级别 [1-100]:'), 0, 0)
+        param_layout.addWidget(self.speed_level_input, 0, 1)
+        btn_set_speed = QPushButton('设置')
+        btn_set_speed.clicked.connect(self.on_set_speed_level)
+        param_layout.addWidget(btn_set_speed, 0, 2)
+        
+        param_layout.addWidget(QLabel('避障策略:'), 1, 0)
+        param_layout.addWidget(self.obstacle_strategy_input, 1, 1)
+        btn_set_obstacle = QPushButton('设置')
+        btn_set_obstacle.clicked.connect(self.on_set_obstacle_strategy)
+        param_layout.addWidget(btn_set_obstacle, 1, 2)
+        
+        param_layout.addWidget(QLabel('当前站点:'), 2, 0)
+        param_layout.addWidget(self.current_site_input, 2, 1)
+        btn_set_site = QPushButton('设置')
+        btn_set_site.clicked.connect(self.on_set_current_site)
+        param_layout.addWidget(btn_set_site, 2, 2)
+        
+        param_layout.addWidget(QLabel('音量 [1-100]:'), 3, 0)
+        param_layout.addWidget(self.speaker_volume_input, 3, 1)
+        btn_set_volume = QPushButton('设置')
+        btn_set_volume.clicked.connect(self.on_set_speaker_volume)
+        param_layout.addWidget(btn_set_volume, 3, 2)
+        
+        param_layout.addWidget(QLabel('地图名 (2字符):'), 4, 0)
+        param_layout.addWidget(self.current_map_input, 4, 1)
+        btn_set_map = QPushButton('设置')
+        btn_set_map.clicked.connect(self.on_set_current_map)
+        param_layout.addWidget(btn_set_map, 4, 2)
+        
+        param_group.setLayout(param_layout)
+        input_layout.addWidget(param_group)
+        
+        input_layout.addStretch()
+        main_layout.addWidget(input_widget, 2)
+        
+        # 右侧：导航状态显示
+        status_widget = QWidget()
+        status_layout = QVBoxLayout(status_widget)
+        
+        nav_status_group = QGroupBox('导航状态')
+        nav_status_layout = QGridLayout()
+        
+        self.nav_comm_pose_label = self.create_value_label('0, 0, 0')
+        self.nav_auto_pose_label = self.create_value_label('0, 0, 0')
+        self.nav_speed_level_label = self.create_value_label('0')
+        self.nav_obstacle_label = self.create_value_label('0')
+        self.nav_site_label = self.create_value_label('0')
+        self.nav_volume_label = self.create_value_label('0')
+        
+        nav_status_layout.addWidget(QLabel('通讯位姿:'), 0, 0)
+        nav_status_layout.addWidget(self.nav_comm_pose_label, 0, 1)
+        nav_status_layout.addWidget(QLabel('自主导航位姿:'), 1, 0)
+        nav_status_layout.addWidget(self.nav_auto_pose_label, 1, 1)
+        nav_status_layout.addWidget(QLabel('速度级别:'), 2, 0)
+        nav_status_layout.addWidget(self.nav_speed_level_label, 2, 1)
+        nav_status_layout.addWidget(QLabel('避障策略:'), 3, 0)
+        nav_status_layout.addWidget(self.nav_obstacle_label, 3, 1)
+        nav_status_layout.addWidget(QLabel('当前站点:'), 4, 0)
+        nav_status_layout.addWidget(self.nav_site_label, 4, 1)
+        nav_status_layout.addWidget(QLabel('音量:'), 5, 0)
+        nav_status_layout.addWidget(self.nav_volume_label, 5, 1)
+        
+        nav_status_group.setLayout(nav_status_layout)
+        status_layout.addWidget(nav_status_group)
+        
+        status_layout.addStretch()
+        main_layout.addWidget(status_widget, 3)
+        
+        group.setLayout(main_layout)
+        return group
+    
+    def on_navigate_to_coordinate(self):
+        """导航到坐标"""
+        try:
+            req = GoNavigateToCoordinate.Request()
+            req.x = float(self.nav_x_input.text())
+            req.y = float(self.nav_y_input.text())
+            req.yaw = float(self.nav_yaw_input.text())
+            req.use_communication_pose = (self.nav_pose_type.currentIndex() == 0)
+            self.call_service_with_feedback(self.ros_node.cli_go_nav_coord, req, '导航到坐标')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_force_localize(self):
+        """强制定位"""
+        try:
+            req = GoForceLocalize.Request()
+            req.x = float(self.nav_x_input.text())
+            req.y = float(self.nav_y_input.text())
+            req.yaw = float(self.nav_yaw_input.text())
+            self.call_service_with_feedback(self.ros_node.cli_go_force_loc, req, '强制定位')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_navigate_to_site(self):
+        """导航到站点"""
+        try:
+            req = GoExecuteActionTask.Request()
+            req.site_id = int(self.nav_site_input.text())
+            req.use_communication_site = (self.nav_site_type.currentIndex() == 0)
+            self.call_service_with_feedback(self.ros_node.cli_go_nav_site, req, '导航到站点')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_set_speed_level(self):
+        """设置速度级别"""
+        try:
+            req = GoSetSpeedType.Request()
+            req.speed_level = int(self.speed_level_input.text())
+            self.call_service_with_feedback(self.ros_node.cli_go_set_speed, req, '设置速度级别')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_set_obstacle_strategy(self):
+        """设置避障策略"""
+        try:
+            req = GoSetObstacleStrategy.Request()
+            req.strategy = int(self.obstacle_strategy_input.text())
+            self.call_service_with_feedback(self.ros_node.cli_go_obstacle, req, '设置避障策略')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_set_current_site(self):
+        """设置当前站点"""
+        try:
+            req = GoSetCurrentSite.Request()
+            req.site_id = int(self.current_site_input.text())
+            self.call_service_with_feedback(self.ros_node.cli_go_current_site, req, '设置当前站点')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_set_speaker_volume(self):
+        """设置音量"""
+        try:
+            req = GoSetSpeakerVolume.Request()
+            req.volume = int(self.speaker_volume_input.text())
+            self.call_service_with_feedback(self.ros_node.cli_go_volume, req, '设置音量')
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_set_current_map(self):
+        """设置当前地图"""
+        req = GoSetCurrentMap.Request()
+        req.map_name = self.current_map_input.text()
+        self.call_service_with_feedback(self.ros_node.cli_go_map, req, '设置地图')
+    
+    def call_service_with_feedback(self, client, request, action_name):
+        """调用服务并显示反馈"""
+        if not client.service_is_ready():
+            client.wait_for_service(timeout_sec=0.5)
+        
+        future = self.ros_node.call_service(client, request)
+        if future:
+            self.ros_node.get_logger().info(f'{action_name} 服务已调用')
+    
+    def update_nav_status(self, msg):
+        """更新导航状态显示"""
+        self.nav_comm_pose_label.setText(
+            f'{msg.communication_pose.x:.2f}, {msg.communication_pose.y:.2f}, {msg.communication_pose.yaw:.2f}'
+        )
+        self.nav_auto_pose_label.setText(
+            f'{msg.autonomous_nav_pose.x:.2f}, {msg.autonomous_nav_pose.y:.2f}, {msg.autonomous_nav_pose.yaw:.2f}'
+        )
+        self.nav_speed_level_label.setText(str(msg.speed_level))
+        self.nav_obstacle_label.setText(str(msg.obstacle_strategy))
+        self.nav_site_label.setText(str(msg.current_site))
+        self.nav_volume_label.setText(str(msg.speaker_volume))
     
     def create_value_label(self, text):
         """创建值显示标签"""
