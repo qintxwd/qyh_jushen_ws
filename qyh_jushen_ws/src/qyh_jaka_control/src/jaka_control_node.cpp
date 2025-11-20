@@ -11,8 +11,6 @@
 #include <qyh_jaka_control_msgs/srv/start_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/stop_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/enable_vr_follow.hpp>
-#include <qyh_jaka_control_msgs/srv/start_recording.hpp>
-#include <qyh_jaka_control_msgs/srv/stop_recording.hpp>
 #include <qyh_jaka_control_msgs/srv/calibrate_vr.hpp>
 #include <qyh_jaka_control_msgs/srv/set_filter.hpp>
 #include <qyh_jaka_control_msgs/srv/move_j.hpp>
@@ -22,7 +20,6 @@
 #include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <fstream>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -36,7 +33,6 @@ using namespace std::chrono_literals;
  * 1. 基础控制：上电、下电、使能、去使能、清除错误、急停
  * 2. 伺服模式：125Hz实时控制、关节空间、笛卡尔空间
  * 3. VR跟随：实时跟随、坐标校准、误差监控
- * 4. 数据录制：CSV格式、可配置频率、完整状态记录
  */
 class JakaControlNode : public rclcpp::Node
 {
@@ -48,9 +44,7 @@ public:
           powered_(false),
           enabled_(false),
           servo_running_(false),
-          vr_following_(false),
-          recording_(false),
-          recorded_frames_(0)
+          vr_following_(false)
     {
         // 参数声明
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
@@ -59,7 +53,6 @@ public:
         declare_parameter<bool>("auto_connect", true);
         declare_parameter<bool>("auto_power_on", false);
         declare_parameter<bool>("auto_enable", false);
-        declare_parameter<std::string>("recording_output_dir", "/tmp/jaka_recordings");
         
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
@@ -67,7 +60,6 @@ public:
         auto_connect_ = get_parameter("auto_connect").as_bool();
         auto_power_on_ = get_parameter("auto_power_on").as_bool();
         auto_enable_ = get_parameter("auto_enable").as_bool();
-        recording_output_dir_ = get_parameter("recording_output_dir").as_string();
 
         // 初始化VR坐标变换
         vr_to_robot_left_.setIdentity();
@@ -147,14 +139,6 @@ public:
         srv_calibrate_vr_ = create_service<qyh_jaka_control_msgs::srv::CalibrateVR>(
             "/jaka/vr/calibrate",
             std::bind(&JakaControlNode::handleCalibrateVR, this, std::placeholders::_1, std::placeholders::_2));
-        
-        srv_start_recording_ = create_service<qyh_jaka_control_msgs::srv::StartRecording>(
-            "/jaka/vr/start_recording",
-            std::bind(&JakaControlNode::handleStartRecording, this, std::placeholders::_1, std::placeholders::_2));
-        
-        srv_stop_recording_ = create_service<qyh_jaka_control_msgs::srv::StopRecording>(
-            "/jaka/vr/stop_recording",
-            std::bind(&JakaControlNode::handleStopRecording, this, std::placeholders::_1, std::placeholders::_2));
 
         // 点到点运动服务
         srv_move_j_ = create_service<qyh_jaka_control_msgs::srv::MoveJ>(
@@ -214,9 +198,6 @@ public:
 
     ~JakaControlNode()
     {
-        if (recording_) {
-            stopRecording();
-        }
         if (servo_running_) {
             jaka_interface_.servoMoveEnable(false);
         }
@@ -292,32 +273,6 @@ private:
         // 发送伺服指令（笛卡尔空间）
         jaka_interface_.servoP(0, left_target, true);   // 左臂
         jaka_interface_.servoP(1, right_target, true);  // 右臂
-
-        // 录制数据
-        if (recording_) {
-            recordFrame(left_target, right_target);
-        }
-    }
-
-    void recordFrame(const geometry_msgs::msg::Pose& left, const geometry_msgs::msg::Pose& right)
-    {
-        if (!recording_file_.is_open()) {
-            return;
-        }
-
-        auto now = this->now();
-        double timestamp = (now - recording_start_time_).seconds();
-        
-        // CSV格式：timestamp, left_vr, right_vr, joint_states, cartesian_poses
-        recording_file_ << timestamp << ","
-                       << left.position.x << "," << left.position.y << "," << left.position.z << ","
-                       << left.orientation.x << "," << left.orientation.y << "," 
-                       << left.orientation.z << "," << left.orientation.w << ","
-                       << right.position.x << "," << right.position.y << "," << right.position.z << ","
-                       << right.orientation.x << "," << right.orientation.y << "," 
-                       << right.orientation.z << "," << right.orientation.w << "\n";
-        
-        recorded_frames_++;
     }
 
     void publishStatus()
@@ -414,10 +369,6 @@ private:
             vr_msg.right_arm_status = "Following";
             vr_msg.left_pose_error = 0.0;  // TODO: 计算实际误差
             vr_msg.right_pose_error = 0.0;
-            vr_msg.recorded_frames = recorded_frames_;
-            if (recording_) {
-                vr_msg.recording_duration = (this->now() - recording_start_time_).seconds();
-            }
             vr_status_pub_->publish(vr_msg);
         }
     }
@@ -592,10 +543,6 @@ private:
         const qyh_jaka_control_msgs::srv::StopServo::Request::SharedPtr,
         qyh_jaka_control_msgs::srv::StopServo::Response::SharedPtr res)
     {
-        if (recording_) {
-            stopRecording();
-        }
-
         if (jaka_interface_.servoMoveEnable(false)) {
             servo_running_ = false;
             vr_following_ = false;
@@ -653,77 +600,6 @@ private:
         res->success = true;
         res->message = "VR calibration completed";
         RCLCPP_INFO(get_logger(), "✓ VR calibrated");
-    }
-
-    void handleStartRecording(
-        const qyh_jaka_control_msgs::srv::StartRecording::Request::SharedPtr req,
-        qyh_jaka_control_msgs::srv::StartRecording::Response::SharedPtr res)
-    {
-        if (!vr_following_) {
-            res->success = false;
-            res->message = "VR following not enabled";
-            return;
-        }
-
-        // 生成文件名
-        auto now = std::chrono::system_clock::now();
-        auto time_t = std::chrono::system_clock::to_time_t(now);
-        char buffer[100];
-        std::strftime(buffer, sizeof(buffer), "%Y%m%d_%H%M%S", std::localtime(&time_t));
-        
-        current_recording_file_ = req->output_path + "/recording_" + buffer + ".csv";
-        
-        recording_file_.open(current_recording_file_);
-        if (!recording_file_.is_open()) {
-            res->success = false;
-            res->message = "Failed to open file: " + current_recording_file_;
-            return;
-        }
-
-        // 写CSV头
-        recording_file_ << "timestamp,left_vr_x,left_vr_y,left_vr_z,"
-                       << "left_vr_qx,left_vr_qy,left_vr_qz,left_vr_qw,"
-                       << "right_vr_x,right_vr_y,right_vr_z,"
-                       << "right_vr_qx,right_vr_qy,right_vr_qz,right_vr_qw\n";
-
-        recording_ = true;
-        recorded_frames_ = 0;
-        recording_start_time_ = this->now();
-        
-        res->success = true;
-        res->message = "Recording started: " + current_recording_file_;
-        RCLCPP_INFO(get_logger(), "✓ Recording STARTED: %s", current_recording_file_.c_str());
-    }
-
-    void handleStopRecording(
-        const qyh_jaka_control_msgs::srv::StopRecording::Request::SharedPtr,
-        qyh_jaka_control_msgs::srv::StopRecording::Response::SharedPtr res)
-    {
-        if (!recording_) {
-            res->success = false;
-            res->message = "Not currently recording";
-            return;
-        }
-
-        stopRecording();
-        
-        auto duration = (this->now() - recording_start_time_).seconds();
-        res->success = true;
-        res->total_frames = recorded_frames_;
-        res->duration = duration;
-        res->saved_file = current_recording_file_;
-        res->message = "Recording stopped";
-        
-        RCLCPP_INFO(get_logger(), "✓ Recording STOPPED: %d frames, %.2f seconds", 
-                    recorded_frames_, duration);
-    }
-
-    void stopRecording()
-    {
-        if (recording_file_.is_open()) {
-            recording_file_.close();
-        }
-        recording_ = false;
     }
 
     // ==================== 点到点运动服务 ====================
@@ -809,7 +685,6 @@ private:
     bool auto_connect_;
     bool auto_power_on_;
     bool auto_enable_;
-    std::string recording_output_dir_;
 
     // 状态标志
     std::atomic<bool> connected_;
@@ -817,7 +692,6 @@ private:
     std::atomic<bool> enabled_;
     std::atomic<bool> servo_running_;
     std::atomic<bool> vr_following_;
-    std::atomic<bool> recording_;
     int64_t last_cycle_duration_us_ = 0;
 
     // VR相关
@@ -826,12 +700,6 @@ private:
     qyh_jaka_control_msgs::msg::VRPose::SharedPtr last_vr_right_;
     tf2::Transform vr_to_robot_left_;
     tf2::Transform vr_to_robot_right_;
-
-    // 录制相关
-    std::ofstream recording_file_;
-    std::string current_recording_file_;
-    int recorded_frames_;
-    rclcpp::Time recording_start_time_;
 
     // 指令缓存
     std::mutex cmd_mutex_;
@@ -866,8 +734,6 @@ private:
     // VR控制服务
     rclcpp::Service<qyh_jaka_control_msgs::srv::EnableVRFollow>::SharedPtr srv_enable_vr_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::CalibrateVR>::SharedPtr srv_calibrate_vr_;
-    rclcpp::Service<qyh_jaka_control_msgs::srv::StartRecording>::SharedPtr srv_start_recording_;
-    rclcpp::Service<qyh_jaka_control_msgs::srv::StopRecording>::SharedPtr srv_stop_recording_;
 
     // 点到点运动服务
     rclcpp::Service<qyh_jaka_control_msgs::srv::MoveJ>::SharedPtr srv_move_j_;

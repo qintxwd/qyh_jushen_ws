@@ -23,8 +23,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetFTConfig.srv"
   "srv/SetFilter.srv"
   "srv/EnableVRFollow.srv"
-  "srv/StartRecording.srv"
-  "srv/StopRecording.srv"
   "srv/CalibrateVR.srv"
   "srv/MoveJ.srv"
   "srv/MoveL.srv"

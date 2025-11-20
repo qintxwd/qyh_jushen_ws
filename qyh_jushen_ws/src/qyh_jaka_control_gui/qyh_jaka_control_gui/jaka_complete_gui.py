@@ -18,16 +18,21 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QFont
 
+from sensor_msgs.msg import JointState
+from geometry_msgs.msg import Pose
 from qyh_jaka_control_msgs.msg import (
     JakaDualJointServo,
     JakaDualCartesianServo,
     JakaServoStatus,
-    VRFollowStatus
+    VRFollowStatus,
+    RobotState
 )
 from qyh_jaka_control_msgs.srv import (
     StartServo, StopServo,
     EnableVRFollow, CalibrateVR,
-    StartRecording, StopRecording
+    MoveJ, MoveL,
+    SetCollisionLevel, SetToolOffset,
+    GetRobotState
 )
 
 
@@ -35,6 +40,8 @@ class SignalBridge(QObject):
     """线程安全的信号桥接"""
     status_updated = pyqtSignal(object)
     vr_status_updated = pyqtSignal(object)
+    robot_state_updated = pyqtSignal(object)
+    joint_state_updated = pyqtSignal(object)
     log_message = pyqtSignal(str, str)
 
 
@@ -56,6 +63,12 @@ class JakaControlNode(Node):
         self.vr_status_sub = self.create_subscription(
             VRFollowStatus, '/jaka/vr/status',
             self.vr_status_callback, 10)
+        self.robot_state_sub = self.create_subscription(
+            RobotState, '/jaka/robot_state',
+            self.robot_state_callback, 10)
+        self.joint_state_sub = self.create_subscription(
+            JointState, '/joint_states',
+            self.joint_state_callback, 10)
 
         # 基础控制服务 (假设通过ROS服务调用底层接口)
         self.cli_power_on = self.create_client(
@@ -82,16 +95,32 @@ class JakaControlNode(Node):
             EnableVRFollow, '/jaka/vr/enable')
         self.cli_calibrate_vr = self.create_client(
             CalibrateVR, '/jaka/vr/calibrate')
-        self.cli_start_recording = self.create_client(
-            StartRecording, '/jaka/vr/start_recording')
-        self.cli_stop_recording = self.create_client(
-            StopRecording, '/jaka/vr/stop_recording')
+
+        # 点到点运动服务
+        self.cli_move_j = self.create_client(
+            MoveJ, '/jaka/move_j')
+        self.cli_move_l = self.create_client(
+            MoveL, '/jaka/move_l')
+
+        # 配置服务
+        self.cli_set_collision = self.create_client(
+            SetCollisionLevel, '/jaka/set_collision_level')
+        self.cli_set_tool = self.create_client(
+            SetToolOffset, '/jaka/set_tool_offset')
+        self.cli_get_state = self.create_client(
+            GetRobotState, '/jaka/get_robot_state')
 
     def status_callback(self, msg):
         self.signals.status_updated.emit(msg)
 
     def vr_status_callback(self, msg):
         self.signals.vr_status_updated.emit(msg)
+
+    def robot_state_callback(self, msg):
+        self.signals.robot_state_updated.emit(msg)
+
+    def joint_state_callback(self, msg):
+        self.signals.joint_state_updated.emit(msg)
 
     def call_service_async(self, client, request):
         if not client.service_is_ready():
@@ -109,6 +138,8 @@ class JakaControlGUI(QMainWindow):
         self.signals = SignalBridge()
         self.signals.status_updated.connect(self.update_status)
         self.signals.vr_status_updated.connect(self.update_vr_status)
+        self.signals.robot_state_updated.connect(self.update_robot_state)
+        self.signals.joint_state_updated.connect(self.update_joint_state)
         self.signals.log_message.connect(self.add_log)
 
         rclpy.init()
@@ -127,7 +158,6 @@ class JakaControlGUI(QMainWindow):
         self.enabled = False
         self.servo_running = False
         self.vr_following = False
-        self.recording = False
 
         self.add_log("JAKA双臂机器人控制系统已启动", "info")
 
@@ -212,8 +242,10 @@ class JakaControlGUI(QMainWindow):
         # 标签页
         tabs = QTabWidget()
         tabs.addTab(self.create_basic_control_tab(), "基础控制")
+        tabs.addTab(self.create_motion_tab(), "点到点运动")
         tabs.addTab(self.create_servo_tab(), "伺服模式")
         tabs.addTab(self.create_vr_tab(), "VR跟随")
+        tabs.addTab(self.create_config_tab(), "参数配置")
         tabs.addTab(self.create_status_tab(), "状态监控")
         main_layout.addWidget(tabs)
 
@@ -312,6 +344,191 @@ class JakaControlGUI(QMainWindow):
         layout.addStretch()
         return widget
 
+    def create_motion_tab(self):
+        """点到点运动标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # MoveJ 关节运动组
+        movej_group = QGroupBox('● 关节空间运动 (MoveJ)')
+        movej_layout = QGridLayout()
+
+        self.movej_robot_id = QDoubleSpinBox()
+        self.movej_robot_id.setRange(-1, 1)
+        self.movej_robot_id.setValue(0)
+        self.movej_robot_id.setDecimals(0)
+        self.movej_robot_id.setSuffix('')
+
+        self.movej_positions = QLineEdit('0,0,0,0,0,0,0,0,0,0,0,0,0,0')
+        self.movej_velocity = QDoubleSpinBox()
+        self.movej_velocity.setRange(0.01, 3.14)
+        self.movej_velocity.setValue(1.0)
+        self.movej_velocity.setSuffix(' rad/s')
+        
+        self.movej_accel = QDoubleSpinBox()
+        self.movej_accel.setRange(0.01, 10.0)
+        self.movej_accel.setValue(0.5)
+        self.movej_accel.setSuffix(' rad/s²')
+
+        self.btn_move_j = QPushButton('执行 MoveJ')
+        self.btn_move_j.setObjectName("infoButton")
+        self.btn_move_j.clicked.connect(self.execute_move_j)
+        self.btn_move_j.setEnabled(False)
+
+        movej_layout.addWidget(QLabel('机器人ID (-1:双臂, 0:左, 1:右):'), 0, 0)
+        movej_layout.addWidget(self.movej_robot_id, 0, 1)
+        movej_layout.addWidget(QLabel('关节位置 (14个值，逗号分隔):'), 1, 0)
+        movej_layout.addWidget(self.movej_positions, 1, 1)
+        movej_layout.addWidget(QLabel('速度:'), 2, 0)
+        movej_layout.addWidget(self.movej_velocity, 2, 1)
+        movej_layout.addWidget(QLabel('加速度:'), 3, 0)
+        movej_layout.addWidget(self.movej_accel, 3, 1)
+        movej_layout.addWidget(self.btn_move_j, 4, 0, 1, 2)
+
+        movej_group.setLayout(movej_layout)
+        layout.addWidget(movej_group)
+
+        # MoveL 直线运动组
+        movel_group = QGroupBox('● 笛卡尔空间直线运动 (MoveL)')
+        movel_layout = QGridLayout()
+
+        self.movel_robot_id = QDoubleSpinBox()
+        self.movel_robot_id.setRange(0, 1)
+        self.movel_robot_id.setValue(0)
+        self.movel_robot_id.setDecimals(0)
+
+        self.movel_x = QDoubleSpinBox()
+        self.movel_x.setRange(-2.0, 2.0)
+        self.movel_x.setValue(0.5)
+        self.movel_x.setSuffix(' m')
+        self.movel_x.setDecimals(3)
+
+        self.movel_y = QDoubleSpinBox()
+        self.movel_y.setRange(-2.0, 2.0)
+        self.movel_y.setValue(0.0)
+        self.movel_y.setSuffix(' m')
+        self.movel_y.setDecimals(3)
+
+        self.movel_z = QDoubleSpinBox()
+        self.movel_z.setRange(-2.0, 2.0)
+        self.movel_z.setValue(0.3)
+        self.movel_z.setSuffix(' m')
+        self.movel_z.setDecimals(3)
+
+        self.movel_velocity = QDoubleSpinBox()
+        self.movel_velocity.setRange(1.0, 500.0)
+        self.movel_velocity.setValue(100.0)
+        self.movel_velocity.setSuffix(' mm/s')
+
+        self.movel_accel = QDoubleSpinBox()
+        self.movel_accel.setRange(1.0, 1000.0)
+        self.movel_accel.setValue(50.0)
+        self.movel_accel.setSuffix(' mm/s²')
+
+        self.btn_move_l = QPushButton('执行 MoveL')
+        self.btn_move_l.setObjectName("infoButton")
+        self.btn_move_l.clicked.connect(self.execute_move_l)
+        self.btn_move_l.setEnabled(False)
+
+        movel_layout.addWidget(QLabel('机器人ID (0:左, 1:右):'), 0, 0)
+        movel_layout.addWidget(self.movel_robot_id, 0, 1)
+        movel_layout.addWidget(QLabel('目标位置 X:'), 1, 0)
+        movel_layout.addWidget(self.movel_x, 1, 1)
+        movel_layout.addWidget(QLabel('目标位置 Y:'), 2, 0)
+        movel_layout.addWidget(self.movel_y, 2, 1)
+        movel_layout.addWidget(QLabel('目标位置 Z:'), 3, 0)
+        movel_layout.addWidget(self.movel_z, 3, 1)
+        movel_layout.addWidget(QLabel('速度:'), 4, 0)
+        movel_layout.addWidget(self.movel_velocity, 4, 1)
+        movel_layout.addWidget(QLabel('加速度:'), 5, 0)
+        movel_layout.addWidget(self.movel_accel, 5, 1)
+        movel_layout.addWidget(self.btn_move_l, 6, 0, 1, 2)
+
+        movel_group.setLayout(movel_layout)
+        layout.addWidget(movel_group)
+
+        layout.addStretch()
+        return widget
+
+    def create_config_tab(self):
+        """参数配置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # 碰撞检测配置组
+        collision_group = QGroupBox('● 碰撞检测等级')
+        collision_layout = QGridLayout()
+
+        self.collision_robot_id = QDoubleSpinBox()
+        self.collision_robot_id.setRange(0, 1)
+        self.collision_robot_id.setValue(0)
+        self.collision_robot_id.setDecimals(0)
+
+        self.collision_level = QDoubleSpinBox()
+        self.collision_level.setRange(0, 5)
+        self.collision_level.setValue(3)
+        self.collision_level.setDecimals(0)
+
+        self.btn_set_collision = QPushButton('设置碰撞等级')
+        self.btn_set_collision.setObjectName("warningButton")
+        self.btn_set_collision.clicked.connect(self.set_collision_level)
+
+        collision_layout.addWidget(QLabel('机器人ID (0:左, 1:右):'), 0, 0)
+        collision_layout.addWidget(self.collision_robot_id, 0, 1)
+        collision_layout.addWidget(QLabel('碰撞等级 (0-5, 0最灵敏):'), 1, 0)
+        collision_layout.addWidget(self.collision_level, 1, 1)
+        collision_layout.addWidget(self.btn_set_collision, 2, 0, 1, 2)
+
+        collision_group.setLayout(collision_layout)
+        layout.addWidget(collision_group)
+
+        # 工具偏移配置组
+        tool_group = QGroupBox('● 工具坐标系偏移')
+        tool_layout = QGridLayout()
+
+        self.tool_robot_id = QDoubleSpinBox()
+        self.tool_robot_id.setRange(0, 1)
+        self.tool_robot_id.setValue(0)
+        self.tool_robot_id.setDecimals(0)
+
+        self.tool_offset_x = QDoubleSpinBox()
+        self.tool_offset_x.setRange(-0.5, 0.5)
+        self.tool_offset_x.setValue(0.0)
+        self.tool_offset_x.setSuffix(' m')
+        self.tool_offset_x.setDecimals(3)
+
+        self.tool_offset_y = QDoubleSpinBox()
+        self.tool_offset_y.setRange(-0.5, 0.5)
+        self.tool_offset_y.setValue(0.0)
+        self.tool_offset_y.setSuffix(' m')
+        self.tool_offset_y.setDecimals(3)
+
+        self.tool_offset_z = QDoubleSpinBox()
+        self.tool_offset_z.setRange(-0.5, 0.5)
+        self.tool_offset_z.setValue(0.15)
+        self.tool_offset_z.setSuffix(' m')
+        self.tool_offset_z.setDecimals(3)
+
+        self.btn_set_tool = QPushButton('设置工具偏移')
+        self.btn_set_tool.setObjectName("warningButton")
+        self.btn_set_tool.clicked.connect(self.set_tool_offset)
+
+        tool_layout.addWidget(QLabel('机器人ID (0:左, 1:右):'), 0, 0)
+        tool_layout.addWidget(self.tool_robot_id, 0, 1)
+        tool_layout.addWidget(QLabel('X 偏移:'), 1, 0)
+        tool_layout.addWidget(self.tool_offset_x, 1, 1)
+        tool_layout.addWidget(QLabel('Y 偏移:'), 2, 0)
+        tool_layout.addWidget(self.tool_offset_y, 2, 1)
+        tool_layout.addWidget(QLabel('Z 偏移:'), 3, 0)
+        tool_layout.addWidget(self.tool_offset_z, 3, 1)
+        tool_layout.addWidget(self.btn_set_tool, 4, 0, 1, 2)
+
+        tool_group.setLayout(tool_layout)
+        layout.addWidget(tool_group)
+
+        layout.addStretch()
+        return widget
+
     def create_servo_tab(self):
         """伺服模式标签页"""
         widget = QWidget()
@@ -386,44 +603,6 @@ class JakaControlGUI(QMainWindow):
         vr_control_group.setLayout(vr_control_layout)
         layout.addWidget(vr_control_group)
 
-        # 数据录制组
-        record_group = QGroupBox('● 数据录制（用于具身智能训练）')
-        record_layout = QGridLayout()
-
-        self.btn_start_recording = QPushButton('开始录制')
-        self.btn_start_recording.setObjectName("warningButton")
-        self.btn_start_recording.clicked.connect(self.start_recording)
-        self.btn_start_recording.setEnabled(False)
-
-        self.btn_stop_recording = QPushButton('停止录制')
-        self.btn_stop_recording.setObjectName("stopButton")
-        self.btn_stop_recording.clicked.connect(self.stop_recording)
-        self.btn_stop_recording.setEnabled(False)
-
-        self.output_path = QLineEdit('/tmp/jaka_recordings')
-        self.recording_freq = QDoubleSpinBox()
-        self.recording_freq.setRange(1.0, 125.0)
-        self.recording_freq.setValue(125.0)
-        self.recording_freq.setSuffix(' Hz')
-
-        self.recording_status = QLabel('未录制')
-        self.frames_label = QLabel('已录制帧数: 0')
-        self.duration_label = QLabel('录制时长: 0.0 秒')
-
-        record_layout.addWidget(QLabel('输出路径:'), 0, 0)
-        record_layout.addWidget(self.output_path, 0, 1, 1, 2)
-        record_layout.addWidget(QLabel('录制频率:'), 1, 0)
-        record_layout.addWidget(self.recording_freq, 1, 1, 1, 2)
-        record_layout.addWidget(QLabel('录制状态:'), 2, 0)
-        record_layout.addWidget(self.recording_status, 2, 1, 1, 2)
-        record_layout.addWidget(self.btn_start_recording, 3, 0)
-        record_layout.addWidget(self.btn_stop_recording, 3, 1)
-        record_layout.addWidget(self.frames_label, 4, 0, 1, 2)
-        record_layout.addWidget(self.duration_label, 5, 0, 1, 2)
-
-        record_group.setLayout(record_layout)
-        layout.addWidget(record_group)
-
         # VR控制器信息
         vr_info_group = QGroupBox('● VR控制器实时信息')
         vr_info_layout = QGridLayout()
@@ -453,26 +632,106 @@ class JakaControlGUI(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # 系统状态组
-        status_group = QGroupBox('● 实时系统状态')
-        status_layout = QGridLayout()
+        # 伺服系统状态组
+        servo_status_group = QGroupBox('● 伺服系统状态')
+        servo_status_layout = QGridLayout()
 
         self.mode_label = QLabel('joint')
         self.cycle_time_label = QLabel('8.0 ms')
         self.publish_rate_label = QLabel('125.0 Hz')
         self.latency_label = QLabel('0.0 ms')
 
-        status_layout.addWidget(QLabel('控制模式:'), 0, 0)
-        status_layout.addWidget(self.mode_label, 0, 1)
-        status_layout.addWidget(QLabel('周期时间:'), 1, 0)
-        status_layout.addWidget(self.cycle_time_label, 1, 1)
-        status_layout.addWidget(QLabel('发布频率:'), 2, 0)
-        status_layout.addWidget(self.publish_rate_label, 2, 1)
-        status_layout.addWidget(QLabel('延迟:'), 3, 0)
-        status_layout.addWidget(self.latency_label, 3, 1)
+        servo_status_layout.addWidget(QLabel('控制模式:'), 0, 0)
+        servo_status_layout.addWidget(self.mode_label, 0, 1)
+        servo_status_layout.addWidget(QLabel('周期时间:'), 1, 0)
+        servo_status_layout.addWidget(self.cycle_time_label, 1, 1)
+        servo_status_layout.addWidget(QLabel('发布频率:'), 2, 0)
+        servo_status_layout.addWidget(self.publish_rate_label, 2, 1)
+        servo_status_layout.addWidget(QLabel('延迟:'), 3, 0)
+        servo_status_layout.addWidget(self.latency_label, 3, 1)
 
-        status_group.setLayout(status_layout)
-        layout.addWidget(status_group)
+        servo_status_group.setLayout(servo_status_layout)
+        layout.addWidget(servo_status_group)
+
+        # 机器人状态组
+        robot_status_group = QGroupBox('● 机器人状态')
+        robot_status_layout = QGridLayout()
+
+        self.robot_powered_label = QLabel('未知')
+        self.robot_enabled_label = QLabel('未知')
+        self.robot_estop_label = QLabel('未知')
+        self.robot_error_label = QLabel('未知')
+        self.robot_left_inpos_label = QLabel('未知')
+        self.robot_right_inpos_label = QLabel('未知')
+        self.robot_error_msg_label = QLabel('无')
+
+        robot_status_layout.addWidget(QLabel('上电状态:'), 0, 0)
+        robot_status_layout.addWidget(self.robot_powered_label, 0, 1)
+        robot_status_layout.addWidget(QLabel('使能状态:'), 1, 0)
+        robot_status_layout.addWidget(self.robot_enabled_label, 1, 1)
+        robot_status_layout.addWidget(QLabel('急停状态:'), 2, 0)
+        robot_status_layout.addWidget(self.robot_estop_label, 2, 1)
+        robot_status_layout.addWidget(QLabel('错误状态:'), 3, 0)
+        robot_status_layout.addWidget(self.robot_error_label, 3, 1)
+        robot_status_layout.addWidget(QLabel('左臂到位:'), 4, 0)
+        robot_status_layout.addWidget(self.robot_left_inpos_label, 4, 1)
+        robot_status_layout.addWidget(QLabel('右臂到位:'), 5, 0)
+        robot_status_layout.addWidget(self.robot_right_inpos_label, 5, 1)
+        robot_status_layout.addWidget(QLabel('错误信息:'), 6, 0)
+        robot_status_layout.addWidget(self.robot_error_msg_label, 6, 1)
+
+        robot_status_group.setLayout(robot_status_layout)
+        layout.addWidget(robot_status_group)
+
+        # 关节位置组
+        joint_group = QGroupBox('● 当前关节位置 (弧度)')
+        joint_layout = QGridLayout()
+
+        self.left_joints_labels = []
+        self.right_joints_labels = []
+
+        for i in range(7):
+            label = QLabel('0.000')
+            self.left_joints_labels.append(label)
+            joint_layout.addWidget(QLabel(f'左臂关节{i+1}:'), i, 0)
+            joint_layout.addWidget(label, i, 1)
+
+        for i in range(7):
+            label = QLabel('0.000')
+            self.right_joints_labels.append(label)
+            joint_layout.addWidget(QLabel(f'右臂关节{i+1}:'), i, 2)
+            joint_layout.addWidget(label, i, 3)
+
+        joint_group.setLayout(joint_layout)
+        layout.addWidget(joint_group)
+
+        # 笛卡尔位姿组
+        cartesian_group = QGroupBox('● 当前末端位姿 (米)')
+        cartesian_layout = QGridLayout()
+
+        self.left_pose_x = QLabel('0.000')
+        self.left_pose_y = QLabel('0.000')
+        self.left_pose_z = QLabel('0.000')
+        self.right_pose_x = QLabel('0.000')
+        self.right_pose_y = QLabel('0.000')
+        self.right_pose_z = QLabel('0.000')
+
+        cartesian_layout.addWidget(QLabel('左臂 X:'), 0, 0)
+        cartesian_layout.addWidget(self.left_pose_x, 0, 1)
+        cartesian_layout.addWidget(QLabel('左臂 Y:'), 1, 0)
+        cartesian_layout.addWidget(self.left_pose_y, 1, 1)
+        cartesian_layout.addWidget(QLabel('左臂 Z:'), 2, 0)
+        cartesian_layout.addWidget(self.left_pose_z, 2, 1)
+
+        cartesian_layout.addWidget(QLabel('右臂 X:'), 0, 2)
+        cartesian_layout.addWidget(self.right_pose_x, 0, 3)
+        cartesian_layout.addWidget(QLabel('右臂 Y:'), 1, 2)
+        cartesian_layout.addWidget(self.right_pose_y, 1, 3)
+        cartesian_layout.addWidget(QLabel('右臂 Z:'), 2, 2)
+        cartesian_layout.addWidget(self.right_pose_z, 2, 3)
+
+        cartesian_group.setLayout(cartesian_layout)
+        layout.addWidget(cartesian_group)
 
         layout.addStretch()
         return widget
@@ -539,6 +798,8 @@ class JakaControlGUI(QMainWindow):
             self.btn_enable.setEnabled(False)
             self.btn_disable.setEnabled(True)
             self.btn_start_servo.setEnabled(True)
+            self.btn_move_j.setEnabled(True)
+            self.btn_move_l.setEnabled(True)
             self.enable_status_label.setText('已使能')
             self.add_log("机器人使能成功", "success")
         else:
@@ -559,6 +820,8 @@ class JakaControlGUI(QMainWindow):
             self.btn_disable.setEnabled(False)
             self.btn_start_servo.setEnabled(False)
             self.btn_stop_servo.setEnabled(False)
+            self.btn_move_j.setEnabled(False)
+            self.btn_move_l.setEnabled(False)
             self.enable_status_label.setText('未使能')
             self.add_log("机器人去使能成功", "info")
         else:
@@ -621,16 +884,109 @@ class JakaControlGUI(QMainWindow):
         if response.success:
             self.servo_running = False
             self.vr_following = False
-            self.recording = False
             self.btn_start_servo.setEnabled(True)
             self.btn_stop_servo.setEnabled(False)
             self.btn_enable_vr.setEnabled(False)
-            self.btn_start_recording.setEnabled(False)
-            self.btn_stop_recording.setEnabled(False)
             self.servo_status_label.setText('未启动')
             self.add_log("伺服模式已停止", "info")
         else:
             self.add_log(f"停止伺服模式失败: {response.message}", "error")
+
+    # ========== 点到点运动功能 ==========
+    def execute_move_j(self):
+        try:
+            positions_str = self.movej_positions.text()
+            positions = [float(x.strip()) for x in positions_str.split(',')]
+            
+            if len(positions) != 14:
+                self.add_log(f"关节位置数量错误: 需要14个值，实际{len(positions)}个", "error")
+                return
+
+            req = MoveJ.Request()
+            req.robot_id = int(self.movej_robot_id.value())
+            req.joint_positions = positions
+            req.move_mode = False  # ABS mode
+            req.velocity = self.movej_velocity.value()
+            req.acceleration = self.movej_accel.value()
+            req.is_block = True
+
+            future = self.ros_node.call_service_async(
+                self.ros_node.cli_move_j, req)
+            future.add_done_callback(lambda f: self.on_move_j_done(f.result()))
+            self.add_log("正在执行MoveJ...", "info")
+        except ValueError as e:
+            self.add_log(f"输入格式错误: {str(e)}", "error")
+
+    def on_move_j_done(self, response):
+        if response.success:
+            self.add_log("MoveJ执行成功", "success")
+        else:
+            self.add_log(f"MoveJ执行失败: {response.message}", "error")
+
+    def execute_move_l(self):
+        req = MoveL.Request()
+        req.robot_id = int(self.movel_robot_id.value())
+        
+        # 创建Pose消息
+        req.target_pose = Pose()
+        req.target_pose.position.x = self.movel_x.value()
+        req.target_pose.position.y = self.movel_y.value()
+        req.target_pose.position.z = self.movel_z.value()
+        req.target_pose.orientation.w = 1.0  # 默认姿态
+        
+        req.move_mode = False  # ABS mode
+        req.velocity = self.movel_velocity.value()
+        req.acceleration = self.movel_accel.value()
+        req.is_block = True
+
+        future = self.ros_node.call_service_async(
+            self.ros_node.cli_move_l, req)
+        future.add_done_callback(lambda f: self.on_move_l_done(f.result()))
+        self.add_log("正在执行MoveL...", "info")
+
+    def on_move_l_done(self, response):
+        if response.success:
+            self.add_log("MoveL执行成功", "success")
+        else:
+            self.add_log(f"MoveL执行失败: {response.message}", "error")
+
+    # ========== 配置功能 ==========
+    def set_collision_level(self):
+        req = SetCollisionLevel.Request()
+        req.robot_id = int(self.collision_robot_id.value())
+        req.level = int(self.collision_level.value())
+
+        future = self.ros_node.call_service_async(
+            self.ros_node.cli_set_collision, req)
+        future.add_done_callback(lambda f: self.on_collision_set(f.result()))
+        self.add_log(f"正在设置碰撞等级为{req.level}...", "info")
+
+    def on_collision_set(self, response):
+        if response.success:
+            self.add_log("碰撞等级设置成功", "success")
+        else:
+            self.add_log(f"碰撞等级设置失败: {response.message}", "error")
+
+    def set_tool_offset(self):
+        req = SetToolOffset.Request()
+        req.robot_id = int(self.tool_robot_id.value())
+        
+        req.tool_offset = Pose()
+        req.tool_offset.position.x = self.tool_offset_x.value()
+        req.tool_offset.position.y = self.tool_offset_y.value()
+        req.tool_offset.position.z = self.tool_offset_z.value()
+        req.tool_offset.orientation.w = 1.0
+
+        future = self.ros_node.call_service_async(
+            self.ros_node.cli_set_tool, req)
+        future.add_done_callback(lambda f: self.on_tool_set(f.result()))
+        self.add_log("正在设置工具偏移...", "info")
+
+    def on_tool_set(self, response):
+        if response.success:
+            self.add_log("工具偏移设置成功", "success")
+        else:
+            self.add_log(f"工具偏移设置失败: {response.message}", "error")
 
     # ========== VR跟随功能 ==========
     def toggle_vr_follow(self):
@@ -648,13 +1004,10 @@ class JakaControlGUI(QMainWindow):
             self.vr_following = not self.vr_following
             if self.vr_following:
                 self.btn_enable_vr.setText('停止VR跟随')
-                self.btn_start_recording.setEnabled(True)
                 self.vr_status_label.setText('已启用')
                 self.add_log("VR跟随已启用", "success")
             else:
                 self.btn_enable_vr.setText('启用VR跟随')
-                self.btn_start_recording.setEnabled(False)
-                self.btn_stop_recording.setEnabled(False)
                 self.vr_status_label.setText('未启用')
                 self.add_log("VR跟随已停止", "info")
         else:
@@ -673,48 +1026,6 @@ class JakaControlGUI(QMainWindow):
         else:
             self.add_log(f"VR校准失败: {response.message}", "error")
 
-    def start_recording(self):
-        req = StartRecording.Request()
-        req.output_path = self.output_path.text()
-        req.recording_frequency = self.recording_freq.value()
-        future = self.ros_node.call_service_async(
-            self.ros_node.cli_start_recording, req)
-        future.add_done_callback(
-            lambda f: self.on_recording_started(f.result()))
-        self.add_log("正在开始录制...", "info")
-
-    def on_recording_started(self, response):
-        if response.success:
-            self.recording = True
-            self.btn_start_recording.setEnabled(False)
-            self.btn_stop_recording.setEnabled(True)
-            self.recording_status.setText('录制中')
-            self.add_log(f"录制已开始: {response.message}", "success")
-        else:
-            self.add_log(f"开始录制失败: {response.message}", "error")
-
-    def stop_recording(self):
-        req = StopRecording.Request()
-        future = self.ros_node.call_service_async(
-            self.ros_node.cli_stop_recording, req)
-        future.add_done_callback(
-            lambda f: self.on_recording_stopped(f.result()))
-        self.add_log("正在停止录制...", "info")
-
-    def on_recording_stopped(self, response):
-        if response.success:
-            self.recording = False
-            self.btn_start_recording.setEnabled(True)
-            self.btn_stop_recording.setEnabled(False)
-            self.recording_status.setText('未录制')
-            self.add_log(
-                f"录制已停止: 共{response.total_frames}帧, "
-                f"{response.duration:.2f}秒, 保存至{response.saved_file}",
-                "success"
-            )
-        else:
-            self.add_log(f"停止录制失败: {response.message}", "error")
-
     # ========== 状态更新 ==========
     def update_status(self, msg):
         self.mode_label.setText(msg.mode)
@@ -727,9 +1038,37 @@ class JakaControlGUI(QMainWindow):
         self.right_arm_status.setText(msg.right_arm_status)
         self.left_error.setText(f'{msg.left_pose_error:.2f} mm')
         self.right_error.setText(f'{msg.right_pose_error:.2f} mm')
-        self.frames_label.setText(f'已录制帧数: {msg.recorded_frames}')
-        self.duration_label.setText(
-            f'录制时长: {msg.recording_duration:.1f} 秒')
+
+    def update_robot_state(self, msg):
+        """更新机器人状态显示"""
+        self.robot_powered_label.setText('已上电' if msg.powered_on else '未上电')
+        self.robot_enabled_label.setText('已使能' if msg.servo_enabled else '未使能')
+        self.robot_estop_label.setText('急停中' if msg.estoped else '正常')
+        self.robot_error_label.setText('错误' if msg.in_error else '正常')
+        self.robot_left_inpos_label.setText('到位' if msg.left_in_position else '运动中')
+        self.robot_right_inpos_label.setText('到位' if msg.right_in_position else '运动中')
+        self.robot_error_msg_label.setText(msg.error_message if msg.error_message else '无')
+
+        # 更新关节位置
+        if len(msg.left_joint_positions) == 7:
+            for i, pos in enumerate(msg.left_joint_positions):
+                self.left_joints_labels[i].setText(f'{pos:.3f}')
+        
+        if len(msg.right_joint_positions) == 7:
+            for i, pos in enumerate(msg.right_joint_positions):
+                self.right_joints_labels[i].setText(f'{pos:.3f}')
+
+        # 更新笛卡尔位姿
+        self.left_pose_x.setText(f'{msg.left_cartesian_pose.position.x:.3f}')
+        self.left_pose_y.setText(f'{msg.left_cartesian_pose.position.y:.3f}')
+        self.left_pose_z.setText(f'{msg.left_cartesian_pose.position.z:.3f}')
+        self.right_pose_x.setText(f'{msg.right_cartesian_pose.position.x:.3f}')
+        self.right_pose_y.setText(f'{msg.right_cartesian_pose.position.y:.3f}')
+        self.right_pose_z.setText(f'{msg.right_cartesian_pose.position.z:.3f}')
+
+    def update_joint_state(self, msg):
+        """更新关节状态（用于备用）"""
+        pass  # 已在 update_robot_state 中处理
 
     def add_log(self, message, level="info"):
         colors = {

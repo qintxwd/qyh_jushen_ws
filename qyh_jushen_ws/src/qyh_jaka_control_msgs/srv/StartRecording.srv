@@ -1,6 +1,0 @@
-# 开始录制VR跟随数据
-string output_path  # 输出文件路径
-float64 recording_frequency  # 录制频率 (Hz)
----
-bool success
-string message

@@ -1,7 +1,0 @@
-# 停止录制VR跟随数据
----
-bool success
-string message
-int32 total_frames  # 总录制帧数
-float64 duration  # 录制时长 (秒)
-string saved_file  # 保存的文件路径
