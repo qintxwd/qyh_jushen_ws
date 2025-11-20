@@ -1,5 +1,6 @@
 # 启用/停止VR跟随
 bool enable  # true: 启用, false: 停止
+string username # VR使用者姓名，用于加载标定数据
 ---
 bool success
 string message

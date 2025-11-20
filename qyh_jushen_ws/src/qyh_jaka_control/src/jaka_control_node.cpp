@@ -18,11 +18,13 @@
 #include <qyh_jaka_control_msgs/srv/set_collision_level.hpp>
 #include <qyh_jaka_control_msgs/srv/set_tool_offset.hpp>
 #include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
+#include <qyh_vr_calibration_msgs/srv/get_profile.hpp>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <chrono>
 #include <atomic>
 #include <mutex>
+#include <set>
 
 using namespace std::chrono_literals;
 
@@ -160,6 +162,10 @@ public:
         srv_get_robot_state_ = create_service<qyh_jaka_control_msgs::srv::GetRobotState>(
             "/jaka/get_robot_state",
             std::bind(&JakaControlNode::handleGetRobotState, this, std::placeholders::_1, std::placeholders::_2));
+
+        // VR Calibration Client
+        client_get_profile_ = create_client<qyh_vr_calibration_msgs::srv::GetProfile>(
+            "vr_calibration/get_profile");
 
         // 自动连接和初始化
         if (auto_connect_) {
@@ -585,6 +591,65 @@ private:
             return;
         }
 
+        if (req->enable) {
+            // Check if username is provided
+            if (req->username.empty()) {
+                res->success = false;
+                res->message = "Username is required to enable VR follow";
+                return;
+            }
+
+            // Call GetProfile service
+            if (!client_get_profile_->wait_for_service(std::chrono::seconds(1))) {
+                res->success = false;
+                res->message = "VR calibration service not available";
+                return;
+            }
+
+            auto profile_req = std::make_shared<qyh_vr_calibration_msgs::srv::GetProfile::Request>();
+            profile_req->username = req->username;
+
+            auto future = client_get_profile_->async_send_request(profile_req);
+            
+            // Wait for result (blocking here is acceptable for configuration service)
+            if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+                res->success = false;
+                res->message = "Timeout waiting for VR profile";
+                return;
+            }
+
+            auto profile_res = future.get();
+            if (!profile_res->found) {
+                res->success = false;
+                res->message = "VR profile not found for user: " + req->username;
+                return;
+            }
+
+            // Validate samples 0, 1, 2, 3 exist
+            std::set<uint32_t> existing_indices;
+            for (const auto& sample : profile_res->profile.samples) {
+                existing_indices.insert(sample.sample_index);
+            }
+
+            bool has_all_samples = true;
+            for (uint32_t i = 0; i < 4; ++i) {
+                if (existing_indices.find(i) == existing_indices.end()) {
+                    has_all_samples = false;
+                    break;
+                }
+            }
+
+            if (!has_all_samples) {
+                res->success = false;
+                res->message = "Incomplete calibration data. Required samples 0-3.";
+                return;
+            }
+
+            // TODO: Load calibration data into internal state for use in processVRFollow
+            RCLCPP_INFO(get_logger(), "Loaded VR profile for %s with %zu samples", 
+                        req->username.c_str(), profile_res->profile.samples.size());
+        }
+
         vr_following_ = req->enable;
         res->success = true;
         res->message = vr_following_ ? "VR following enabled" : "VR following disabled";
@@ -741,6 +806,9 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetCollisionLevel>::SharedPtr srv_set_collision_level_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetToolOffset>::SharedPtr srv_set_tool_offset_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::GetRobotState>::SharedPtr srv_get_robot_state_;
+
+    // VR Calibration Client
+    rclcpp::Client<qyh_vr_calibration_msgs::srv::GetProfile>::SharedPtr client_get_profile_;
 
     // 定时器
     rclcpp::TimerBase::SharedPtr main_timer_;
