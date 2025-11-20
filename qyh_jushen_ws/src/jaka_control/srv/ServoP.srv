@@ -1,8 +1,0 @@
-# Request
-int32 robot_id  # LEFT=0, RIGHT=1
-geometry_msgs/Pose target_pose  # 目标笛卡尔位姿
-bool move_mode  # ABS=0, INCR=1
----
-# Response
-bool success
-string message

@@ -1,7 +1,0 @@
-# Request
-bool enable  # true: 进入伺服模式, false: 退出伺服模式
-int32 robot_id  # 机器人ID: LEFT=0, RIGHT=1, DUAL=-1
----
-# Response
-bool success
-string message
