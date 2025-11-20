@@ -249,13 +249,13 @@ private:
         tf2::Transform vr_left;
         tf2::fromMsg(last_vr_left_->pose, vr_left);
         tf2::Transform robot_left = vr_to_robot_left_ * vr_left;
-        left_target = tf2::toMsg(robot_left);
+        tf2::toMsg(robot_left, left_target);
         
         // 右臂
         tf2::Transform vr_right;
         tf2::fromMsg(last_vr_right_->pose, vr_right);
         tf2::Transform robot_right = vr_to_robot_right_ * vr_right;
-        right_target = tf2::toMsg(robot_right);
+        tf2::toMsg(robot_right, right_target);
 
         // 发送伺服指令（笛卡尔空间）
         jaka_interface_.servoP(0, left_target, true);   // 左臂

@@ -83,7 +83,7 @@ bool JakaInterface::motionAbort()
 
 bool JakaInterface::servoMoveEnable(bool enable, int robot_id)
 {
-    errno_t ret = robot_->servo_move_enable(enable);
+    errno_t ret = robot_->servo_move_enable(enable, robot_id);
     if (checkReturn(ret, enable ? "servo_move_enable" : "servo_move_disable")) {
         servo_enabled_ = enable;
         return true;
@@ -111,8 +111,13 @@ bool JakaInterface::servoJ(int robot_id, const std::vector<double>& joint_positi
         jpos[1].jVal[i] = joint_positions[i + 7];
     }
 
-    errno_t ret = robot_->servo_j(jpos, is_abs ? ABS : INCR);
-    return checkReturn(ret, "servo_j");
+    // Send to Left (0)
+    errno_t ret = robot_->edg_servo_j(0, &jpos[0], is_abs ? ABS : INCR);
+    if (ret != ERR_SUCC) return checkReturn(ret, "servo_j left");
+
+    // Send to Right (1)
+    ret = robot_->edg_servo_j(1, &jpos[1], is_abs ? ABS : INCR);
+    return checkReturn(ret, "servo_j right");
 }
 
 bool JakaInterface::servoP(int robot_id, const geometry_msgs::msg::Pose& pose, bool is_abs)
@@ -123,7 +128,7 @@ bool JakaInterface::servoP(int robot_id, const geometry_msgs::msg::Pose& pose, b
     }
 
     CartesianPose jaka_pose = rosPoseToJaka(pose);
-    errno_t ret = robot_->servo_p(&jaka_pose, is_abs ? ABS : INCR);
+    errno_t ret = robot_->edg_servo_p((unsigned char)robot_id, &jaka_pose, is_abs ? ABS : INCR);
     return checkReturn(ret, "servo_p");
 }
 
@@ -166,32 +171,32 @@ bool JakaInterface::edgSend()
 
 bool JakaInterface::edgGetStat(int robot_id, JointValue& joint_pos, CartesianPose& cartesian_pose)
 {
-    errno_t ret = robot_->edg_get_stat(&joint_pos, &cartesian_pose);
+    errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &joint_pos, &cartesian_pose);
     return checkReturn(ret, "edg_get_stat");
 }
 
 bool JakaInterface::edgServoJ(int robot_id, const JointValue& joint_pos, bool is_abs)
 {
-    errno_t ret = robot_->edg_servo_j(&joint_pos, is_abs ? ABS : INCR);
+    errno_t ret = robot_->edg_servo_j((unsigned char)robot_id, &joint_pos, is_abs ? ABS : INCR);
     return checkReturn(ret, "edg_servo_j");
 }
 
 bool JakaInterface::edgServoP(int robot_id, const CartesianPose& pose, bool is_abs)
 {
-    errno_t ret = robot_->edg_servo_p(&pose, is_abs ? ABS : INCR);
+    errno_t ret = robot_->edg_servo_p((unsigned char)robot_id, &pose, is_abs ? ABS : INCR);
     return checkReturn(ret, "edg_servo_p");
 }
 
 bool JakaInterface::kineForward(int robot_id, const JointValue& joint_pos, CartesianPose& cartesian_pose)
 {
-    errno_t ret = robot_->kine_forward(&joint_pos, &cartesian_pose);
+    errno_t ret = robot_->kine_forward(robot_id, &joint_pos, &cartesian_pose);
     return checkReturn(ret, "kine_forward");
 }
 
 bool JakaInterface::kineInverse(int robot_id, const JointValue& ref_pos, 
                                 const CartesianPose& cartesian_pose, JointValue& joint_pos)
 {
-    errno_t ret = robot_->kine_inverse(&ref_pos, &cartesian_pose, &joint_pos);
+    errno_t ret = robot_->kine_inverse(robot_id, &ref_pos, &cartesian_pose, &joint_pos);
     return checkReturn(ret, "kine_inverse");
 }
 
@@ -203,13 +208,13 @@ bool JakaInterface::getRobotState(RobotState& state)
 
 bool JakaInterface::isInError(int error[2])
 {
-    errno_t ret = robot_->is_in_error(error);
+    errno_t ret = robot_->robot_is_in_error(error);
     return checkReturn(ret, "is_in_error");
 }
 
 bool JakaInterface::isInPosition(int inpos[2])
 {
-    errno_t ret = robot_->is_in_pos(inpos);
+    errno_t ret = robot_->robot_is_inpos(inpos);
     return checkReturn(ret, "is_in_pos");
 }
 

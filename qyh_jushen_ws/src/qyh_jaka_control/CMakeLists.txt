@@ -16,16 +16,18 @@ find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(qyh_jaka_control_msgs REQUIRED)
+find_package(Protobuf REQUIRED)
 
 # Include directories
 include_directories(
   include
-  ../jaka_control/thirdparty/include
+  ./thirdparty/include
+  ${Protobuf_INCLUDE_DIRS}
 )
 
 # Link directories
 link_directories(
-  ../jaka_control/thirdparty/lib
+  ./thirdparty/lib
 )
 
 # Libraries
@@ -38,12 +40,14 @@ ament_target_dependencies(jaka_interface
 )
 target_link_libraries(jaka_interface
   jakaAPI
+  ${Protobuf_LIBRARIES}
 )
 
 # Main control node (unified: basic + servo + VR)
 add_executable(jaka_control_node src/jaka_control_node.cpp)
 ament_target_dependencies(jaka_control_node
   rclcpp
+  std_srvs
   geometry_msgs
   tf2
   tf2_geometry_msgs
@@ -52,6 +56,7 @@ ament_target_dependencies(jaka_control_node
 target_link_libraries(jaka_control_node
   jaka_interface
   jakaAPI
+  ${Protobuf_LIBRARIES}
 )
 
 install(TARGETS jaka_interface
