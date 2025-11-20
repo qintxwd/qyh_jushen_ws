@@ -6,9 +6,28 @@ from rclpy.node import Node
 from qyh_standard_robot_msgs.msg import StandardRobotStatus
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QGroupBox, 
-                             QGridLayout, QProgressBar, QScrollArea)
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QObject
-from PyQt5.QtGui import QFont, QPalette, QColor
+                             QGridLayout, QProgressBar, QScrollArea, QPushButton, QCheckBox)
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QObject, QEvent, QPointF
+from PyQt5.QtGui import QFont, QPalette, QColor, QPainter
+from qyh_standard_robot_msgs.msg import ManualMotionCommand
+from qyh_standard_robot_msgs.srv import (
+    ControlStartManualControl,
+    ControlStopManualControl,
+    ControlPauseMove,
+    ControlResumeMove,
+    ControlStopMove,
+    ControlStopLocalization,
+    ControlEmergencyStop,
+    ControlReleaseEmergencyStop,
+    ControlStartCharging,
+    ControlStopCharging,
+    ControlEnterLowPowerMode,
+    ControlExitLowPowerMode,
+    ControlSystemReset,
+    ControlPauseMission,
+    ControlResumeMission,
+    ControlCancelMission,
+)
 
 
 class RobotStatusSignals(QObject):
@@ -16,11 +35,59 @@ class RobotStatusSignals(QObject):
     status_updated = pyqtSignal(object)
 
 
+class ToggleSwitch(QCheckBox):
+    """自定义开关控件，模拟 Android 风格"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(62, 32)
+        self.setFocusPolicy(Qt.NoFocus)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        rect = self.rect()
+        radius = rect.height() / 2
+        track_color = QColor('#4CAF50') if self.isChecked() else QColor('#cfd8dc')
+        knob_color = QColor('#ffffff') if self.isEnabled() else QColor('#f0f0f0')
+        border_color = QColor('#2E7D32') if self.isChecked() else QColor('#b0bec5')
+
+        painter.setPen(border_color)
+        painter.setBrush(track_color)
+        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), radius, radius)
+
+        knob_radius = radius - 4
+        center_x = rect.right() - radius if self.isChecked() else rect.left() + radius
+        knob_center = QPointF(center_x, rect.center().y())
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(knob_color)
+        painter.drawEllipse(knob_center, knob_radius, knob_radius)
+
+
 class StandardRobotMonitor(Node):
     def __init__(self, signals):
         super().__init__('standard_robot_monitor')
         self.signals = signals
         self.latest_status = None
+        self.manual_pub = self.create_publisher(ManualMotionCommand, 'manual_motion_cmd', 10)
+        self.cli_start_manual = self.create_client(ControlStartManualControl, 'control_start_manual_control')
+        self.cli_stop_manual = self.create_client(ControlStopManualControl, 'control_stop_manual_control')
+        self.cli_pause_move = self.create_client(ControlPauseMove, 'control_pause_move')
+        self.cli_resume_move = self.create_client(ControlResumeMove, 'control_resume_move')
+        self.cli_stop_move = self.create_client(ControlStopMove, 'control_stop_move')
+        self.cli_stop_localization = self.create_client(ControlStopLocalization, 'control_stop_localization')
+        self.cli_emergency_stop = self.create_client(ControlEmergencyStop, 'control_emergency_stop')
+        self.cli_release_emergency_stop = self.create_client(ControlReleaseEmergencyStop, 'control_release_emergency_stop')
+        self.cli_start_charging = self.create_client(ControlStartCharging, 'control_start_charging')
+        self.cli_stop_charging = self.create_client(ControlStopCharging, 'control_stop_charging')
+        self.cli_enter_low_power = self.create_client(ControlEnterLowPowerMode, 'control_enter_low_power_mode')
+        self.cli_exit_low_power = self.create_client(ControlExitLowPowerMode, 'control_exit_low_power_mode')
+        self.cli_system_reset = self.create_client(ControlSystemReset, 'control_system_reset')
+        self.cli_pause_mission = self.create_client(ControlPauseMission, 'control_pause_mission')
+        self.cli_resume_mission = self.create_client(ControlResumeMission, 'control_resume_mission')
+        self.cli_cancel_mission = self.create_client(ControlCancelMission, 'control_cancel_mission')
         
         # 订阅机器人状态
         self.subscription = self.create_subscription(
@@ -34,6 +101,12 @@ class StandardRobotMonitor(Node):
     def status_callback(self, msg):
         self.latest_status = msg
         self.signals.status_updated.emit(msg)
+    def publish_manual(self, cmd):
+        self.manual_pub.publish(cmd)
+    def call_service(self, client, request):
+        if client.service_is_ready():
+            return client.call_async(request)
+        return None
 
 
 class RobotMonitorGUI(QMainWindow):
@@ -85,6 +158,21 @@ class RobotMonitorGUI(QMainWindow):
                 border: none;
                 background-color: transparent;
             }
+            QGroupBox#controlServices QPushButton {
+                background-color: #1e88e5;
+                border: 2px solid #1565c0;
+                border-radius: 8px;
+                padding: 10px 14px;
+                font-size: 10pt;
+                font-weight: 600;
+                color: #ffffff;
+            }
+            QGroupBox#controlServices QPushButton:hover {
+                background-color: #1976d2;
+            }
+            QGroupBox#controlServices QPushButton:pressed {
+                background-color: #0d47a1;
+            }
         """)
         
         # 初始化ROS2
@@ -104,6 +192,17 @@ class RobotMonitorGUI(QMainWindow):
         
         # 连接状态标签
         self.last_update_time = None
+        self.manual_enabled = False
+        self.cmd = ManualMotionCommand()
+        self.cmd.forward = False
+        self.cmd.backward = False
+        self.cmd.rotate_left = False
+        self.cmd.rotate_right = False
+        self.installEventFilter(self)
+        self.manual_timer = QTimer()
+        self.manual_timer.timeout.connect(self.publish_manual_cmd)
+        self.manual_timer.start(50)
+        QApplication.instance().installEventFilter(self)
     
     def init_ui(self):
         # 创建中央widget和滚动区域
@@ -164,6 +263,8 @@ class RobotMonitorGUI(QMainWindow):
         
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
+        self.setFocusPolicy(Qt.StrongFocus)
+        central_widget.setFocusPolicy(Qt.StrongFocus)
     
     def create_all_content(self, parent_layout):
         """创建所有内容在一个页面"""
@@ -191,6 +292,10 @@ class RobotMonitorGUI(QMainWindow):
         row4.addWidget(self.create_status_flags_group())
         row4.addWidget(self.create_obstacle_flags_group())
         parent_layout.addLayout(row4)
+        row5 = QHBoxLayout()
+        row5.addWidget(self.create_manual_control_group(), 2)
+        row5.addWidget(self.create_control_services_group(), 3)
+        parent_layout.addLayout(row5)
         
         parent_layout.addStretch()
     
@@ -466,6 +571,79 @@ class RobotMonitorGUI(QMainWindow):
         
         group.setLayout(grid)
         return group
+    def create_manual_control_group(self):
+        group = QGroupBox('● 手动控制')
+        group.setObjectName('manualControl')
+        grid = QGridLayout()
+        toggle_row = QHBoxLayout()
+        toggle_label = QLabel('启用手动控制')
+        toggle_label.setStyleSheet('font-weight: bold; color: #2c5aa0;')
+        self.manual_toggle = ToggleSwitch()
+        self.manual_toggle.stateChanged.connect(self.on_manual_toggled)
+        toggle_row.addWidget(toggle_label)
+        toggle_row.addStretch()
+        toggle_row.addWidget(self.manual_toggle)
+        self.manual_hint = QLabel('W/A/S/D 前后左右，方向键左右为旋转')
+        self.manual_hint.setStyleSheet('font-weight: bold;')
+        self.manual_state_label = self.create_value_label('未启用')
+        grid.addLayout(toggle_row, 0, 0, 1, 2)
+        grid.addWidget(QLabel('当前状态:'), 1, 0)
+        grid.addWidget(self.manual_state_label, 1, 1)
+        grid.addWidget(self.manual_hint, 2, 0, 1, 2)
+        group.setLayout(grid)
+        return group
+    def create_control_services_group(self):
+        group = QGroupBox('● 控制服务')
+        group.setObjectName('controlServices')
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        grid.setContentsMargins(8, 8, 8, 8)
+        btn_pause_move = QPushButton('暂停移动')
+        btn_resume_move = QPushButton('恢复移动')
+        btn_stop_move = QPushButton('停止移动')
+        btn_stop_loc = QPushButton('停止定位')
+        btn_emg_stop = QPushButton('紧急停止')
+        btn_release_emg = QPushButton('解除急停')
+        btn_start_chg = QPushButton('开始充电')
+        btn_stop_chg = QPushButton('停止充电')
+        btn_enter_low = QPushButton('进入低功耗')
+        btn_exit_low = QPushButton('退出低功耗')
+        btn_sys_reset = QPushButton('系统复位')
+        btn_pause_mis = QPushButton('任务暂停')
+        btn_resume_mis = QPushButton('任务恢复')
+        btn_cancel_mis = QPushButton('任务取消')
+        btn_pause_move.clicked.connect(lambda: self.call_control(self.ros_node.cli_pause_move))
+        btn_resume_move.clicked.connect(lambda: self.call_control(self.ros_node.cli_resume_move))
+        btn_stop_move.clicked.connect(lambda: self.call_control(self.ros_node.cli_stop_move))
+        btn_stop_loc.clicked.connect(lambda: self.call_control(self.ros_node.cli_stop_localization))
+        btn_emg_stop.clicked.connect(lambda: self.call_control(self.ros_node.cli_emergency_stop))
+        btn_release_emg.clicked.connect(lambda: self.call_control(self.ros_node.cli_release_emergency_stop))
+        btn_start_chg.clicked.connect(lambda: self.call_control(self.ros_node.cli_start_charging))
+        btn_stop_chg.clicked.connect(lambda: self.call_control(self.ros_node.cli_stop_charging))
+        btn_enter_low.clicked.connect(lambda: self.call_control(self.ros_node.cli_enter_low_power))
+        btn_exit_low.clicked.connect(lambda: self.call_control(self.ros_node.cli_exit_low_power))
+        btn_sys_reset.clicked.connect(lambda: self.call_control(self.ros_node.cli_system_reset))
+        btn_pause_mis.clicked.connect(lambda: self.call_control(self.ros_node.cli_pause_mission))
+        btn_resume_mis.clicked.connect(lambda: self.call_control(self.ros_node.cli_resume_mission))
+        btn_cancel_mis.clicked.connect(lambda: self.call_control(self.ros_node.cli_cancel_mission))
+        widgets = [
+            btn_pause_move, btn_resume_move, btn_stop_move, btn_stop_loc,
+            btn_emg_stop, btn_release_emg, btn_start_chg, btn_stop_chg,
+            btn_enter_low, btn_exit_low, btn_sys_reset,
+            btn_pause_mis, btn_resume_mis, btn_cancel_mis,
+        ]
+        r = 0
+        c = 0
+        for w in widgets:
+            w.setCursor(Qt.PointingHandCursor)
+            w.setMinimumHeight(42)
+            grid.addWidget(w, r, c)
+            c += 1
+            if c >= 3:
+                c = 0
+                r += 1
+        group.setLayout(grid)
+        return group
     
     def create_value_label(self, text):
         """创建值显示标签"""
@@ -516,6 +694,56 @@ class RobotMonitorGUI(QMainWindow):
                 border: 2px solid #e0e0e0;
                 border-radius: 22px;
             """)
+    def on_manual_toggled(self, state):
+        enabled = state == Qt.Checked
+        self.manual_enabled = enabled
+        self.manual_state_label.setText('已启用' if enabled else '未启用')
+        if enabled:
+            self.call_control(self.ros_node.cli_start_manual)
+            self.setFocus()
+        else:
+            self.cmd.forward = False
+            self.cmd.backward = False
+            self.cmd.rotate_left = False
+            self.cmd.rotate_right = False
+            self.ros_node.publish_manual(self.cmd)
+            self.call_control(self.ros_node.cli_stop_manual)
+    def call_control(self, client):
+        req = client.srv_type.Request()
+        if not client.service_is_ready():
+            client.wait_for_service(timeout_sec=0.5)
+        self.ros_node.call_service(client, req)
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            if self.manual_enabled and not event.isAutoRepeat():
+                k = event.key()
+                if k == Qt.Key_W or k == Qt.Key_Up:
+                    self.cmd.forward = True
+                    self.cmd.backward = False
+                elif k == Qt.Key_S or k == Qt.Key_Down:
+                    self.cmd.backward = True
+                    self.cmd.forward = False
+                elif k == Qt.Key_A or k == Qt.Key_Left:
+                    self.cmd.rotate_left = True
+                    self.cmd.rotate_right = False
+                elif k == Qt.Key_D or k == Qt.Key_Right:
+                    self.cmd.rotate_right = True
+                    self.cmd.rotate_left = False
+        elif event.type() == QEvent.KeyRelease:
+            if self.manual_enabled and not event.isAutoRepeat():
+                k = event.key()
+                if k == Qt.Key_W or k == Qt.Key_Up:
+                    self.cmd.forward = False
+                elif k == Qt.Key_S or k == Qt.Key_Down:
+                    self.cmd.backward = False
+                elif k == Qt.Key_A or k == Qt.Key_Left:
+                    self.cmd.rotate_left = False
+                elif k == Qt.Key_D or k == Qt.Key_Right:
+                    self.cmd.rotate_right = False
+        return super().eventFilter(obj, event)
+    def publish_manual_cmd(self):
+        if self.manual_enabled:
+            self.ros_node.publish_manual(self.cmd)
     
     def update_status(self, msg):
         """更新所有状态显示"""

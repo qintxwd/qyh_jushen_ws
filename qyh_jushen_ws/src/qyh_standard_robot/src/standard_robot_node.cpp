@@ -439,7 +439,7 @@ void StandardRobotNode::handle_stop_move(const qyh_standard_robot_msgs::srv::Con
 void StandardRobotNode::handle_stop_localization(const qyh_standard_robot_msgs::srv::ControlStopLocalization::Request::SharedPtr,
                                                  qyh_standard_robot_msgs::srv::ControlStopLocalization::Response::SharedPtr res)
 {
-  bool ok = write_coil(4);
+  bool ok = write_coil(5);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -447,7 +447,7 @@ void StandardRobotNode::handle_stop_localization(const qyh_standard_robot_msgs::
 void StandardRobotNode::handle_emergency_stop(const qyh_standard_robot_msgs::srv::ControlEmergencyStop::Request::SharedPtr,
                                               qyh_standard_robot_msgs::srv::ControlEmergencyStop::Response::SharedPtr res)
 {
-  bool ok = write_coil(6);
+  bool ok = write_coil(7);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -455,7 +455,7 @@ void StandardRobotNode::handle_emergency_stop(const qyh_standard_robot_msgs::srv
 void StandardRobotNode::handle_release_emergency_stop(const qyh_standard_robot_msgs::srv::ControlReleaseEmergencyStop::Request::SharedPtr,
                                                       qyh_standard_robot_msgs::srv::ControlReleaseEmergencyStop::Response::SharedPtr res)
 {
-  bool ok = write_coil(7);
+  bool ok = write_coil(8);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -463,7 +463,7 @@ void StandardRobotNode::handle_release_emergency_stop(const qyh_standard_robot_m
 void StandardRobotNode::handle_start_charging(const qyh_standard_robot_msgs::srv::ControlStartCharging::Request::SharedPtr,
                                               qyh_standard_robot_msgs::srv::ControlStartCharging::Response::SharedPtr res)
 {
-  bool ok = write_coil(8);
+  bool ok = write_coil(9);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -471,7 +471,7 @@ void StandardRobotNode::handle_start_charging(const qyh_standard_robot_msgs::srv
 void StandardRobotNode::handle_stop_charging(const qyh_standard_robot_msgs::srv::ControlStopCharging::Request::SharedPtr,
                                              qyh_standard_robot_msgs::srv::ControlStopCharging::Response::SharedPtr res)
 {
-  bool ok = write_coil(9);
+  bool ok = write_coil(10);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -479,7 +479,7 @@ void StandardRobotNode::handle_stop_charging(const qyh_standard_robot_msgs::srv:
 void StandardRobotNode::handle_enter_low_power(const qyh_standard_robot_msgs::srv::ControlEnterLowPowerMode::Request::SharedPtr,
                                                qyh_standard_robot_msgs::srv::ControlEnterLowPowerMode::Response::SharedPtr res)
 {
-  bool ok = write_coil(10);
+  bool ok = write_coil(11);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -487,7 +487,7 @@ void StandardRobotNode::handle_enter_low_power(const qyh_standard_robot_msgs::sr
 void StandardRobotNode::handle_exit_low_power(const qyh_standard_robot_msgs::srv::ControlExitLowPowerMode::Request::SharedPtr,
                                               qyh_standard_robot_msgs::srv::ControlExitLowPowerMode::Response::SharedPtr res)
 {
-  bool ok = write_coil(11);
+  bool ok = write_coil(12);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
@@ -495,7 +495,7 @@ void StandardRobotNode::handle_exit_low_power(const qyh_standard_robot_msgs::srv
 void StandardRobotNode::handle_system_reset(const qyh_standard_robot_msgs::srv::ControlSystemReset::Request::SharedPtr,
                                             qyh_standard_robot_msgs::srv::ControlSystemReset::Response::SharedPtr res)
 {
-  bool ok = write_coil(12);
+  bool ok = write_coil(14);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
 }
