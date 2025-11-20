@@ -1,6 +1,6 @@
 string username
-VRActionSample sample
+CalibrationPose sample
 ---
 bool success
-VRCalibrationProfile profile
+CalibrationProfile profile
 string message

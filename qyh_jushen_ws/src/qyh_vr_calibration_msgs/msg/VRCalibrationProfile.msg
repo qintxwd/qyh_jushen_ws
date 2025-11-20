@@ -1,2 +1,0 @@
-string username
-VRActionSample[] samples

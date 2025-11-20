@@ -2,5 +2,5 @@ string username
 int32 sample_index  # set to -1 to delete all samples for this user profile
 ---
 bool success
-VRCalibrationProfile profile
+CalibrationProfile profile
 string message

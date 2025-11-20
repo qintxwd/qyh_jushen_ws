@@ -1,4 +1,4 @@
 ---
-VRCalibrationProfile[] profiles
+CalibrationProfile[] profiles
 bool success
 string message

@@ -19,12 +19,17 @@
 #include <qyh_jaka_control_msgs/srv/set_tool_offset.hpp>
 #include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
 #include <qyh_vr_calibration_msgs/srv/get_profile.hpp>
+#include <qyh_vr_calibration_msgs/srv/get_robot_calibration.hpp>
 #include <tf2/LinearMath/Transform.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Vector3.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <Eigen/Dense>
 #include <chrono>
 #include <atomic>
 #include <mutex>
 #include <set>
+#include <map>
 
 using namespace std::chrono_literals;
 
@@ -166,6 +171,8 @@ public:
         // VR Calibration Client
         client_get_profile_ = create_client<qyh_vr_calibration_msgs::srv::GetProfile>(
             "vr_calibration/get_profile");
+        client_get_robot_calibration_ = create_client<qyh_vr_calibration_msgs::srv::GetRobotCalibration>(
+            "vr_calibration/get_robot_calibration");
 
         // 自动连接和初始化
         if (auto_connect_) {
@@ -580,6 +587,98 @@ private:
         res->message = success ? "Filter set successfully" : "Failed to set filter";
     }
 
+    // ==================== VR坐标变换计算 ====================
+    /**
+     * @brief 使用4个对应点计算VR到机器人的刚体变换
+     * 
+     * 该方法使用最小二乘法求解刚体变换，考虑4个标定姿态：
+     * - 姿态0: T-Pose
+     * - 姿态1: 双臂前伸
+     * - 姿态2: 双臂上举
+     * - 姿态3: 双臂下垂
+     * 
+     * 算法步骤：
+     * 1. 计算VR点集和机器人点集的质心
+     * 2. 将点集去中心化
+     * 3. 使用SVD分解计算最优旋转矩阵
+     * 4. 计算平移向量
+     * 
+     * @param vr_poses VR控制器的4个姿态（从VRCalibrationProfile获取）
+     * @param robot_poses 机器人末端的4个姿态（从RobotCalibrationProfile获取）
+     * @return tf2::Transform VR到机器人的变换矩阵
+     */
+    tf2::Transform computeRigidTransform(
+        const std::vector<geometry_msgs::msg::Pose>& vr_poses,
+        const std::vector<geometry_msgs::msg::Pose>& robot_poses)
+    {
+        if (vr_poses.size() != 4 || robot_poses.size() != 4) {
+            RCLCPP_ERROR(get_logger(), "Need exactly 4 corresponding poses");
+            return tf2::Transform::getIdentity();
+        }
+
+        // 使用Eigen进行数值计算
+        Eigen::Matrix3Xd vr_points(3, 4);
+        Eigen::Matrix3Xd robot_points(3, 4);
+
+        // 填充点云
+        for (size_t i = 0; i < 4; ++i) {
+            vr_points(0, i) = vr_poses[i].position.x;
+            vr_points(1, i) = vr_poses[i].position.y;
+            vr_points(2, i) = vr_poses[i].position.z;
+
+            robot_points(0, i) = robot_poses[i].position.x;
+            robot_points(1, i) = robot_poses[i].position.y;
+            robot_points(2, i) = robot_poses[i].position.z;
+        }
+
+        // 计算质心
+        Eigen::Vector3d vr_centroid = vr_points.rowwise().mean();
+        Eigen::Vector3d robot_centroid = robot_points.rowwise().mean();
+
+        // 去中心化
+        Eigen::Matrix3Xd vr_centered = vr_points.colwise() - vr_centroid;
+        Eigen::Matrix3Xd robot_centered = robot_points.colwise() - robot_centroid;
+
+        // 计算协方差矩阵 H = vr_centered * robot_centered^T
+        Eigen::Matrix3d H = vr_centered * robot_centered.transpose();
+
+        // SVD分解
+        Eigen::JacobiSVD<Eigen::Matrix3d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
+        Eigen::Matrix3d U = svd.matrixU();
+        Eigen::Matrix3d V = svd.matrixV();
+
+        // 计算旋转矩阵 R = V * U^T
+        Eigen::Matrix3d R = V * U.transpose();
+
+        // 确保是右手坐标系（行列式为1）
+        if (R.determinant() < 0) {
+            V.col(2) *= -1;
+            R = V * U.transpose();
+        }
+
+        // 计算平移向量 t = robot_centroid - R * vr_centroid
+        Eigen::Vector3d t = robot_centroid - R * vr_centroid;
+
+        // 转换为tf2::Transform
+        tf2::Matrix3x3 tf2_rotation(
+            R(0,0), R(0,1), R(0,2),
+            R(1,0), R(1,1), R(1,2),
+            R(2,0), R(2,1), R(2,2)
+        );
+        tf2::Vector3 tf2_translation(t(0), t(1), t(2));
+
+        tf2::Transform transform;
+        transform.setBasis(tf2_rotation);
+        transform.setOrigin(tf2_translation);
+
+        // 输出变换信息用于调试
+        RCLCPP_INFO(get_logger(), 
+            "Computed transform - Translation: [%.3f, %.3f, %.3f]",
+            t(0), t(1), t(2));
+
+        return transform;
+    }
+
     // ==================== VR控制服务 ====================
     void handleEnableVR(
         const qyh_jaka_control_msgs::srv::EnableVRFollow::Request::SharedPtr req,
@@ -599,55 +698,134 @@ private:
                 return;
             }
 
-            // Call GetProfile service
+            // 1. Get VR user calibration profile
             if (!client_get_profile_->wait_for_service(std::chrono::seconds(1))) {
                 res->success = false;
                 res->message = "VR calibration service not available";
                 return;
             }
 
-            auto profile_req = std::make_shared<qyh_vr_calibration_msgs::srv::GetProfile::Request>();
-            profile_req->username = req->username;
+            auto vr_profile_req = std::make_shared<qyh_vr_calibration_msgs::srv::GetProfile::Request>();
+            vr_profile_req->username = req->username;
 
-            auto future = client_get_profile_->async_send_request(profile_req);
+            auto vr_future = client_get_profile_->async_send_request(vr_profile_req);
             
-            // Wait for result (blocking here is acceptable for configuration service)
-            if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+            if (vr_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
                 res->success = false;
-                res->message = "Timeout waiting for VR profile";
+                res->message = "Timeout waiting for VR user profile";
                 return;
             }
 
-            auto profile_res = future.get();
-            if (!profile_res->found) {
+            auto vr_profile_res = vr_future.get();
+            if (!vr_profile_res->found) {
                 res->success = false;
-                res->message = "VR profile not found for user: " + req->username;
+                res->message = "VR profile not found for user: " + req->username + 
+                               ". Please calibrate VR first.";
                 return;
             }
 
-            // Validate samples 0, 1, 2, 3 exist
-            std::set<uint32_t> existing_indices;
-            for (const auto& sample : profile_res->profile.samples) {
-                existing_indices.insert(sample.sample_index);
+            // 2. Get robot calibration profile
+            if (!client_get_robot_calibration_->wait_for_service(std::chrono::seconds(1))) {
+                res->success = false;
+                res->message = "Robot calibration service not available";
+                return;
             }
 
-            bool has_all_samples = true;
-            for (uint32_t i = 0; i < 4; ++i) {
-                if (existing_indices.find(i) == existing_indices.end()) {
-                    has_all_samples = false;
-                    break;
+            auto robot_profile_req = std::make_shared<qyh_vr_calibration_msgs::srv::GetRobotCalibration::Request>();
+            auto robot_future = client_get_robot_calibration_->async_send_request(robot_profile_req);
+            
+            if (robot_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+                res->success = false;
+                res->message = "Timeout waiting for robot calibration profile";
+                return;
+            }
+
+            auto robot_profile_res = robot_future.get();
+            if (!robot_profile_res->found) {
+                res->success = false;
+                res->message = "Robot calibration not found. Please calibrate robot first using set_robot_calibration service.";
+                return;
+            }
+
+            // 3. Extract poses from both profiles
+            std::map<uint32_t, geometry_msgs::msg::Pose> vr_left_poses;
+            std::map<uint32_t, geometry_msgs::msg::Pose> vr_right_poses;
+            std::map<uint32_t, geometry_msgs::msg::Pose> robot_left_poses;
+            std::map<uint32_t, geometry_msgs::msg::Pose> robot_right_poses;
+            
+            // VR poses (from user's calibration)
+            for (const auto& sample : vr_profile_res->profile.samples) {
+                if (sample.sample_index < 4) {
+                    vr_left_poses[sample.sample_index] = sample.left_hand_pose;
+                    vr_right_poses[sample.sample_index] = sample.right_hand_pose;
                 }
             }
 
-            if (!has_all_samples) {
+            // Robot poses (from robot calibration)
+            for (const auto& sample : robot_profile_res->profile.samples) {
+                if (sample.sample_index < 4) {
+                    robot_left_poses[sample.sample_index] = sample.left_hand_pose;
+                    robot_right_poses[sample.sample_index] = sample.right_hand_pose;
+                }
+            }
+
+            // 4. Validate all 4 poses exist for both VR and robot
+            std::vector<uint32_t> missing_vr_indices;
+            std::vector<uint32_t> missing_robot_indices;
+            
+            for (uint32_t i = 0; i < 4; ++i) {
+                if (vr_left_poses.find(i) == vr_left_poses.end() ||
+                    vr_right_poses.find(i) == vr_right_poses.end()) {
+                    missing_vr_indices.push_back(i);
+                }
+                if (robot_left_poses.find(i) == robot_left_poses.end() ||
+                    robot_right_poses.find(i) == robot_right_poses.end()) {
+                    missing_robot_indices.push_back(i);
+                }
+            }
+
+            if (!missing_vr_indices.empty() || !missing_robot_indices.empty()) {
                 res->success = false;
-                res->message = "Incomplete calibration data. Required samples 0-3.";
+                std::string msg = "Incomplete calibration data. Missing poses: ";
+                if (!missing_vr_indices.empty()) {
+                    msg += "VR user [";
+                    for (size_t i = 0; i < missing_vr_indices.size(); ++i) {
+                        msg += std::to_string(missing_vr_indices[i]);
+                        if (i < missing_vr_indices.size() - 1) msg += ",";
+                    }
+                    msg += "]";
+                }
+                if (!missing_robot_indices.empty()) {
+                    if (!missing_vr_indices.empty()) msg += ", ";
+                    msg += "Robot [";
+                    for (size_t i = 0; i < missing_robot_indices.size(); ++i) {
+                        msg += std::to_string(missing_robot_indices[i]);
+                        if (i < missing_robot_indices.size() - 1) msg += ",";
+                    }
+                    msg += "]";
+                }
+                msg += ". Required: 0-3 (T-Pose, Forward, Up, Down)";
+                res->message = msg;
                 return;
             }
 
-            // TODO: Load calibration data into internal state for use in processVRFollow
-            RCLCPP_INFO(get_logger(), "Loaded VR profile for %s with %zu samples", 
-                        req->username.c_str(), profile_res->profile.samples.size());
+            // 5. Compute transformations for left and right arms
+            std::vector<geometry_msgs::msg::Pose> vr_left_vec, vr_right_vec;
+            std::vector<geometry_msgs::msg::Pose> robot_left_vec, robot_right_vec;
+            
+            for (uint32_t i = 0; i < 4; ++i) {
+                vr_left_vec.push_back(vr_left_poses[i]);
+                vr_right_vec.push_back(vr_right_poses[i]);
+                robot_left_vec.push_back(robot_left_poses[i]);
+                robot_right_vec.push_back(robot_right_poses[i]);
+            }
+
+            vr_to_robot_left_ = computeRigidTransform(vr_left_vec, robot_left_vec);
+            vr_to_robot_right_ = computeRigidTransform(vr_right_vec, robot_right_vec);
+
+            RCLCPP_INFO(get_logger(), 
+                "✓ Loaded and computed VR-to-robot transforms for user: %s", 
+                req->username.c_str());
         }
 
         vr_following_ = req->enable;
@@ -809,6 +987,7 @@ private:
 
     // VR Calibration Client
     rclcpp::Client<qyh_vr_calibration_msgs::srv::GetProfile>::SharedPtr client_get_profile_;
+    rclcpp::Client<qyh_vr_calibration_msgs::srv::GetRobotCalibration>::SharedPtr client_get_robot_calibration_;
 
     // 定时器
     rclcpp::TimerBase::SharedPtr main_timer_;

@@ -10,8 +10,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
-  "msg/VRActionSample.msg"
-  "msg/VRCalibrationProfile.msg"
+  "msg/CalibrationPose.msg"
+  "msg/CalibrationProfile.msg"
 )
 
 set(srv_files
@@ -20,6 +20,8 @@ set(srv_files
   "srv/UpdateActionSample.srv"
   "srv/DeleteActionSamples.srv"
   "srv/DeleteProfile.srv"
+  "srv/GetRobotCalibration.srv"
+  "srv/SetRobotCalibration.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

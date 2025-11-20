@@ -1,0 +1,6 @@
+# Set robot calibration data
+CalibrationPose sample
+---
+bool success
+CalibrationProfile profile  # username will be 'ROBOT'
+string message
