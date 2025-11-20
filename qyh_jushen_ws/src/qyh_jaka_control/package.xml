@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>qyh_jaka_control</name>
+  <version>0.1.0</version>
+  <description>JAKA dual-arm control nodes (servo and move)</description>
+  <maintainer email="dev@example.com">qyh</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>rclcpp</build_depend>
+  <build_depend>qyh_jaka_control_msgs</build_depend>
+
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>qyh_jaka_control_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>qyh_jaka_control_gui</name>
+  <version>0.1.0</version>
+  <description>GUI for publishing JAKA ABS/REL servo commands</description>
+  <maintainer email="dev@example.com">qyh</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>qyh_jaka_control_msgs</exec_depend>
+  <exec_depend>python3-pyqt5</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

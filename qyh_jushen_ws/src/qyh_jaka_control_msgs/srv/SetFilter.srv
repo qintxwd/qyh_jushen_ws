@@ -1,0 +1,5 @@
+string filter_type
+float64 param
+---
+bool success
+string message
