@@ -144,7 +144,7 @@ class RobotMonitorGUI(QMainWindow):
             }
             QPushButton {
                 background-color: #4CAF50;
-                color: white;
+                color: black;
                 border: none;
                 padding: 10px;
                 border-radius: 5px;
@@ -165,7 +165,7 @@ class RobotMonitorGUI(QMainWindow):
                 padding: 10px 14px;
                 font-size: 10pt;
                 font-weight: 600;
-                color: #ffffff;
+                color: black;
             }
             QGroupBox#controlServices QPushButton:hover {
                 background-color: #1976d2;
@@ -184,7 +184,7 @@ class RobotMonitorGUI(QMainWindow):
         
         # 创建定时器来处理ROS2回调
         self.ros_timer = QTimer()
-        self.ros_timer.timeout.connect(lambda: rclpy.spin_once(self.ros_node, timeout_sec=0))
+        self.ros_timer.timeout.connect(self.spin_ros_node)
         self.ros_timer.start(50)  # 20Hz
         
         # 创建UI
@@ -204,6 +204,13 @@ class RobotMonitorGUI(QMainWindow):
         self.manual_timer.start(50)
         QApplication.instance().installEventFilter(self)
     
+    def spin_ros_node(self):
+        if rclpy.ok():
+            try:
+                rclpy.spin_once(self.ros_node, timeout_sec=0)
+            except Exception:
+                pass
+
     def init_ui(self):
         # 创建中央widget和滚动区域
         central_widget = QWidget()
@@ -977,9 +984,21 @@ def main(args=None):
     font.setPointSize(10)
     app.setFont(font)
     
+    # 允许 Ctrl+C 退出程序
+    import signal
+    signal.signal(signal.SIGINT, lambda *args: app.quit())
+    
     window = RobotMonitorGUI()
     window.show()
-    sys.exit(app.exec_())
+    
+    # 运行应用
+    exit_code = app.exec_()
+    
+    # 清理资源
+    if rclpy.ok():
+        rclpy.shutdown()
+        
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':
