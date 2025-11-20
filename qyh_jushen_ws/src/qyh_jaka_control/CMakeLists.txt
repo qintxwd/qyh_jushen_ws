@@ -27,10 +27,11 @@ include_directories(
   ${Protobuf_INCLUDE_DIRS}
 )
 
-# Link directories
-link_directories(
-  ./thirdparty/lib
-)
+# Resolve JAKA API shared library
+set(JAKA_API_LIB "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/lib/libjakaAPI_2_3_3.so")
+if(NOT EXISTS ${JAKA_API_LIB})
+  message(FATAL_ERROR "JAKA API shared library not found at ${JAKA_API_LIB}. Please verify thirdparty/lib contents.")
+endif()
 
 # Libraries
 add_library(jaka_interface src/jaka_interface.cpp)
@@ -41,7 +42,7 @@ ament_target_dependencies(jaka_interface
   tf2_geometry_msgs
 )
 target_link_libraries(jaka_interface
-  jakaAPI
+  ${JAKA_API_LIB}
   ${Protobuf_LIBRARIES}
 )
 
@@ -59,7 +60,7 @@ ament_target_dependencies(jaka_control_node
 )
 target_link_libraries(jaka_control_node
   jaka_interface
-  jakaAPI
+  ${JAKA_API_LIB}
   ${Protobuf_LIBRARIES}
 )
 

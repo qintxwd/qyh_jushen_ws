@@ -30,6 +30,7 @@
 #include <mutex>
 #include <set>
 #include <map>
+#include <array>
 
 using namespace std::chrono_literals;
 
@@ -323,16 +324,22 @@ private:
 
             // 获取关节位置
             JointValue left_joint, right_joint;
+            std::array<double, 7> left_joint_positions{};
+            std::array<double, 7> right_joint_positions{};
+
             if (jaka_interface_.getJointPositions(0, left_joint)) {
-                for (int i = 0; i < 7; ++i) {
-                    robot_state_msg.left_joint_positions.push_back(left_joint.jVal[i]);
+                for (size_t i = 0; i < left_joint_positions.size(); ++i) {
+                    left_joint_positions[i] = left_joint.jVal[i];
                 }
             }
             if (jaka_interface_.getJointPositions(1, right_joint)) {
-                for (int i = 0; i < 7; ++i) {
-                    robot_state_msg.right_joint_positions.push_back(right_joint.jVal[i]);
+                for (size_t i = 0; i < right_joint_positions.size(); ++i) {
+                    right_joint_positions[i] = right_joint.jVal[i];
                 }
             }
+
+            robot_state_msg.left_joint_positions = left_joint_positions;
+            robot_state_msg.right_joint_positions = right_joint_positions;
 
             // 获取笛卡尔位姿
             CartesianPose left_pose, right_pose;
@@ -368,10 +375,13 @@ private:
             joint_state_msg.name.push_back("right_joint_" + std::to_string(i));
         }
         
-        joint_state_msg.position = robot_state_msg.left_joint_positions;
-        joint_state_msg.position.insert(joint_state_msg.position.end(),
-                                       robot_state_msg.right_joint_positions.begin(),
-                                       robot_state_msg.right_joint_positions.end());
+        joint_state_msg.position.assign(
+            robot_state_msg.left_joint_positions.begin(),
+            robot_state_msg.left_joint_positions.end());
+        joint_state_msg.position.insert(
+            joint_state_msg.position.end(),
+            robot_state_msg.right_joint_positions.begin(),
+            robot_state_msg.right_joint_positions.end());
         
         joint_states_pub_->publish(joint_state_msg);
 
