@@ -1,95 +1,170 @@
 # JAKA双臂机器人VR控制系统
 
+# JAKA双臂机器人控制系统
+
 ## 系统架构
 
-### 1. 消息和服务定义 (qyh_jaka_control_msgs)
-定义了所有通信接口：
-- 消息：VRPose, VRFollowStatus, JakaDualJointServo, JakaDualCartesianServo, JakaServoStatus
-- 服务：EnableVRFollow, StartRecording, StopRecording, CalibrateVR, StartServo, StopServo
+### 统一控制节点 (jaka_control_node)
+**完整集成所有功能的单一节点**，包括：
 
-### 2. 核心控制节点 (qyh_jaka_control)
-- **jaka_interface**: JAKA SDK C++包装层，提供线程安全的机器人控制接口
-- **jaka_servo_node_vr**: 主控制节点，实现125Hz实时伺服控制、VR跟随、数据录制
+#### 1. 基础控制功能
+- **连接管理**: 自动连接到双臂机器人
+- **电源控制**: Power On / Power Off
+- **使能控制**: Enable / Disable  
+- **错误处理**: Clear Error
+- **急停**: Motion Abort
 
-### 3. 图形界面 (qyh_jaka_control_gui)
-- **vr_control_gui**: PyQt5图形界面，提供伺服控制、VR跟随、数据录制的可视化操作
+#### 2. 伺服模式（125Hz实时控制）
+- **关节空间伺服**: 14自由度（双臂各7个关节）
+- **笛卡尔空间伺服**: 位置+姿态控制
+- **滤波器配置**: LPF、NLF多种滤波模式
+- **EtherCAT同步**: 8ms周期精确控制
 
-## 功能特点
+#### 3. VR跟随功能
+- **实时位姿跟随**: 订阅VR控制器位姿
+- **坐标系变换**: VR空间→机器人空间
+- **校准功能**: 可配置坐标映射关系
+- **误差监控**: 实时跟随误差反馈
 
-### VR跟随控制
-- 实时订阅VR控制器位姿 (`/vr/left_controller_pose`, `/vr/right_controller_pose`)
-- 通过TF2进行坐标变换（VR空间→机器人空间）
-- 支持VR坐标系校准
-- 可配置跟随参数（缩放比例、偏移、旋转等）
+#### 4. 数据录制（具身智能训练）
+- **CSV格式**: 时间戳、VR位姿、关节状态、笛卡尔位姿
+- **可配置频率**: 1-125Hz
+- **自动文件管理**: 时间戳命名
+- **实时统计**: 帧数、时长监控
 
-### 数据录制
-- 125Hz高频数据采集
-- CSV格式存储：时间戳、VR位姿、机器人关节角度/速度、笛卡尔位姿
-- 可配置录制路径和频率
-- 支持实时录制开始/停止
+## ROS服务接口
 
-### 实时伺服控制
-- 125Hz (8ms周期) EtherCAT同步控制
-- 支持关节空间和笛卡尔空间伺服
-- 可配置滤波参数（位置、速度、加速度）
-- 实时状态监控（周期时间、延迟、发布频率）
-
-## 使用流程
-
-### 1. 编译安装
+### 基础控制服务
 ```bash
-cd ~/qyh_jushen_ws
-colcon build --packages-select qyh_jaka_control_msgs qyh_jaka_control qyh_jaka_control_gui
-source install/setup.bash
+# 上电
+ros2 service call /jaka/robot/power_on std_srvs/srv/Trigger
+
+# 下电
+ros2 service call /jaka/robot/power_off std_srvs/srv/Trigger
+
+# 使能
+ros2 service call /jaka/robot/enable std_srvs/srv/Trigger
+
+# 去使能
+ros2 service call /jaka/robot/disable std_srvs/srv/Trigger
+
+# 清除错误
+ros2 service call /jaka/robot/clear_error std_srvs/srv/Trigger
+
+# 急停
+ros2 service call /jaka/robot/motion_abort std_srvs/srv/Trigger
 ```
 
-### 2. 配置机器人参数
-编辑 `src/qyh_jaka_control/config/robot_config.yaml`：
-```yaml
-robot:
-  left_arm_ip: "192.168.1.10"
-  right_arm_ip: "192.168.1.11"
-  # ... 其他参数
-```
-
-### 3. 启动VR跟随系统
-
-#### 方式1：使用GUI（推荐）
-```bash
-ros2 launch qyh_jaka_control_gui vr_control_gui.launch.py
-```
-操作步骤：
-1. 点击"启动伺服模式"
-2. 点击"校准VR坐标系"（首次使用或坐标系变化时）
-3. 点击"启用VR跟随"
-4. 设置录制路径，点击"开始录制"
-5. 完成后点击"停止录制"
-6. 点击"停止VR跟随"和"停止伺服模式"
-
-#### 方式2：使用launch文件
-```bash
-ros2 launch qyh_jaka_control jaka_servo.launch.py
-```
-
-### 4. 单独启动控制节点
-```bash
-ros2 run qyh_jaka_control jaka_servo_node_vr
-```
-
-### 5. 命令行操作
+### 伺服控制服务
 ```bash
 # 启动伺服模式
 ros2 service call /jaka/servo/start qyh_jaka_control_msgs/srv/StartServo
 
+# 停止伺服模式
+ros2 service call /jaka/servo/stop qyh_jaka_control_msgs/srv/StopServo
+```
+
+### VR跟随服务
+```bash
 # 启用VR跟随
 ros2 service call /jaka/vr/enable qyh_jaka_control_msgs/srv/EnableVRFollow "{enable: true}"
 
+# 校准VR坐标系
+ros2 service call /jaka/vr/calibrate qyh_jaka_control_msgs/srv/CalibrateVR
+
 # 开始录制
 ros2 service call /jaka/vr/start_recording qyh_jaka_control_msgs/srv/StartRecording \
-  "{output_path: '/tmp/demo_recording', recording_frequency: 125.0}"
+  "{output_path: '/tmp/demo', recording_frequency: 125.0}"
 
 # 停止录制
 ros2 service call /jaka/vr/stop_recording qyh_jaka_control_msgs/srv/StopRecording
+```
+
+## 话题接口
+
+### 发布话题
+- `/jaka/servo/status` (JakaServoStatus) - 伺服状态
+- `/jaka/vr/status` (VRFollowStatus) - VR跟随状态
+
+### 订阅话题
+- `/jaka/servo/joint_cmd` (JakaDualJointServo) - 关节空间指令
+- `/jaka/servo/cartesian_cmd` (JakaDualCartesianServo) - 笛卡尔空间指令
+- `/vr/left_controller` (VRPose) - 左VR控制器位姿
+- `/vr/right_controller` (VRPose) - 右VR控制器位姿
+
+## 使用方法
+
+### 方式1：使用GUI（推荐）
+```bash
+ros2 launch qyh_jaka_control_gui jaka_gui.launch.py
+```
+GUI提供可视化控制，包含所有基础和高级功能。
+
+### 方式2：使用Launch文件
+```bash
+# 默认配置
+ros2 launch qyh_jaka_control jaka_control.launch.py
+
+# 自定义配置
+ros2 launch qyh_jaka_control jaka_control.launch.py \
+  robot_ip:=192.168.1.100 \
+  auto_connect:=true \
+  auto_power_on:=true \
+  auto_enable:=true
+```
+
+### 方式3：直接运行节点
+```bash
+ros2 run qyh_jaka_control jaka_control_node \
+  --ros-args \
+  -p robot_ip:=192.168.2.200 \
+  -p auto_connect:=true
+```
+
+## 完整工作流程
+
+### 场景1：基础运动控制
+```bash
+# 1. 启动节点
+ros2 launch qyh_jaka_control jaka_control.launch.py
+
+# 2. 上电
+ros2 service call /jaka/robot/power_on std_srvs/srv/Trigger
+
+# 3. 使能
+ros2 service call /jaka/robot/enable std_srvs/srv/Trigger
+
+# 4. 启动伺服模式
+ros2 service call /jaka/servo/start qyh_jaka_control_msgs/srv/StartServo
+
+# 5. 发送控制指令（通过ROS话题）
+ros2 topic pub /jaka/servo/joint_cmd qyh_jaka_control_msgs/msg/JakaDualJointServo ...
+
+# 6. 完成后停止
+ros2 service call /jaka/servo/stop qyh_jaka_control_msgs/srv/StopServo
+```
+
+### 场景2：VR跟随+数据录制
+```bash
+# 1-4步同上，启动伺服模式
+
+# 5. 校准VR坐标系（首次使用）
+ros2 service call /jaka/vr/calibrate qyh_jaka_control_msgs/srv/CalibrateVR
+
+# 6. 启用VR跟随
+ros2 service call /jaka/vr/enable qyh_jaka_control_msgs/srv/EnableVRFollow "{enable: true}"
+
+# 7. 开始录制
+ros2 service call /jaka/vr/start_recording qyh_jaka_control_msgs/srv/StartRecording \
+  "{output_path: '/home/user/datasets/demo01', recording_frequency: 125.0}"
+
+# 8. 进行VR操作演示...
+
+# 9. 停止录制
+ros2 service call /jaka/vr/stop_recording qyh_jaka_control_msgs/srv/StopRecording
+
+# 10. 停止VR跟随
+ros2 service call /jaka/vr/enable qyh_jaka_control_msgs/srv/EnableVRFollow "{enable: false}"
 ```
 
 ## 数据格式

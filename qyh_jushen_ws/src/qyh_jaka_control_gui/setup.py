@@ -22,8 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'servo_gui = qyh_jaka_control_gui.servo_gui:main',
-            'vr_control_gui = qyh_jaka_control_gui.vr_control_gui:main',
+            'jaka_gui = qyh_jaka_control_gui.jaka_complete_gui:main',
         ],
     },
 )

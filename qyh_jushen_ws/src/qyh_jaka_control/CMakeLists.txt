@@ -11,6 +11,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -39,23 +40,19 @@ target_link_libraries(jaka_interface
   jakaAPI
 )
 
-# Servo node with VR support
-add_executable(jaka_servo_node_vr src/jaka_servo_node_vr.cpp)
-ament_target_dependencies(jaka_servo_node_vr
+# Main control node (unified: basic + servo + VR)
+add_executable(jaka_control_node src/jaka_control_node.cpp)
+ament_target_dependencies(jaka_control_node
   rclcpp
   geometry_msgs
   tf2
   tf2_geometry_msgs
   qyh_jaka_control_msgs
 )
-target_link_libraries(jaka_servo_node_vr
+target_link_libraries(jaka_control_node
   jaka_interface
   jakaAPI
 )
-
-# Original servo node (fallback)
-add_executable(jaka_servo_node src/jaka_servo_node.cpp)
-ament_target_dependencies(jaka_servo_node rclcpp qyh_jaka_control_msgs)
 
 install(TARGETS jaka_interface
   ARCHIVE DESTINATION lib
@@ -64,8 +61,7 @@ install(TARGETS jaka_interface
 )
 
 install(TARGETS
-  jaka_servo_node_vr
-  jaka_servo_node
+  jaka_control_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
