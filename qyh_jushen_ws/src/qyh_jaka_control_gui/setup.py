@@ -1,4 +1,6 @@
 from setuptools import setup
+import os
+from glob import glob
 
 package_name = 'qyh_jaka_control_gui'
 
@@ -9,17 +11,19 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='qyh',
     maintainer_email='dev@example.com',
-    description='GUI for JAKA servo commands',
+    description='JAKA双臂机器人VR控制GUI',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'servo_gui = qyh_jaka_control_gui.servo_gui:main',
+            'vr_control_gui = qyh_jaka_control_gui.vr_control_gui:main',
         ],
     },
 )

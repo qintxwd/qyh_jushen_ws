@@ -1,0 +1,5 @@
+# 校准VR坐标系到机器人坐标系
+geometry_msgs/Pose base_to_world  # 机器人基座在世界坐标系中的位姿
+---
+bool success
+string message

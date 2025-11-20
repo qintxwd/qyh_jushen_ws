@@ -7,18 +7,25 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/JakaDualJointServo.msg"
   "msg/JakaDualCartesianServo.msg"
   "msg/JakaServoStatus.msg"
+  "msg/VRPose.msg"
+  "msg/VRFollowStatus.msg"
   "srv/StartServo.srv"
   "srv/StopServo.srv"
   "srv/ZeroFT.srv"
   "srv/SetFTConfig.srv"
   "srv/SetFilter.srv"
-  DEPENDENCIES geometry_msgs
+  "srv/EnableVRFollow.srv"
+  "srv/StartRecording.srv"
+  "srv/StopRecording.srv"
+  "srv/CalibrateVR.srv"
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
