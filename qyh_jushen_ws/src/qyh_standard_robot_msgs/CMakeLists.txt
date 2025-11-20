@@ -27,6 +27,8 @@ endif()
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/StandardRobotStatus.msg"
   "msg/ManualMotionCommand.msg"
+  "msg/NavigationPose.msg"
+  "msg/NavigationStatus.msg"
   "srv/ControlPauseMove.srv"
   "srv/ControlResumeMove.srv"
   "srv/ControlStopMove.srv"
@@ -43,6 +45,17 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ControlPauseMission.srv"
   "srv/ControlResumeMission.srv"
   "srv/ControlCancelMission.srv"
+  "srv/GoSetSpeedType.srv"
+  "srv/GoNavigateToCoordinate.srv"
+  "srv/GoExecuteActionTask.srv"
+  "srv/GoSetManualControl.srv"
+  "srv/GoSetObstacleStrategy.srv"
+  "srv/GoSetCurrentSite.srv"
+  "srv/GoSetSpeakerVolume.srv"
+  "srv/GoSetCurrentMap.srv"
+  "srv/GoForceLocalize.srv"
+  "srv/GoNavigateToPoseWithTask.srv"
+  "srv/GoNavigateToSiteWithTask.srv"
   DEPENDENCIES geometry_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 

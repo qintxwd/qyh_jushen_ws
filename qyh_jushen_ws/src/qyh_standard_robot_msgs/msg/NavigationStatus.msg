@@ -1,0 +1,18 @@
+# Navigation status (read from Modbus, converted to standard ROS units)
+NavigationPose communication_pose          # 通讯位姿定位 (40001-40006)
+uint16 communication_site                  # 通讯站点定位 (40007)
+NavigationPose autonomous_nav_pose         # 自主导航移动位姿 (40008-40013)
+uint16 autonomous_nav_site                 # 自主导航移动到站点 (40015, 默认ID=0)
+uint16 obstacle_strategy                   # 设置避障策略 (40016)
+float64 manual_vx                          # 手动控制Vx线速度 [m/s] (40022)
+float64 manual_vy                          # 手动控制Vy速度 [m/s] (40023, 双轮差速为0)
+float64 manual_w                           # 手动控制w角速度 [rad/s] (40024)
+uint16 speed_level                         # 设置速度级别 (40026) [1,100]
+uint16 current_site                        # 设置当前站点 (40027)
+uint16 speaker_volume                      # 设置扬声器音量 (40028) [1,100]
+uint16 current_map                         # 设置当前地图 (40029)
+NavigationPose force_localize_pose         # 通讯位姿强制定位 (40049,40051,40053)
+uint16 nav_to_pose_task_id                 # 自主导航移动到位姿任务编号 (40057)
+NavigationPose nav_to_pose_target          # 自主导航移动到位姿 (40059,40061,40063)
+uint16 nav_to_site_task_id                 # 自主导航移动到站点任务编号 (40066)
+uint16 nav_to_site_target                  # 自主导航移动到站点 (40068)

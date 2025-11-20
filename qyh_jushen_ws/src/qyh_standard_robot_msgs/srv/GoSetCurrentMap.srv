@@ -1,0 +1,7 @@
+# Set current map (40029)
+# Map name encoded in first two bytes
+# Example: "12楼地图" -> 0x3132, "55a" -> 0x3535
+string map_name
+---
+bool success
+string message

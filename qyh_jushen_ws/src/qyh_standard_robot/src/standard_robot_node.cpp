@@ -37,6 +37,9 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
   status_pub_ = this->create_publisher<qyh_standard_robot_msgs::msg::StandardRobotStatus>(
     "standard_robot_status", 10);
   
+  nav_status_pub_ = this->create_publisher<qyh_standard_robot_msgs::msg::NavigationStatus>(
+    "navigation_status", 10);
+  
   // Connect to Modbus
   if (!connect_modbus()) {
     RCLCPP_ERROR(this->get_logger(), "Failed to connect to Modbus device");
@@ -96,6 +99,41 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
   srv_cancel_mission_ = this->create_service<qyh_standard_robot_msgs::srv::ControlCancelMission>(
     "control_cancel_mission",
     std::bind(&StandardRobotNode::handle_cancel_mission, this, std::placeholders::_1, std::placeholders::_2));
+
+  // Go series services
+  srv_go_set_speed_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetSpeedType>(
+    "go_set_speed_level",
+    std::bind(&StandardRobotNode::handle_go_set_speed, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_nav_coord_ = this->create_service<qyh_standard_robot_msgs::srv::GoNavigateToCoordinate>(
+    "go_navigate_to_coordinate",
+    std::bind(&StandardRobotNode::handle_go_nav_coord, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_nav_site_ = this->create_service<qyh_standard_robot_msgs::srv::GoExecuteActionTask>(
+    "go_navigate_to_site",
+    std::bind(&StandardRobotNode::handle_go_nav_site, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_manual_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetManualControl>(
+    "go_set_manual_control",
+    std::bind(&StandardRobotNode::handle_go_manual, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_obstacle_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetObstacleStrategy>(
+    "go_set_obstacle_strategy",
+    std::bind(&StandardRobotNode::handle_go_obstacle, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_current_site_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetCurrentSite>(
+    "go_set_current_site",
+    std::bind(&StandardRobotNode::handle_go_current_site, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_volume_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetSpeakerVolume>(
+    "go_set_speaker_volume",
+    std::bind(&StandardRobotNode::handle_go_volume, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_map_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetCurrentMap>(
+    "go_set_current_map",
+    std::bind(&StandardRobotNode::handle_go_map, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_force_loc_ = this->create_service<qyh_standard_robot_msgs::srv::GoForceLocalize>(
+    "go_force_localize",
+    std::bind(&StandardRobotNode::handle_go_force_loc, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_nav_pose_task_ = this->create_service<qyh_standard_robot_msgs::srv::GoNavigateToPoseWithTask>(
+    "go_navigate_to_pose_with_task",
+    std::bind(&StandardRobotNode::handle_go_nav_pose_task, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_nav_site_task_ = this->create_service<qyh_standard_robot_msgs::srv::GoNavigateToSiteWithTask>(
+    "go_navigate_to_site_with_task",
+    std::bind(&StandardRobotNode::handle_go_nav_site_task, this, std::placeholders::_1, std::placeholders::_2));
 
   manual_motion_sub_ = this->create_subscription<qyh_standard_robot_msgs::msg::ManualMotionCommand>(
     "manual_motion_cmd", 10,
@@ -391,6 +429,40 @@ bool StandardRobotNode::write_coil(uint16_t addr)
   }
 }
 
+bool StandardRobotNode::write_holding_register(uint16_t addr, uint16_t value)
+{
+  if (!is_connected_ || !modbus_ctx_) {
+    return false;
+  }
+  try {
+    modbus_ctx_->write_register(addr, value);
+    return true;
+  } catch (const modbus::Exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Modbus exception while writing register %u: %s", addr, e.what());
+    return false;
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Exception while writing register %u: %s", addr, e.what());
+    return false;
+  }
+}
+
+bool StandardRobotNode::write_holding_registers(uint16_t addr, const std::vector<uint16_t>& values)
+{
+  if (!is_connected_ || !modbus_ctx_) {
+    return false;
+  }
+  try {
+    modbus_ctx_->write_registers(addr, values);
+    return true;
+  } catch (const modbus::Exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Modbus exception while writing registers starting at %u: %s", addr, e.what());
+    return false;
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(this->get_logger(), "Exception while writing registers starting at %u: %s", addr, e.what());
+    return false;
+  }
+}
+
 void StandardRobotNode::command_timer_callback()
 {
   if(!is_manual_control_||!last_cmd_) {
@@ -546,6 +618,180 @@ void StandardRobotNode::handle_cancel_mission(const qyh_standard_robot_msgs::srv
   bool ok = write_coil(99);
   res->success = ok;
   res->message = ok ? "ok" : "failed";
+}
+
+// Go series service handlers
+void StandardRobotNode::handle_go_set_speed(const qyh_standard_robot_msgs::srv::GoSetSpeedType::Request::SharedPtr req,
+                                            qyh_standard_robot_msgs::srv::GoSetSpeedType::Response::SharedPtr res)
+{
+  // Write to register 40026
+  if (req->speed_level < 1 || req->speed_level > 100) {
+    res->success = false;
+    res->message = "Speed level must be between 1 and 100";
+    return;
+  }
+  bool ok = write_holding_register(40026, req->speed_level);
+  res->success = ok;
+  res->message = ok ? "Speed level set successfully" : "Failed to set speed level";
+}
+
+void StandardRobotNode::handle_go_nav_coord(const qyh_standard_robot_msgs::srv::GoNavigateToCoordinate::Request::SharedPtr req,
+                                            qyh_standard_robot_msgs::srv::GoNavigateToCoordinate::Response::SharedPtr res)
+{
+  // Convert from ROS units (m, rad) to Modbus units (mm, 1/1000 rad)
+  int32_t x_mm = static_cast<int32_t>(req->x * 1000.0);
+  int32_t y_mm = static_cast<int32_t>(req->y * 1000.0);
+  int32_t yaw_mrad = static_cast<int32_t>(req->yaw * 1000.0);
+  
+  // Split 32-bit values into 16-bit registers
+  std::vector<uint16_t> values(6);
+  values[0] = static_cast<uint16_t>((x_mm >> 16) & 0xFFFF);
+  values[1] = static_cast<uint16_t>(x_mm & 0xFFFF);
+  values[2] = static_cast<uint16_t>((y_mm >> 16) & 0xFFFF);
+  values[3] = static_cast<uint16_t>(y_mm & 0xFFFF);
+  values[4] = static_cast<uint16_t>((yaw_mrad >> 16) & 0xFFFF);
+  values[5] = static_cast<uint16_t>(yaw_mrad & 0xFFFF);
+  
+  // Write to 40001-40006 (通讯位姿) or 40008-40013 (自主导航)
+  uint16_t start_addr = req->use_communication_pose ? 40001 : 40008;
+  bool ok = write_holding_registers(start_addr, values);
+  res->success = ok;
+  res->message = ok ? "Navigation coordinate set successfully" : "Failed to set navigation coordinate";
+}
+
+void StandardRobotNode::handle_go_nav_site(const qyh_standard_robot_msgs::srv::GoExecuteActionTask::Request::SharedPtr req,
+                                           qyh_standard_robot_msgs::srv::GoExecuteActionTask::Response::SharedPtr res)
+{
+  // Write to register 40007 (通讯站点) or 40015 (自主导航到站点)
+  uint16_t addr = req->use_communication_site ? 40007 : 40015;
+  bool ok = write_holding_register(addr, req->site_id);
+  res->success = ok;
+  res->message = ok ? "Navigation to site set successfully" : "Failed to set navigation to site";
+}
+
+void StandardRobotNode::handle_go_manual(const qyh_standard_robot_msgs::srv::GoSetManualControl::Request::SharedPtr req,
+                                         qyh_standard_robot_msgs::srv::GoSetManualControl::Response::SharedPtr res)
+{
+  // Convert from ROS units (m/s, rad/s) to Modbus units (mm/s, 1/1000 rad/s)
+  int16_t vx_mms = static_cast<int16_t>(req->vx * 1000.0);
+  int16_t vy_mms = static_cast<int16_t>(req->vy * 1000.0);  // Should be 0 for differential drive
+  int16_t w_mrads = static_cast<int16_t>(req->w * 1000.0);
+  
+  // Write to registers 40022-40024 atomically
+  std::vector<uint16_t> values(3);
+  values[0] = static_cast<uint16_t>(vx_mms);
+  values[1] = static_cast<uint16_t>(vy_mms);
+  values[2] = static_cast<uint16_t>(w_mrads);
+  
+  bool ok = write_holding_registers(40022, values);
+  res->success = ok;
+  res->message = ok ? "Manual control velocities set successfully" : "Failed to set manual control velocities";
+}
+
+void StandardRobotNode::handle_go_obstacle(const qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Request::SharedPtr req,
+                                           qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Response::SharedPtr res)
+{
+  // Write to register 40016
+  bool ok = write_holding_register(40016, req->strategy);
+  res->success = ok;
+  res->message = ok ? "Obstacle strategy set successfully" : "Failed to set obstacle strategy";
+}
+
+void StandardRobotNode::handle_go_current_site(const qyh_standard_robot_msgs::srv::GoSetCurrentSite::Request::SharedPtr req,
+                                               qyh_standard_robot_msgs::srv::GoSetCurrentSite::Response::SharedPtr res)
+{
+  // Write to register 40027
+  bool ok = write_holding_register(40027, req->site_id);
+  res->success = ok;
+  res->message = ok ? "Current site set successfully" : "Failed to set current site";
+}
+
+void StandardRobotNode::handle_go_volume(const qyh_standard_robot_msgs::srv::GoSetSpeakerVolume::Request::SharedPtr req,
+                                         qyh_standard_robot_msgs::srv::GoSetSpeakerVolume::Response::SharedPtr res)
+{
+  // Write to register 40028
+  if (req->volume < 1 || req->volume > 100) {
+    res->success = false;
+    res->message = "Volume must be between 1 and 100";
+    return;
+  }
+  bool ok = write_holding_register(40028, req->volume);
+  res->success = ok;
+  res->message = ok ? "Speaker volume set successfully" : "Failed to set speaker volume";
+}
+
+void StandardRobotNode::handle_go_map(const qyh_standard_robot_msgs::srv::GoSetCurrentMap::Request::SharedPtr req,
+                                      qyh_standard_robot_msgs::srv::GoSetCurrentMap::Response::SharedPtr res)
+{
+  // Convert map name to first two bytes
+  // Example: "12" -> 0x3132 (ASCII codes)
+  if (req->map_name.length() < 2) {
+    res->success = false;
+    res->message = "Map name must have at least 2 characters";
+    return;
+  }
+  
+  uint16_t map_value = (static_cast<uint16_t>(req->map_name[0]) << 8) | static_cast<uint16_t>(req->map_name[1]);
+  
+  // Write to register 40029
+  bool ok = write_holding_register(40029, map_value);
+  res->success = ok;
+  res->message = ok ? "Current map set successfully" : "Failed to set current map";
+}
+
+void StandardRobotNode::handle_go_force_loc(const qyh_standard_robot_msgs::srv::GoForceLocalize::Request::SharedPtr req,
+                                            qyh_standard_robot_msgs::srv::GoForceLocalize::Response::SharedPtr res)
+{
+  // Convert from ROS units (m, rad) to Modbus units (mm, 1/1000 rad)
+  int32_t x_mm = static_cast<int32_t>(req->x * 1000.0);
+  int32_t y_mm = static_cast<int32_t>(req->y * 1000.0);
+  int32_t yaw_mrad = static_cast<int32_t>(req->yaw * 1000.0);
+  
+  // Write to registers 40049, 40051, 40053 (non-contiguous)
+  bool ok = true;
+  ok &= write_holding_register(40049, static_cast<uint16_t>(x_mm & 0xFFFF));
+  ok &= write_holding_register(40051, static_cast<uint16_t>(y_mm & 0xFFFF));
+  ok &= write_holding_register(40053, static_cast<uint16_t>(yaw_mrad & 0xFFFF));
+  
+  res->success = ok;
+  res->message = ok ? "Force localization set successfully" : "Failed to set force localization";
+}
+
+void StandardRobotNode::handle_go_nav_pose_task(const qyh_standard_robot_msgs::srv::GoNavigateToPoseWithTask::Request::SharedPtr req,
+                                                qyh_standard_robot_msgs::srv::GoNavigateToPoseWithTask::Response::SharedPtr res)
+{
+  // Convert from ROS units (m, rad) to Modbus units (mm, 1/1000 rad)
+  int32_t x_mm = static_cast<int32_t>(req->x * 1000.0);
+  int32_t y_mm = static_cast<int32_t>(req->y * 1000.0);
+  int32_t yaw_mrad = static_cast<int32_t>(req->yaw * 1000.0);
+  
+  // Write task ID to 40057
+  bool ok = write_holding_register(40057, req->task_id);
+  
+  // Write pose to 40059, 40061, 40063 (non-contiguous)
+  if (ok) {
+    ok &= write_holding_register(40059, static_cast<uint16_t>(x_mm & 0xFFFF));
+    ok &= write_holding_register(40061, static_cast<uint16_t>(y_mm & 0xFFFF));
+    ok &= write_holding_register(40063, static_cast<uint16_t>(yaw_mrad & 0xFFFF));
+  }
+  
+  res->success = ok;
+  res->message = ok ? "Navigation to pose with task set successfully" : "Failed to set navigation to pose with task";
+}
+
+void StandardRobotNode::handle_go_nav_site_task(const qyh_standard_robot_msgs::srv::GoNavigateToSiteWithTask::Request::SharedPtr req,
+                                                qyh_standard_robot_msgs::srv::GoNavigateToSiteWithTask::Response::SharedPtr res)
+{
+  // Write task ID to 40066
+  bool ok = write_holding_register(40066, req->task_id);
+  
+  // Write site ID to 40068
+  if (ok) {
+    ok &= write_holding_register(40068, req->site_id);
+  }
+  
+  res->success = ok;
+  res->message = ok ? "Navigation to site with task set successfully" : "Failed to set navigation to site with task";
 }
 
 }  // namespace qyh_standard_robot

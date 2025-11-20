@@ -22,6 +22,18 @@
 #include <qyh_standard_robot_msgs/srv/control_stop_manual_control.hpp>
 #include <qyh_standard_robot_msgs/srv/control_stop_move.hpp>
 #include <qyh_standard_robot_msgs/srv/control_system_reset.hpp>
+#include <qyh_standard_robot_msgs/srv/go_set_speed_type.hpp>
+#include <qyh_standard_robot_msgs/srv/go_navigate_to_coordinate.hpp>
+#include <qyh_standard_robot_msgs/srv/go_execute_action_task.hpp>
+#include <qyh_standard_robot_msgs/srv/go_set_manual_control.hpp>
+#include <qyh_standard_robot_msgs/srv/go_set_obstacle_strategy.hpp>
+#include <qyh_standard_robot_msgs/srv/go_set_current_site.hpp>
+#include <qyh_standard_robot_msgs/srv/go_set_speaker_volume.hpp>
+#include <qyh_standard_robot_msgs/srv/go_set_current_map.hpp>
+#include <qyh_standard_robot_msgs/srv/go_force_localize.hpp>
+#include <qyh_standard_robot_msgs/srv/go_navigate_to_pose_with_task.hpp>
+#include <qyh_standard_robot_msgs/srv/go_navigate_to_site_with_task.hpp>
+#include <qyh_standard_robot_msgs/msg/navigation_status.hpp>
 #include <modbus/modbus.hpp>
 
 namespace qyh_standard_robot
@@ -39,6 +51,8 @@ private:
   void disconnect_modbus();
   bool read_robot_status();
   bool write_coil(uint16_t addr);
+  bool write_holding_register(uint16_t addr, uint16_t value);
+  bool write_holding_registers(uint16_t addr, const std::vector<uint16_t>& values);
   void command_timer_callback();
 
   // ROS2 members
@@ -80,6 +94,21 @@ private:
   rclcpp::Service<qyh_standard_robot_msgs::srv::ControlResumeMission>::SharedPtr srv_resume_mission_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::ControlCancelMission>::SharedPtr srv_cancel_mission_;
 
+  // Go series services for navigation control
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetSpeedType>::SharedPtr srv_go_set_speed_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoNavigateToCoordinate>::SharedPtr srv_go_nav_coord_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoExecuteActionTask>::SharedPtr srv_go_nav_site_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetManualControl>::SharedPtr srv_go_manual_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetObstacleStrategy>::SharedPtr srv_go_obstacle_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetCurrentSite>::SharedPtr srv_go_current_site_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetSpeakerVolume>::SharedPtr srv_go_volume_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetCurrentMap>::SharedPtr srv_go_map_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoForceLocalize>::SharedPtr srv_go_force_loc_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoNavigateToPoseWithTask>::SharedPtr srv_go_nav_pose_task_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoNavigateToSiteWithTask>::SharedPtr srv_go_nav_site_task_;
+
+  rclcpp::Publisher<qyh_standard_robot_msgs::msg::NavigationStatus>::SharedPtr nav_status_pub_;
+
   void handle_pause_move(const qyh_standard_robot_msgs::srv::ControlPauseMove::Request::SharedPtr,
                          qyh_standard_robot_msgs::srv::ControlPauseMove::Response::SharedPtr);
   void handle_resume_move(const qyh_standard_robot_msgs::srv::ControlResumeMove::Request::SharedPtr,
@@ -112,6 +141,30 @@ private:
                              qyh_standard_robot_msgs::srv::ControlResumeMission::Response::SharedPtr);
   void handle_cancel_mission(const qyh_standard_robot_msgs::srv::ControlCancelMission::Request::SharedPtr,
                              qyh_standard_robot_msgs::srv::ControlCancelMission::Response::SharedPtr);
+
+  // Go series service handlers
+  void handle_go_set_speed(const qyh_standard_robot_msgs::srv::GoSetSpeedType::Request::SharedPtr,
+                           qyh_standard_robot_msgs::srv::GoSetSpeedType::Response::SharedPtr);
+  void handle_go_nav_coord(const qyh_standard_robot_msgs::srv::GoNavigateToCoordinate::Request::SharedPtr,
+                           qyh_standard_robot_msgs::srv::GoNavigateToCoordinate::Response::SharedPtr);
+  void handle_go_nav_site(const qyh_standard_robot_msgs::srv::GoExecuteActionTask::Request::SharedPtr,
+                          qyh_standard_robot_msgs::srv::GoExecuteActionTask::Response::SharedPtr);
+  void handle_go_manual(const qyh_standard_robot_msgs::srv::GoSetManualControl::Request::SharedPtr,
+                        qyh_standard_robot_msgs::srv::GoSetManualControl::Response::SharedPtr);
+  void handle_go_obstacle(const qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Request::SharedPtr,
+                          qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Response::SharedPtr);
+  void handle_go_current_site(const qyh_standard_robot_msgs::srv::GoSetCurrentSite::Request::SharedPtr,
+                              qyh_standard_robot_msgs::srv::GoSetCurrentSite::Response::SharedPtr);
+  void handle_go_volume(const qyh_standard_robot_msgs::srv::GoSetSpeakerVolume::Request::SharedPtr,
+                        qyh_standard_robot_msgs::srv::GoSetSpeakerVolume::Response::SharedPtr);
+  void handle_go_map(const qyh_standard_robot_msgs::srv::GoSetCurrentMap::Request::SharedPtr,
+                     qyh_standard_robot_msgs::srv::GoSetCurrentMap::Response::SharedPtr);
+  void handle_go_force_loc(const qyh_standard_robot_msgs::srv::GoForceLocalize::Request::SharedPtr,
+                           qyh_standard_robot_msgs::srv::GoForceLocalize::Response::SharedPtr);
+  void handle_go_nav_pose_task(const qyh_standard_robot_msgs::srv::GoNavigateToPoseWithTask::Request::SharedPtr,
+                               qyh_standard_robot_msgs::srv::GoNavigateToPoseWithTask::Response::SharedPtr);
+  void handle_go_nav_site_task(const qyh_standard_robot_msgs::srv::GoNavigateToSiteWithTask::Request::SharedPtr,
+                               qyh_standard_robot_msgs::srv::GoNavigateToSiteWithTask::Response::SharedPtr);
 };
 
 }  // namespace qyh_standard_robot

@@ -1,0 +1,6 @@
+# Navigate to site (40007 or 40015)
+uint16 site_id
+bool use_communication_site  # true=40007通讯站点, false=40015自主导航到站点
+---
+bool success
+string message

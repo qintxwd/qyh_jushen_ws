@@ -1,0 +1,5 @@
+# Set speaker volume (40028) [1,100]
+uint16 volume
+---
+bool success
+string message
