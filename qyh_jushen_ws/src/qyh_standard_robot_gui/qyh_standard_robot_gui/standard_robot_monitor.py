@@ -212,6 +212,63 @@ class RobotMonitorGUI(QMainWindow):
             QGroupBox#controlServices QPushButton:pressed {
                 background-color: #0d47a1;
             }
+            QComboBox {
+                background-color: white;
+                color: black;
+                border: 2px solid #4a90e2;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 10pt;
+                min-height: 25px;
+            }
+            QComboBox:hover {
+                border: 2px solid #2c5aa0;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 8px solid #4a90e2;
+                margin-right: 8px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: black;
+                selection-background-color: #4a90e2;
+                selection-color: white;
+                border: 2px solid #4a90e2;
+                outline: none;
+                padding: 5px;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 30px;
+                padding: 5px 10px;
+                color: black;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #e8f4f8;
+                color: black;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #4a90e2;
+                color: white;
+            }
+            QLineEdit {
+                background-color: white;
+                color: black;
+                border: 2px solid #4a90e2;
+                border-radius: 5px;
+                padding: 5px 10px;
+                font-size: 10pt;
+                min-height: 25px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2c5aa0;
+            }
         """)
         
         # 初始化ROS2
