@@ -758,65 +758,132 @@ class RobotMonitorGUI(QMainWindow):
     
     def create_navigation_control_group(self):
         """创建导航控制组"""
-        from PyQt5.QtWidgets import QLineEdit, QComboBox
+        from PyQt5.QtWidgets import QLineEdit, QTabWidget
         
-        group = QGroupBox('◆ 导航控制 (Go服务)')
+        group = QGroupBox('◆ 定位与导航控制 (Go服务)')
         group.setObjectName('navigationControl')
         main_layout = QHBoxLayout()
         
-        # 左侧：输入控件
+        # 左侧：使用Tab分类功能
         input_widget = QWidget()
         input_layout = QVBoxLayout(input_widget)
         
-        # 位姿导航
-        pose_group = QGroupBox('位姿导航')
-        pose_layout = QGridLayout()
+        # 创建标签页
+        tab_widget = QTabWidget()
         
-        self.nav_x_input = QLineEdit('0.0')
-        self.nav_y_input = QLineEdit('0.0')
-        self.nav_yaw_input = QLineEdit('0.0')
-        self.nav_pose_type = QComboBox()
-        self.nav_pose_type.addItems(['通讯位姿 (40001-40006)', '自主导航 (40008-40013)'])
+        # === 定位功能标签页 ===
+        localization_tab = QWidget()
+        loc_layout = QVBoxLayout(localization_tab)
         
-        pose_layout.addWidget(QLabel('X (米):'), 0, 0)
-        pose_layout.addWidget(self.nav_x_input, 0, 1)
-        pose_layout.addWidget(QLabel('Y (米):'), 1, 0)
-        pose_layout.addWidget(self.nav_y_input, 1, 1)
-        pose_layout.addWidget(QLabel('Yaw (弧度):'), 2, 0)
-        pose_layout.addWidget(self.nav_yaw_input, 2, 1)
-        pose_layout.addWidget(QLabel('类型:'), 3, 0)
-        pose_layout.addWidget(self.nav_pose_type, 3, 1)
+        # 位姿定位
+        pose_loc_group = QGroupBox('通过位姿定位 (40001-40006)')
+        pose_loc_layout = QGridLayout()
         
-        btn_nav_coord = QPushButton('导航到坐标')
-        btn_nav_coord.clicked.connect(self.on_navigate_to_coordinate)
-        pose_layout.addWidget(btn_nav_coord, 4, 0, 1, 2)
+        self.loc_pose_x_input = QLineEdit('0.0')
+        self.loc_pose_y_input = QLineEdit('0.0')
+        self.loc_pose_yaw_input = QLineEdit('0.0')
+        
+        pose_loc_layout.addWidget(QLabel('X (米):'), 0, 0)
+        pose_loc_layout.addWidget(self.loc_pose_x_input, 0, 1)
+        pose_loc_layout.addWidget(QLabel('Y (米):'), 1, 0)
+        pose_loc_layout.addWidget(self.loc_pose_y_input, 1, 1)
+        pose_loc_layout.addWidget(QLabel('Yaw (弧度):'), 2, 0)
+        pose_loc_layout.addWidget(self.loc_pose_yaw_input, 2, 1)
+        
+        btn_loc_pose = QPushButton('通过位姿定位')
+        btn_loc_pose.clicked.connect(self.on_localize_by_pose)
+        pose_loc_layout.addWidget(btn_loc_pose, 3, 0, 1, 2)
+        
+        pose_loc_group.setLayout(pose_loc_layout)
+        loc_layout.addWidget(pose_loc_group)
+        
+        # 站点定位
+        site_loc_group = QGroupBox('通过站点定位 (40007)')
+        site_loc_layout = QGridLayout()
+        
+        self.loc_site_input = QLineEdit('0')
+        
+        site_loc_layout.addWidget(QLabel('站点ID:'), 0, 0)
+        site_loc_layout.addWidget(self.loc_site_input, 0, 1)
+        
+        btn_loc_site = QPushButton('通过站点定位')
+        btn_loc_site.clicked.connect(self.on_localize_by_site)
+        site_loc_layout.addWidget(btn_loc_site, 1, 0, 1, 2)
+        
+        site_loc_group.setLayout(site_loc_layout)
+        loc_layout.addWidget(site_loc_group)
+        
+        # 强制定位
+        force_loc_group = QGroupBox('强制定位 (40049,40051,40053)')
+        force_loc_layout = QGridLayout()
+        
+        self.force_loc_x_input = QLineEdit('0.0')
+        self.force_loc_y_input = QLineEdit('0.0')
+        self.force_loc_yaw_input = QLineEdit('0.0')
+        
+        force_loc_layout.addWidget(QLabel('X (米):'), 0, 0)
+        force_loc_layout.addWidget(self.force_loc_x_input, 0, 1)
+        force_loc_layout.addWidget(QLabel('Y (米):'), 1, 0)
+        force_loc_layout.addWidget(self.force_loc_y_input, 1, 1)
+        force_loc_layout.addWidget(QLabel('Yaw (弧度):'), 2, 0)
+        force_loc_layout.addWidget(self.force_loc_yaw_input, 2, 1)
         
         btn_force_loc = QPushButton('强制定位')
         btn_force_loc.clicked.connect(self.on_force_localize)
-        pose_layout.addWidget(btn_force_loc, 5, 0, 1, 2)
+        force_loc_layout.addWidget(btn_force_loc, 3, 0, 1, 2)
         
-        pose_group.setLayout(pose_layout)
-        input_layout.addWidget(pose_group)
+        force_loc_group.setLayout(force_loc_layout)
+        loc_layout.addWidget(force_loc_group)
         
-        # 站点导航
-        site_group = QGroupBox('站点导航')
-        site_layout = QGridLayout()
+        loc_layout.addStretch()
+        tab_widget.addTab(localization_tab, '定位功能')
+        
+        # === 导航功能标签页 ===
+        navigation_tab = QWidget()
+        nav_layout = QVBoxLayout(navigation_tab)
+        
+        # 自主导航到位姿
+        nav_pose_group = QGroupBox('导航到位姿 (40008-40013)')
+        nav_pose_layout = QGridLayout()
+        
+        self.nav_pose_x_input = QLineEdit('0.0')
+        self.nav_pose_y_input = QLineEdit('0.0')
+        self.nav_pose_yaw_input = QLineEdit('0.0')
+        
+        nav_pose_layout.addWidget(QLabel('X (米):'), 0, 0)
+        nav_pose_layout.addWidget(self.nav_pose_x_input, 0, 1)
+        nav_pose_layout.addWidget(QLabel('Y (米):'), 1, 0)
+        nav_pose_layout.addWidget(self.nav_pose_y_input, 1, 1)
+        nav_pose_layout.addWidget(QLabel('Yaw (弧度):'), 2, 0)
+        nav_pose_layout.addWidget(self.nav_pose_yaw_input, 2, 1)
+        
+        btn_nav_pose = QPushButton('导航到位姿')
+        btn_nav_pose.clicked.connect(self.on_navigate_to_pose)
+        nav_pose_layout.addWidget(btn_nav_pose, 3, 0, 1, 2)
+        
+        nav_pose_group.setLayout(nav_pose_layout)
+        nav_layout.addWidget(nav_pose_group)
+        
+        # 自主导航到站点
+        nav_site_group = QGroupBox('导航到站点 (40015)')
+        nav_site_layout = QGridLayout()
         
         self.nav_site_input = QLineEdit('0')
-        self.nav_site_type = QComboBox()
-        self.nav_site_type.addItems(['通讯站点 (40007)', '自主导航站点 (40015)'])
         
-        site_layout.addWidget(QLabel('站点ID:'), 0, 0)
-        site_layout.addWidget(self.nav_site_input, 0, 1)
-        site_layout.addWidget(QLabel('类型:'), 1, 0)
-        site_layout.addWidget(self.nav_site_type, 1, 1)
+        nav_site_layout.addWidget(QLabel('站点ID:'), 0, 0)
+        nav_site_layout.addWidget(self.nav_site_input, 0, 1)
         
         btn_nav_site = QPushButton('导航到站点')
         btn_nav_site.clicked.connect(self.on_navigate_to_site)
-        site_layout.addWidget(btn_nav_site, 2, 0, 1, 2)
+        nav_site_layout.addWidget(btn_nav_site, 1, 0, 1, 2)
         
-        site_group.setLayout(site_layout)
-        input_layout.addWidget(site_group)
+        nav_site_group.setLayout(nav_site_layout)
+        nav_layout.addWidget(nav_site_group)
+        
+        nav_layout.addStretch()
+        tab_widget.addTab(navigation_tab, '导航功能')
+        
+        input_layout.addWidget(tab_widget)
         
         # 参数设置
         param_group = QGroupBox('参数设置')
@@ -878,9 +945,9 @@ class RobotMonitorGUI(QMainWindow):
         self.nav_site_label = self.create_value_label('0')
         self.nav_volume_label = self.create_value_label('0')
         
-        nav_status_layout.addWidget(QLabel('通讯位姿:'), 0, 0)
+        nav_status_layout.addWidget(QLabel('定位位姿(40001-40006):'), 0, 0)
         nav_status_layout.addWidget(self.nav_comm_pose_label, 0, 1)
-        nav_status_layout.addWidget(QLabel('自主导航位姿:'), 1, 0)
+        nav_status_layout.addWidget(QLabel('导航位姿(40008-40013):'), 1, 0)
         nav_status_layout.addWidget(self.nav_auto_pose_label, 1, 1)
         nav_status_layout.addWidget(QLabel('速度级别:'), 2, 0)
         nav_status_layout.addWidget(self.nav_speed_level_label, 2, 1)
@@ -900,36 +967,70 @@ class RobotMonitorGUI(QMainWindow):
         group.setLayout(main_layout)
         return group
     
-    def on_navigate_to_coordinate(self):
-        """导航到坐标"""
+    def on_localize_by_pose(self):
+        """通过位姿定位 (40001-40006) - 仅定位，不移动"""
         try:
             req = GoNavigateToCoordinate.Request()
-            req.x = float(self.nav_x_input.text())
-            req.y = float(self.nav_y_input.text())
-            req.yaw = float(self.nav_yaw_input.text())
-            req.use_communication_pose = (self.nav_pose_type.currentIndex() == 0)
-            self.call_service_with_feedback(self.ros_node.cli_go_nav_coord, req, '导航到坐标')
+            req.x = float(self.loc_pose_x_input.text())
+            req.y = float(self.loc_pose_y_input.text())
+            req.yaw = float(self.loc_pose_yaw_input.text())
+            req.is_localization = True  # 使用40001-40006, 仅定位
+            self.call_service_with_feedback(
+                self.ros_node.cli_go_nav_coord, req, '通过位姿定位'
+            )
         except ValueError:
             self.ros_node.get_logger().error('输入值无效')
     
+    def on_localize_by_site(self):
+        """通过站点定位 (40007) - 仅定位，不移动"""
+        try:
+            req = GoExecuteActionTask.Request()
+            req.site_id = int(self.loc_site_input.text())
+            req.is_localization = True  # 使用40007, 仅定位
+            self.call_service_with_feedback(
+                self.ros_node.cli_go_nav_site, req, '通过站点定位'
+            )
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_navigate_to_pose(self):
+        """导航到位姿 (40008-40013) - 移动到目标位置"""
+        try:
+            req = GoNavigateToCoordinate.Request()
+            req.x = float(self.nav_pose_x_input.text())
+            req.y = float(self.nav_pose_y_input.text())
+            req.yaw = float(self.nav_pose_yaw_input.text())
+            req.is_localization = False  # 使用40008-40013, 导航移动
+            self.call_service_with_feedback(
+                self.ros_node.cli_go_nav_coord, req, '导航到位姿'
+            )
+        except ValueError:
+            self.ros_node.get_logger().error('输入值无效')
+    
+    def on_navigate_to_coordinate(self):
+        """导航到坐标（已废弃，使用on_localize_by_pose或on_navigate_to_pose）"""
+        pass
+    
     def on_force_localize(self):
-        """强制定位"""
+        """强制定位 (40049,40051,40053)"""
         try:
             req = GoForceLocalize.Request()
-            req.x = float(self.nav_x_input.text())
-            req.y = float(self.nav_y_input.text())
-            req.yaw = float(self.nav_yaw_input.text())
+            req.x = float(self.force_loc_x_input.text())
+            req.y = float(self.force_loc_y_input.text())
+            req.yaw = float(self.force_loc_yaw_input.text())
             self.call_service_with_feedback(self.ros_node.cli_go_force_loc, req, '强制定位')
         except ValueError:
             self.ros_node.get_logger().error('输入值无效')
     
     def on_navigate_to_site(self):
-        """导航到站点"""
+        """导航到站点 (40015) - 移动到目标站点"""
         try:
             req = GoExecuteActionTask.Request()
             req.site_id = int(self.nav_site_input.text())
-            req.use_communication_site = (self.nav_site_type.currentIndex() == 0)
-            self.call_service_with_feedback(self.ros_node.cli_go_nav_site, req, '导航到站点')
+            req.is_localization = False  # 使用40015, 导航移动
+            self.call_service_with_feedback(
+                self.ros_node.cli_go_nav_site, req, '导航到站点'
+            )
         except ValueError:
             self.ros_node.get_logger().error('输入值无效')
     
@@ -987,10 +1088,12 @@ class RobotMonitorGUI(QMainWindow):
     def update_nav_status(self, msg):
         """更新导航状态显示"""
         self.nav_comm_pose_label.setText(
-            f'{msg.communication_pose.x:.2f}, {msg.communication_pose.y:.2f}, {msg.communication_pose.yaw:.2f}'
+            f'{msg.communication_pose.x:.2f}, {msg.communication_pose.y:.2f}, '
+            f'{msg.communication_pose.yaw:.2f}'
         )
         self.nav_auto_pose_label.setText(
-            f'{msg.autonomous_nav_pose.x:.2f}, {msg.autonomous_nav_pose.y:.2f}, {msg.autonomous_nav_pose.yaw:.2f}'
+            f'{msg.autonomous_nav_pose.x:.2f}, {msg.autonomous_nav_pose.y:.2f}, '
+            f'{msg.autonomous_nav_pose.yaw:.2f}'
         )
         self.nav_speed_level_label.setText(str(msg.speed_level))
         self.nav_obstacle_label.setText(str(msg.obstacle_strategy))

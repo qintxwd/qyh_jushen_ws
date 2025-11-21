@@ -652,8 +652,8 @@ void StandardRobotNode::handle_go_nav_coord(const qyh_standard_robot_msgs::srv::
   values[4] = static_cast<uint16_t>((yaw_mrad >> 16) & 0xFFFF);
   values[5] = static_cast<uint16_t>(yaw_mrad & 0xFFFF);
   
-  // Write to 40001-40006 (通讯位姿) or 40008-40013 (自主导航)
-  uint16_t start_addr = req->use_communication_pose ? 40001 : 40008;
+  // Write to 40001-40006 (通过位姿定位,不移动) or 40008-40013 (导航到位姿,移动)
+  uint16_t start_addr = req->is_localization ? 40001 : 40008;
   bool ok = write_holding_registers(start_addr, values);
   res->success = ok;
   res->message = ok ? "Navigation coordinate set successfully" : "Failed to set navigation coordinate";
@@ -662,8 +662,8 @@ void StandardRobotNode::handle_go_nav_coord(const qyh_standard_robot_msgs::srv::
 void StandardRobotNode::handle_go_nav_site(const qyh_standard_robot_msgs::srv::GoExecuteActionTask::Request::SharedPtr req,
                                            qyh_standard_robot_msgs::srv::GoExecuteActionTask::Response::SharedPtr res)
 {
-  // Write to register 40007 (通讯站点) or 40015 (自主导航到站点)
-  uint16_t addr = req->use_communication_site ? 40007 : 40015;
+  // Write to register 40007 (通过站点定位,不移动) or 40015 (导航到站点,移动)
+  uint16_t addr = req->is_localization ? 40007 : 40015;
   bool ok = write_holding_register(addr, req->site_id);
   res->success = ok;
   res->message = ok ? "Navigation to site set successfully" : "Failed to set navigation to site";

@@ -1,10 +1,10 @@
-# Navigate to coordinate with pose (40001-40006 or 40008-40013)
+# 通过位姿定位或导航到位姿 (40001-40006通过位姿定位 or 40008-40013导航到位姿)
 # Must be set atomically: x, y, yaw
 # Standard ROS units (converted to mm, mm, 1/1000 rad when writing to Modbus)
 float64 x         # X coordinate [m]
 float64 y         # Y coordinate [m]
 float64 yaw       # Yaw angle [rad]
-bool use_communication_pose  # true=40001-40006通讯位姿, false=40008-40013自主导航
+bool is_localization  # true=40001-40006通过位姿定位(仅定位不移动), false=40008-40013导航到位姿(移动)
 ---
 bool success
 string message

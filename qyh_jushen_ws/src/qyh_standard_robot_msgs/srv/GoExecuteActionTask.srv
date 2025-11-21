@@ -1,6 +1,6 @@
-# Navigate to site (40007 or 40015)
+# 通过站点定位或导航到站点 (40007通过站点定位 or 40015导航到站点)
 uint16 site_id
-bool use_communication_site  # true=40007通讯站点, false=40015自主导航到站点
+bool is_localization  # true=40007通过站点定位(仅定位不移动), false=40015导航到站点(移动)
 ---
 bool success
 string message
