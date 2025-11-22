@@ -1,0 +1,6 @@
+gripper_control_node:
+  ros__parameters:
+    device_port: "/dev/ttyUSB1"
+    baudrate: 115200
+    slave_id: 1
+    publish_rate: 20.0
