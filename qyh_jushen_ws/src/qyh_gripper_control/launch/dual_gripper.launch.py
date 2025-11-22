@@ -8,22 +8,26 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     """Launch both left and right gripper control nodes"""
     
-    gripper_launch = PathJoinSubstitution([
-        FindPackageShare('qyh_gripper_control'),
-        'launch',
-        'gripper_control.launch.py'
-    ])
-    
     # Left gripper
     left_gripper = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(gripper_launch),
-        launch_arguments={'side': 'left'}.items()
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('qyh_gripper_control'),
+                'launch',
+                'gripper_control_left.launch.py'
+            ])
+        ])
     )
     
     # Right gripper
     right_gripper = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(gripper_launch),
-        launch_arguments={'side': 'right'}.items()
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('qyh_gripper_control'),
+                'launch',
+                'gripper_control_right.launch.py'
+            ])
+        ])
     )
     
     return LaunchDescription([

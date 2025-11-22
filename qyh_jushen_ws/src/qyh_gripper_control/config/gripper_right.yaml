@@ -1,4 +1,4 @@
-gripper_control_node:
+/**:
   ros__parameters:
     device_port: "/dev/ttyUSB1"
     baudrate: 115200
