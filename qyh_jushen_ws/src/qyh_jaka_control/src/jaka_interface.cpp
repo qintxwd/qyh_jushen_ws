@@ -61,7 +61,7 @@ bool JakaInterface::powerOn()
     // Check if already powered
     RobotState state;
     ret = robot_->get_robot_state(&state);
-    if (ret == ERR_SUCC && state.powered_on) {
+    if (ret == ERR_SUCC && state.poweredOn) {
         RCLCPP_INFO(logger_, "Robot is already powered on");
         return true;
     }

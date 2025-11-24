@@ -59,15 +59,24 @@ public:
         declare_parameter<double>("cycle_time_ms", 8.0);  // 125Hz
         declare_parameter<bool>("use_cartesian", false);
         declare_parameter<bool>("auto_connect", true);
-        declare_parameter<bool>("auto_power_on", false);
-        declare_parameter<bool>("auto_enable", false);
+        declare_parameter<bool>("auto_initialize", false);
+        
+        // 初始化姿态参数
+        declare_parameter<std::vector<double>>("open_pose_joints", 
+            std::vector<double>{0.0, -0.5, 0.0, -1.57, 0.0, 1.07, 0.0,
+                                0.0, -0.5, 0.0, -1.57, 0.0, 1.07, 0.0});
+        declare_parameter<std::vector<double>>("home_pose_joints",
+            std::vector<double>{0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785,
+                                0.0, -0.785, 0.0, -2.356, 0.0, 1.571, -0.785});
+        declare_parameter<double>("init_joint_velocity", 0.5);
+        declare_parameter<double>("init_joint_acceleration", 0.3);
         
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
         use_cartesian_ = get_parameter("use_cartesian").as_bool();
         auto_connect_ = get_parameter("auto_connect").as_bool();
-        auto_power_on_ = get_parameter("auto_power_on").as_bool();
-        auto_enable_ = get_parameter("auto_enable").as_bool();
+        auto_power_on_ = false;  // 废弃，使用auto_initialize
+        auto_enable_ = false;     // 废弃，使用auto_initialize
 
         // 初始化VR坐标变换
         vr_to_robot_left_.setIdentity();
@@ -181,13 +190,15 @@ public:
                 connected_ = true;
                 RCLCPP_INFO(get_logger(), "✓ Connected to robot at %s", robot_ip_.c_str());
                 
-                if (auto_power_on_ && jaka_interface_.powerOn()) {
-                    powered_ = true;
-                    RCLCPP_INFO(get_logger(), "✓ Robot powered on");
+                // 自动初始化流程
+                bool auto_initialize = get_parameter("auto_initialize").as_bool();
+                if (auto_initialize) {
+                    RCLCPP_INFO(get_logger(), "Starting auto-initialization sequence...");
                     
-                    if (auto_enable_ && jaka_interface_.enableRobot()) {
-                        enabled_ = true;
-                        RCLCPP_INFO(get_logger(), "✓ Robot enabled");
+                    if (autoInitialize()) {
+                        RCLCPP_INFO(get_logger(), "✓ Auto-initialization completed successfully");
+                    } else {
+                        RCLCPP_ERROR(get_logger(), "✗ Auto-initialization failed");
                     }
                 }
             } else {
@@ -306,12 +317,14 @@ private:
         auto robot_state_msg = qyh_jaka_control_msgs::msg::RobotState();
         robot_state_msg.header.stamp = this->now();
         robot_state_msg.header.frame_id = "world";
+        robot_state_msg.connected = connected_;
+        robot_state_msg.robot_ip = robot_ip_;
 
         RobotState state;
         if (jaka_interface_.getRobotState(state)) {
             robot_state_msg.powered_on = state.poweredOn;
-            robot_state_msg.servo_enabled = state.servoEnabled;
-            robot_state_msg.estoped = state.estoped;
+            robot_state_msg.enabled = state.servoEnabled;
+            robot_state_msg.in_estop = state.estoped;
 
             int error[2] = {0, 0};
             jaka_interface_.isInError(error);
@@ -853,6 +866,70 @@ private:
         res->success = true;
         res->message = "VR calibration completed";
         RCLCPP_INFO(get_logger(), "✓ VR calibrated");
+    }
+
+    // ==================== 自动初始化流程 ====================
+    bool autoInitialize()
+    {
+        // 步骤1: 上电
+        RCLCPP_INFO(get_logger(), "[1/6] Powering on robot...");
+        if (!jaka_interface_.powerOn()) {
+            RCLCPP_ERROR(get_logger(), "Failed to power on robot");
+            return false;
+        }
+        powered_ = true;
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        RCLCPP_INFO(get_logger(), "✓ Robot powered on");
+
+        // 步骤2: 使能
+        RCLCPP_INFO(get_logger(), "[2/6] Enabling robot...");
+        if (!jaka_interface_.enableRobot()) {
+            RCLCPP_ERROR(get_logger(), "Failed to enable robot");
+            return false;
+        }
+        enabled_ = true;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        RCLCPP_INFO(get_logger(), "✓ Robot enabled");
+
+        // 步骤3: 移动到张开姿态
+        RCLCPP_INFO(get_logger(), "[3/6] Moving to open pose...");
+        auto open_pose = get_parameter("open_pose_joints").as_double_array();
+        double vel = get_parameter("init_joint_velocity").as_double();
+        double acc = get_parameter("init_joint_acceleration").as_double();
+        
+        if (!jaka_interface_.moveJ(-1, open_pose, false, vel, acc, true)) {
+            RCLCPP_ERROR(get_logger(), "Failed to move to open pose");
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        RCLCPP_INFO(get_logger(), "✓ Moved to open pose");
+
+        // 步骤4: 移动到初始位置
+        RCLCPP_INFO(get_logger(), "[4/6] Moving to home pose...");
+        auto home_pose = get_parameter("home_pose_joints").as_double_array();
+        
+        if (!jaka_interface_.moveJ(-1, home_pose, false, vel, acc, true)) {
+            RCLCPP_ERROR(get_logger(), "Failed to move to home pose");
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        RCLCPP_INFO(get_logger(), "✓ Moved to home pose");
+
+        // 步骤5: 启动伺服模式
+        RCLCPP_INFO(get_logger(), "[5/6] Starting servo mode...");
+        if (!jaka_interface_.servoMoveEnable(true, -1)) {
+            RCLCPP_ERROR(get_logger(), "Failed to start servo mode");
+            return false;
+        }
+        servo_running_ = true;
+        RCLCPP_INFO(get_logger(), "✓ Servo mode started");
+
+        // 步骤6: 启用VR跟随
+        RCLCPP_INFO(get_logger(), "[6/6] Enabling VR follow mode...");
+        vr_following_ = true;
+        RCLCPP_INFO(get_logger(), "✓ VR follow mode enabled");
+
+        return true;
     }
 
     // ==================== 点到点运动服务 ====================

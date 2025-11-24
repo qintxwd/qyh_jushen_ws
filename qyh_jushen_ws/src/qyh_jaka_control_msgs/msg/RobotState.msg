@@ -1,7 +1,9 @@
 std_msgs/Header header
+bool connected
+string robot_ip
 bool powered_on
-bool servo_enabled
-bool estoped
+bool enabled
+bool in_estop
 bool in_error
 bool left_in_position
 bool right_in_position

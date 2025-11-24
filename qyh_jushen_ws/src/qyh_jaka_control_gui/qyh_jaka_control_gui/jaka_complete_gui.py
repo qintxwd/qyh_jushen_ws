@@ -268,17 +268,15 @@ class JakaControlGUI(QMainWindow):
         conn_group = QGroupBox('● 连接状态')
         conn_layout = QGridLayout()
 
-        self.left_ip_label = QLabel('192.168.1.10')
-        self.right_ip_label = QLabel('192.168.1.11')
-        self.left_conn_status = QLabel('未连接')
-        self.right_conn_status = QLabel('未连接')
+        self.robot_ip_label = QLabel('192.168.2.200')
+        self.conn_status = QLabel('未连接')
+        self.conn_status.setStyleSheet('color: gray; font-weight: bold;')
 
-        conn_layout.addWidget(QLabel('左臂IP:'), 0, 0)
-        conn_layout.addWidget(self.left_ip_label, 0, 1)
-        conn_layout.addWidget(self.left_conn_status, 0, 2)
-        conn_layout.addWidget(QLabel('右臂IP:'), 1, 0)
-        conn_layout.addWidget(self.right_ip_label, 1, 1)
-        conn_layout.addWidget(self.right_conn_status, 1, 2)
+        conn_layout.addWidget(QLabel('控制器IP:'), 0, 0)
+        conn_layout.addWidget(self.robot_ip_label, 0, 1)
+        conn_layout.addWidget(QLabel('连接状态:'), 1, 0)
+        conn_layout.addWidget(self.conn_status, 1, 1)
+        conn_layout.addWidget(QLabel('说明: 双臂机器人共用一个控制器'), 2, 0, 1, 2)
 
         conn_group.setLayout(conn_layout)
         layout.addWidget(conn_group)
@@ -1045,9 +1043,12 @@ class JakaControlGUI(QMainWindow):
         self.robot_enabled_label.setText('已使能' if msg.servo_enabled else '未使能')
         self.robot_estop_label.setText('急停中' if msg.estoped else '正常')
         self.robot_error_label.setText('错误' if msg.in_error else '正常')
-        self.robot_left_inpos_label.setText('到位' if msg.left_in_position else '运动中')
-        self.robot_right_inpos_label.setText('到位' if msg.right_in_position else '运动中')
-        self.robot_error_msg_label.setText(msg.error_message if msg.error_message else '无')
+        self.robot_left_inpos_label.setText(
+            '到位' if msg.left_in_position else '运动中')
+        self.robot_right_inpos_label.setText(
+            '到位' if msg.right_in_position else '运动中')
+        self.robot_error_msg_label.setText(
+            msg.error_message if msg.error_message else '无')
 
         # 更新关节位置
         if len(msg.left_joint_positions) == 7:
