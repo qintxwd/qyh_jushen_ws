@@ -1,5 +1,7 @@
 #include "qyh_jaka_control/jaka_interface.hpp"
 #include <cstring>
+#include <chrono>
+#include <thread>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 
@@ -47,7 +49,24 @@ bool JakaInterface::disconnect()
 
 bool JakaInterface::powerOn()
 {
-    errno_t ret = robot_->power_on();
+    // Check if robot is in error state
+    int error[2] = {0, 0};
+    errno_t ret = robot_->robot_is_in_error(error);
+    if (ret == ERR_SUCC && (error[0] != 0 || error[1] != 0)) {
+        RCLCPP_WARN(logger_, "Robot in error state (left:%d, right:%d), clearing errors before power on", error[0], error[1]);
+        robot_->clear_error();
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
+    // Check if already powered
+    RobotState state;
+    ret = robot_->get_robot_state(&state);
+    if (ret == ERR_SUCC && state.powered_on) {
+        RCLCPP_INFO(logger_, "Robot is already powered on");
+        return true;
+    }
+
+    ret = robot_->power_on();
     return checkReturn(ret, "power_on");
 }
 
@@ -351,7 +370,24 @@ bool JakaInterface::checkReturn(errno_t ret, const std::string& operation)
         return true;
     }
     
-    RCLCPP_ERROR(logger_, "Operation '%s' failed with error code: %d", operation.c_str(), ret);
+    // Provide detailed error messages
+    std::string error_msg;
+    switch (ret) {
+        case -1: error_msg = "General error"; break;
+        case -2: error_msg = "Invalid parameter"; break;
+        case -3: error_msg = "Robot not ready or in error state"; break;
+        case -4: error_msg = "Communication error"; break;
+        case -5: error_msg = "Operation timeout"; break;
+        case -6: error_msg = "Robot is not powered on"; break;
+        case -7: error_msg = "Robot is not enabled"; break;
+        case -8: error_msg = "Motion in progress"; break;
+        case -9: error_msg = "Servo mode not enabled"; break;
+        case -10: error_msg = "Robot in emergency stop"; break;
+        default: error_msg = "Unknown error"; break;
+    }
+    
+    RCLCPP_ERROR(logger_, "Operation '%s' failed with error code: %d (%s)", 
+                 operation.c_str(), ret, error_msg.c_str());
     return false;
 }
 
