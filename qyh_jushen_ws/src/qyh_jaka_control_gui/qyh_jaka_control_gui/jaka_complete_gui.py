@@ -1040,8 +1040,8 @@ class JakaControlGUI(QMainWindow):
     def update_robot_state(self, msg):
         """更新机器人状态显示"""
         self.robot_powered_label.setText('已上电' if msg.powered_on else '未上电')
-        self.robot_enabled_label.setText('已使能' if msg.servo_enabled else '未使能')
-        self.robot_estop_label.setText('急停中' if msg.estoped else '正常')
+        self.robot_enabled_label.setText('已使能' if msg.enabled else '未使能')
+        self.robot_estop_label.setText('急停中' if msg.in_estop else '正常')
         self.robot_error_label.setText('错误' if msg.in_error else '正常')
         self.robot_left_inpos_label.setText(
             '到位' if msg.left_in_position else '运动中')
