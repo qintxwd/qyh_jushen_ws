@@ -18,13 +18,11 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(qyh_jaka_control_msgs REQUIRED)
 find_package(qyh_vr_calibration_msgs REQUIRED)
-find_package(Protobuf REQUIRED)
 
 # Include directories
 include_directories(
   include
   ./thirdparty/include
-  ${Protobuf_INCLUDE_DIRS}
 )
 
 # Resolve JAKA API shared library
@@ -43,7 +41,6 @@ ament_target_dependencies(jaka_interface
 )
 target_link_libraries(jaka_interface
   ${JAKA_API_LIB}
-  ${Protobuf_LIBRARIES}
 )
 
 # Main control node (unified: basic + servo + VR)
@@ -61,7 +58,6 @@ ament_target_dependencies(jaka_control_node
 target_link_libraries(jaka_control_node
   jaka_interface
   ${JAKA_API_LIB}
-  ${Protobuf_LIBRARIES}
 )
 
 install(TARGETS jaka_interface

@@ -29,6 +29,8 @@ add_library(${PROJECT_NAME}_node SHARED
   src/standard_robot_node.cpp
 )
 
+target_link_directories(${PROJECT_NAME}_node PRIVATE thirdparty/lib/linux)
+
 target_compile_features(${PROJECT_NAME}_node PUBLIC c_std_99 cxx_std_17)
 
 ament_target_dependencies(${PROJECT_NAME}_node
@@ -49,7 +51,7 @@ rclcpp_components_register_nodes(${PROJECT_NAME}_node "qyh_standard_robot::Stand
 add_executable(${PROJECT_NAME}_node_exe
   src/standard_robot_node_main.cpp
 )
-
+target_link_directories(${PROJECT_NAME}_node_exe PRIVATE thirdparty/lib/linux)
 target_compile_features(${PROJECT_NAME}_node_exe PUBLIC c_std_99 cxx_std_17)
 
 ament_target_dependencies(${PROJECT_NAME}_node_exe
