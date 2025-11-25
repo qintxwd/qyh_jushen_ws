@@ -608,14 +608,14 @@ public:
 	/**
 	 * @brief 获取机器人安装位置
 	 * @param robot_id 机器人ID 接受LEFT(0) RIGHT(1)
-	 * @param base_offset 机器人基座标相对于世界坐标的变换，姿态按照ZYX欧拉角描述,单位mm和rad
+	 * @param base_offset 安装位置偏移量，笛卡尔空间位置和姿态,单位mm和rad
 	 * @return ERR_SUCC 成功 其他失败
 	 */
     errno_t robot_get_default_base(int robot_id, CartesianPose* base_offset);
 
 	/**
-	 * @brief 设置机器人安装位置,
-	 * @param install_offset 机器人基座标相对于世界坐标的变换，姿态按照ZYX欧拉角描述，单位mm和rad
+	 * @brief 设置机器人安装位置
+	 * @param install_offset 安装位置偏移量，笛卡尔空间位置和姿态,单位mm和rad
 	 * @param robot_id 机器人ID 接受LEFT(0) RIGHT(1)
 	 * @return ERR_SUCC 成功 其他失败
 	 * @note 该接口设置的安装角度会影响到机器人末端工具坐标系的计算

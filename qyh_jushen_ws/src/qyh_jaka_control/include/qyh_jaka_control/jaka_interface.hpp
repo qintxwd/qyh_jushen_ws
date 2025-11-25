@@ -46,8 +46,8 @@ public:
     bool setFilterCarteNLF(double max_vp, double max_ap, double max_jp,
                            double max_vr, double max_ar, double max_jr);
 
-    // EtherCAT同步模式
-    bool edgRecv(struct timespec *next = nullptr);
+    // EtherCAT同步模式 (SDK 2.3.0.13+)
+    // Note: edg_recv() is deprecated in SDK 2.3.0.12+
     bool edgSend();
     bool edgGetStat(int robot_id, JointValue& joint_pos, CartesianPose& cartesian_pose);
     bool edgServoJ(int robot_id, const JointValue& joint_pos, bool is_abs);

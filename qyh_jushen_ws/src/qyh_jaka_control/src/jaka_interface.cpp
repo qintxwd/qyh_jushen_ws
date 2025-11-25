@@ -180,11 +180,8 @@ bool JakaInterface::setFilterCarteNLF(double max_vp, double max_ap, double max_j
     return checkReturn(ret, "servo_move_use_carte_NLF");
 }
 
-bool JakaInterface::edgRecv(struct timespec *next)
-{
-    errno_t ret = robot_->edg_recv(next);
-    return checkReturn(ret, "edg_recv");
-}
+// Note: edg_recv() is deprecated in SDK 2.3.0.12+
+// edg_get_stat() no longer depends on edg_recv()
 
 bool JakaInterface::edgSend()
 {

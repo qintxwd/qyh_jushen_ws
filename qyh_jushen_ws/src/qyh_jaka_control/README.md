@@ -2,6 +2,18 @@
 
 本功能包提供了JAKA双臂机器人系统的核心控制节点。它负责与机器人控制器通信，提供ROS 2控制接口，并集成了VR遥操作和数据录制功能。
 
+## SDK 版本
+
+- **JAKA SDK**: 2.3.0.13 (NVIDIA Jetson 优化版)
+- **更新日期**: 2025-07-18
+- **库文件**: `thirdparty/lib/libjakaAPI_2_3_0_13.so`
+- **主要特性**:
+  - 支持末端传感器扭矩反馈 (edg_get_stat)
+  - 支持读写双臂安装位置
+  - 废弃 edg_recv 接口，edg_get_stat 已脱离依赖
+  - 多线程安全优化
+  - edg优先级提升至98，绑定到CPU10
+
 ## 核心节点: jaka_control_node
 
 ### 功能描述

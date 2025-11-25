@@ -25,8 +25,8 @@ include_directories(
   ./thirdparty/include
 )
 
-# Resolve JAKA API shared library
-set(JAKA_API_LIB "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/lib/libjakaAPI_2_3_3.so")
+# Resolve JAKA API shared library (Jetson ARM64 version)
+set(JAKA_API_LIB "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/lib/libjakaAPI_2_3_0_13.so")
 if(NOT EXISTS ${JAKA_API_LIB})
   message(FATAL_ERROR "JAKA API shared library not found at ${JAKA_API_LIB}. Please verify thirdparty/lib contents.")
 endif()
