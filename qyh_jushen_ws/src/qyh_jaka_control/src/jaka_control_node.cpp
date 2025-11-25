@@ -332,48 +332,55 @@ private:
             robot_state_msg.enabled = state.servoEnabled;
             robot_state_msg.in_estop = state.estoped;
 
-            int error[2] = {0, 0};
-            jaka_interface_.isInError(error);
-            robot_state_msg.in_error = (error[0] || error[1]);
-
-            int inpos[2] = {0, 0};
-            jaka_interface_.isInPosition(inpos);
-            robot_state_msg.left_in_position = inpos[0];
-            robot_state_msg.right_in_position = inpos[1];
-
-            // 获取关节位置
-            JointValue left_joint, right_joint;
-            std::array<double, 7> left_joint_positions{};
-            std::array<double, 7> right_joint_positions{};
-
-            if (jaka_interface_.getJointPositions(0, left_joint)) {
-                for (size_t i = 0; i < left_joint_positions.size(); ++i) {
-                    left_joint_positions[i] = left_joint.jVal[i];
+            // Only query detailed status if powered on
+            if (state.poweredOn) {
+                int error[2] = {0, 0};
+                // Try to get error state
+                if (jaka_interface_.isInError(error)) {
+                    robot_state_msg.in_error = (error[0] || error[1]);
                 }
-            }
-            if (jaka_interface_.getJointPositions(1, right_joint)) {
-                for (size_t i = 0; i < right_joint_positions.size(); ++i) {
-                    right_joint_positions[i] = right_joint.jVal[i];
-                }
-            }
 
-            robot_state_msg.left_joint_positions = left_joint_positions;
-            robot_state_msg.right_joint_positions = right_joint_positions;
+                // Only query pose if not in error (to avoid SDK errors)
+                if (!robot_state_msg.in_error) {
+                    int inpos[2] = {0, 0};
+                    if (jaka_interface_.isInPosition(inpos)) {
+                        robot_state_msg.left_in_position = inpos[0];
+                        robot_state_msg.right_in_position = inpos[1];
+                    }
 
-            // 获取笛卡尔位姿
-            CartesianPose left_pose, right_pose;
-            if (jaka_interface_.getCartesianPose(0, left_pose)) {
-                robot_state_msg.left_cartesian_pose = jaka_interface_.jakaPoseToRos(left_pose);
-            }
-            if (jaka_interface_.getCartesianPose(1, right_pose)) {
-                robot_state_msg.right_cartesian_pose = jaka_interface_.jakaPoseToRos(right_pose);
-            }
+                    // 获取关节位置
+                    JointValue left_joint, right_joint;
+                    std::array<double, 7> left_joint_positions{};
+                    std::array<double, 7> right_joint_positions{};
 
-            // 错误信息
-            if (robot_state_msg.in_error) {
-                ErrorCode error_code;
-                if (jaka_interface_.getLastError(error_code)) {
-                    robot_state_msg.error_message = error_code.message;
+                    if (jaka_interface_.getJointPositions(0, left_joint)) {
+                        for (size_t i = 0; i < left_joint_positions.size(); ++i) {
+                            left_joint_positions[i] = left_joint.jVal[i];
+                        }
+                    }
+                    if (jaka_interface_.getJointPositions(1, right_joint)) {
+                        for (size_t i = 0; i < right_joint_positions.size(); ++i) {
+                            right_joint_positions[i] = right_joint.jVal[i];
+                        }
+                    }
+
+                    robot_state_msg.left_joint_positions = left_joint_positions;
+                    robot_state_msg.right_joint_positions = right_joint_positions;
+
+                    // 获取笛卡尔位姿
+                    CartesianPose left_pose, right_pose;
+                    if (jaka_interface_.getCartesianPose(0, left_pose)) {
+                        robot_state_msg.left_cartesian_pose = jaka_interface_.jakaPoseToRos(left_pose);
+                    }
+                    if (jaka_interface_.getCartesianPose(1, right_pose)) {
+                        robot_state_msg.right_cartesian_pose = jaka_interface_.jakaPoseToRos(right_pose);
+                    }
+                } else {
+                    // 错误信息
+                    ErrorCode error_code;
+                    if (jaka_interface_.getLastError(error_code)) {
+                        robot_state_msg.error_message = error_code.message;
+                    }
                 }
             }
         }
