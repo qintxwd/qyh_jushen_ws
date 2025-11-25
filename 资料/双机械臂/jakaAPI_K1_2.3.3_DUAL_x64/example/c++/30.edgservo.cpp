@@ -257,39 +257,39 @@ int main()
     JAKAZuRobot robot;
     
     robot.login_in("192.168.2.200");
-    for(int i = 0; i < 100; i++)
-    {
-        robot.clear_error();
-        auto start = std::chrono::system_clock::now();
-    robot.power_on();
-    auto power_done = std::chrono::system_clock::now();
-    robot.enable_robot();
-    auto enable_done = std::chrono::system_clock::now();
-    // system_clock转时分秒
-    std::time_t power_time = std::chrono::system_clock::to_time_t(power_done);
-    std::time_t enable_time = std::chrono::system_clock::to_time_t(enable_done);
-    std::cout << "power on time: " << std::ctime(&power_time);
-    std::cout << "enable robot time: " << std::ctime(&enable_time);
+//     for(int i = 0; i < 100; i++)
+//     {
+//         robot.clear_error();
+//         auto start = std::chrono::system_clock::now();
+//     robot.power_on();
+//     auto power_done = std::chrono::system_clock::now();
+//     robot.enable_robot();
+//     auto enable_done = std::chrono::system_clock::now();
+//     // system_clock转时分秒
+//     std::time_t power_time = std::chrono::system_clock::to_time_t(power_done);
+//     std::time_t enable_time = std::chrono::system_clock::to_time_t(enable_done);
+//     std::cout << "power on time: " << std::ctime(&power_time);
+//     std::cout << "enable robot time: " << std::ctime(&enable_time);
 
-    robot.motion_abort();
-    std::cout << "Test " << i << std::endl;
-    std::cout <<"[" << std::ctime(&power_time)  << "]power on time: " << std::chrono::duration_cast<std::chrono::milliseconds>(power_done - start).count() << " ms" << std::endl;
-    std::cout <<"[" << std::ctime(&enable_time) << "]enable robot time: " << std::chrono::duration_cast<std::chrono::milliseconds>(enable_done - power_done).count() << " ms" << std::endl;
+//     robot.motion_abort();
+//     std::cout << "Test " << i << std::endl;
+//     std::cout <<"[" << std::ctime(&power_time)  << "]power on time: " << std::chrono::duration_cast<std::chrono::milliseconds>(power_done - start).count() << " ms" << std::endl;
+//     std::cout <<"[" << std::ctime(&enable_time) << "]enable robot time: " << std::chrono::duration_cast<std::chrono::milliseconds>(enable_done - power_done).count() << " ms" << std::endl;
     
-    robot.servo_move_enable(0, -1); //关闭所有机器人的伺服模式
-    robot.servo_move_use_none_filter();
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-    robot.disable_robot();
-    robot.power_off();
-    std::this_thread::sleep_for(std::chrono::seconds(3));
-}
-    return 0;
+//     robot.servo_move_enable(0, -1); //关闭所有机器人的伺服模式
+//     robot.servo_move_use_none_filter();
+//     std::this_thread::sleep_for(std::chrono::seconds(2));
+//     robot.disable_robot();
+//     robot.power_off();
+//     std::this_thread::sleep_for(std::chrono::seconds(3));
+// }
+//     return 0;
     
-    // 测试获取机器人状态
-    test_edg_stat(robot);
+    // // 测试获取机器人状态
+    // test_edg_stat(robot);
     
     // 测试关节伺服，注意CAN双臂CONTROL_LOOP_MS宏为8,ECAT双臂为1
-    // servoj_test(robot);
+    servoj_test(robot);
     
     // 测试笛卡尔伺服，注意CAN双臂CONTROL_LOOP_MS宏为8,ECAT双臂为1
     // servop_test(robot);

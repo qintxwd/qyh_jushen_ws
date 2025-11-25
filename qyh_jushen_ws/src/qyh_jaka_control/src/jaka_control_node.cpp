@@ -262,6 +262,9 @@ private:
                 std::vector<double> positions(last_joint_cmd_->positions.begin(), 
                                              last_joint_cmd_->positions.end());
                 jaka_interface_.servoJ(-1, positions, last_joint_cmd_->is_abs);
+                
+                // Send command to robot (CRITICAL!)
+                jaka_interface_.edgSend();
             }
             else if (last_cartesian_cmd_) {
                 // 笛卡尔控制（待实现双臂分别控制）
@@ -298,6 +301,9 @@ private:
         // 发送伺服指令（笛卡尔空间）
         jaka_interface_.servoP(0, left_target, true);   // 左臂
         jaka_interface_.servoP(1, right_target, true);  // 右臂
+        
+        // Send all commands at once (CRITICAL!)
+        jaka_interface_.edgSend();
     }
 
     void publishStatus()

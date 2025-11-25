@@ -130,13 +130,15 @@ bool JakaInterface::servoJ(int robot_id, const std::vector<double>& joint_positi
         jpos[1].jVal[i] = joint_positions[i + 7];
     }
 
-    // Send to Left (0)
+    // Prepare servo commands for both arms
     errno_t ret = robot_->edg_servo_j(0, &jpos[0], is_abs ? MoveMode::ABS : MoveMode::INCR);
     if (ret != ERR_SUCC) return checkReturn(ret, "servo_j left");
 
-    // Send to Right (1)
     ret = robot_->edg_servo_j(1, &jpos[1], is_abs ? MoveMode::ABS : MoveMode::INCR);
-    return checkReturn(ret, "servo_j right");
+    if (ret != ERR_SUCC) return checkReturn(ret, "servo_j right");
+
+    // NOTE: Caller must call edgSend() to actually send commands
+    return true;
 }
 
 bool JakaInterface::servoP(int robot_id, const geometry_msgs::msg::Pose& pose, bool is_abs)
@@ -148,6 +150,8 @@ bool JakaInterface::servoP(int robot_id, const geometry_msgs::msg::Pose& pose, b
 
     CartesianPose jaka_pose = rosPoseToJaka(pose);
     errno_t ret = robot_->edg_servo_p((unsigned char)robot_id, &jaka_pose, is_abs ? MoveMode::ABS : MoveMode::INCR);
+    
+    // NOTE: Caller must call edgSend() to actually send commands
     return checkReturn(ret, "servo_p");
 }
 

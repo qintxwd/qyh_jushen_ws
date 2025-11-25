@@ -161,6 +161,7 @@ class JakaControlGUI(QMainWindow):
         self.servo_testing = False
         self.test_timer = None
         self.test_counter = 0
+        self.at_initial_position = False  # 是否已到达初始位置
 
         self.add_log("JAKA双臂机器人控制系统已启动", "info")
 
@@ -535,8 +536,31 @@ class JakaControlGUI(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
+        # 初始位置准备组
+        init_group = QGroupBox('● 步骤1: 移动到初始位置')
+        init_layout = QGridLayout()
+
+        self.btn_move_to_init = QPushButton('移动到初始位置')
+        self.btn_move_to_init.setObjectName("infoButton")
+        self.btn_move_to_init.clicked.connect(self.move_to_initial_position)
+        self.btn_move_to_init.setEnabled(False)
+
+        self.init_position_label = QLabel('未到位')
+        self.init_position_label.setStyleSheet(
+            'color: gray; font-weight: bold;')
+
+        init_layout.addWidget(QLabel('位置状态:'), 0, 0)
+        init_layout.addWidget(self.init_position_label, 0, 1, 1, 2)
+        init_layout.addWidget(self.btn_move_to_init, 1, 0, 1, 3)
+        init_layout.addWidget(
+            QLabel('说明: 在普通模式下移动到零位 [0,0,...,0]'),
+            2, 0, 1, 3)
+
+        init_group.setLayout(init_layout)
+        layout.addWidget(init_group)
+
         # 伺服控制组
-        servo_group = QGroupBox('● 伺服模式控制')
+        servo_group = QGroupBox('● 步骤2: 启动伺服模式')
         servo_layout = QGridLayout()
 
         self.btn_start_servo = QPushButton('启动伺服模式')
@@ -554,12 +578,13 @@ class JakaControlGUI(QMainWindow):
         servo_layout.addWidget(self.servo_status_label, 0, 1, 1, 2)
         servo_layout.addWidget(self.btn_start_servo, 1, 0)
         servo_layout.addWidget(self.btn_stop_servo, 1, 1)
+        servo_layout.addWidget(QLabel('说明: 到达初始位置后启动伺服模式'), 2, 0, 1, 3)
 
         servo_group.setLayout(servo_layout)
         layout.addWidget(servo_group)
 
         # 伺服测试组
-        test_group = QGroupBox('● 伺服运动测试')
+        test_group = QGroupBox('● 步骤3: 伺服运动测试')
         test_layout = QGridLayout()
 
         self.btn_test_servo = QPushButton('开始测试')
@@ -574,7 +599,9 @@ class JakaControlGUI(QMainWindow):
         test_layout.addWidget(self.test_status_label, 0, 1)
         test_layout.addWidget(self.test_progress_label, 0, 2)
         test_layout.addWidget(self.btn_test_servo, 1, 0, 1, 3)
-        test_layout.addWidget(QLabel('说明: 执行慢速正弦波关节运动测试'), 2, 0, 1, 3)
+        test_layout.addWidget(
+            QLabel('说明: 执行慢速正弦波关节运动测试 (关节0,1,3)'),
+            2, 0, 1, 3)
 
         test_group.setLayout(test_layout)
         layout.addWidget(test_group)
@@ -817,15 +844,18 @@ class JakaControlGUI(QMainWindow):
     def on_enable(self, response):
         if response.success:
             self.enabled = True
+            self.enable_status_label.setText('已使能 ✓')
+            self.enable_status_label.setStyleSheet(
+                'color: green; font-weight: bold;')
             self.btn_enable.setEnabled(False)
             self.btn_disable.setEnabled(True)
-            self.btn_start_servo.setEnabled(True)
+            self.btn_move_to_init.setEnabled(True)
             self.btn_move_j.setEnabled(True)
             self.btn_move_l.setEnabled(True)
-            self.enable_status_label.setText('已使能')
-            self.add_log("机器人使能成功", "success")
+            self.add_log("机器人已使能，请先移动到初始位置", "success")
         else:
             self.add_log(f"使能失败: {response.message}", "error")
+            self.btn_enable.setEnabled(True)
 
     def disable_robot(self):
         req = Trigger.Request()
@@ -838,16 +868,25 @@ class JakaControlGUI(QMainWindow):
         if response.success:
             self.enabled = False
             self.servo_running = False
+            self.at_initial_position = False
+            self.enable_status_label.setText('未使能')
+            self.enable_status_label.setStyleSheet(
+                'color: gray; font-weight: bold;')
+            self.init_position_label.setText('未到位')
+            self.init_position_label.setStyleSheet(
+                'color: gray; font-weight: bold;')
             self.btn_enable.setEnabled(True)
             self.btn_disable.setEnabled(False)
+            self.btn_move_to_init.setEnabled(False)
             self.btn_start_servo.setEnabled(False)
             self.btn_stop_servo.setEnabled(False)
             self.btn_move_j.setEnabled(False)
             self.btn_move_l.setEnabled(False)
-            self.enable_status_label.setText('未使能')
-            self.add_log("机器人去使能成功", "info")
+            self.btn_enable_vr.setEnabled(False)
+            self.add_log("机器人已去使能", "info")
         else:
             self.add_log(f"去使能失败: {response.message}", "error")
+            self.btn_disable.setEnabled(True)
 
     def clear_error(self):
         req = Trigger.Request()
@@ -876,6 +915,54 @@ class JakaControlGUI(QMainWindow):
         else:
             self.add_log(f"急停失败: {response.message}", "error")
 
+    # ========== 初始位置移动 ==========
+    def move_to_initial_position(self):
+        """移动到初始位置（零位）"""
+        if not self.enabled:
+            self.add_log("请先使能机器人", "warning")
+            return
+        
+        if self.servo_running:
+            self.add_log("请先停止伺服模式", "warning")
+            return
+        
+        self.add_log("开始移动到初始位置 [0,0,0,...,0]", "info")
+        self.btn_move_to_init.setEnabled(False)
+        
+        # 构造MoveJ请求
+        request = MoveJ.Request()
+        request.robot_id = -1  # 双臂
+        request.joint_positions = [0.0] * 14  # 14个关节全部归零
+        request.velocity = 0.5  # 较慢速度
+        request.acceleration = 0.3
+        request.move_mode = False  # False=ABS, True=INCR
+        request.is_block = True
+        
+        future = self.ros_node.call_service_async(
+            self.ros_node.cli_move_j, request)
+        future.add_done_callback(self.on_initial_position_reached)
+    
+    def on_initial_position_reached(self, future):
+        """初始位置到达回调"""
+        try:
+            response = future.result()
+            if response.success:
+                self.at_initial_position = True
+                self.init_position_label.setText('已到位 ✓')
+                self.init_position_label.setStyleSheet(
+                    'color: green; font-weight: bold;')
+                self.add_log(
+                    "已到达初始位置，可以启动伺服模式", "success")
+                # 启用伺服模式按钮
+                if self.enabled and not self.servo_running:
+                    self.btn_start_servo.setEnabled(True)
+            else:
+                self.add_log(f"移动到初始位置失败: {response.message}", "error")
+                self.btn_move_to_init.setEnabled(True)
+        except Exception as e:
+            self.add_log(f"移动到初始位置异常: {str(e)}", "error")
+            self.btn_move_to_init.setEnabled(True)
+
     # ========== 伺服模式控制 ==========
     def start_servo(self):
         req = StartServo.Request()
@@ -887,14 +974,20 @@ class JakaControlGUI(QMainWindow):
     def on_servo_started(self, response):
         if response.success:
             self.servo_running = True
+            self.servo_status_label.setText('伺服运行中 ✓')
+            self.servo_status_label.setStyleSheet(
+                'color: green; font-weight: bold;')
             self.btn_start_servo.setEnabled(False)
             self.btn_stop_servo.setEnabled(True)
             self.btn_enable_vr.setEnabled(True)
             self.btn_test_servo.setEnabled(True)
-            self.servo_status_label.setText('已启动')
-            self.add_log("伺服模式已启动", "success")
+            self.btn_move_to_init.setEnabled(False)
+            self.add_log("伺服模式已启动，可以开始测试", "success")
         else:
-            self.add_log(f"启动伺服模式失败: {response.message}", "error")
+            self.add_log(
+                f"启动伺服模式失败: {response.message}", "error")
+            if self.at_initial_position:
+                self.btn_start_servo.setEnabled(True)
 
     def stop_servo(self):
         req = StopServo.Request()
@@ -954,15 +1047,15 @@ class JakaControlGUI(QMainWindow):
         if not self.servo_testing:
             return
 
-        # 时间系数（降低频率使运动更慢更安全）
+        # 时间系数（与SDK示例一致）
         t = self.test_counter / 10000.0
-        k = 0.5  # 降低频率系数（原SDK示例为3）
+        k = 20.0  # 频率系数（SDK示例为35，这里用20更安全平滑）
         
-        # 安全的小幅度正弦波运动（角度单位：度）
+        # 正弦波运动（角度单位：度）
         import math
-        joint_0 = math.sin(k * t) * 10.0  # 降低幅度到10度（原为30度）
-        joint_1 = -math.cos(k * t) * 8.0 + 8.0  # 降低幅度（原为20度）
-        joint_3 = -math.cos(k * t) * 5.0 + 5.0  # 降低幅度（原为10度）
+        joint_0 = math.sin(k * t) * 15.0  # 幅度15度（SDK为30度）
+        joint_1 = -math.cos(k * t) * 12.0 + 12.0  # 幅度12度（SDK为20度）
+        joint_3 = -math.cos(k * t) * 8.0 + 8.0  # 幅度8度（SDK为10度）
 
         # 转换为弧度
         joint_0_rad = math.radians(joint_0)
