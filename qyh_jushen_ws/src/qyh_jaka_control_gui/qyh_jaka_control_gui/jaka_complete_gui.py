@@ -1062,12 +1062,29 @@ class JakaControlGUI(QMainWindow):
         joint_1_rad = math.radians(joint_1)
         joint_3_rad = math.radians(joint_3)
 
-        # 发布关节伺服指令（只控制左臂的前3个关节）
+        # 发布关节伺服指令
+        # 双臂对称运动规则：
+        # - 关节 0(基座), 1, 3, 5, 6: 左右相反（镜像）
+        # - 关节 2, 4: 左右相同
         msg = JakaDualJointServo()
         # positions: 14个关节 [左臂7个, 右臂7个]
         msg.positions = [
-            joint_0_rad, joint_1_rad, 0.0, joint_3_rad, 0.0, 0.0, 0.0,  # 左臂
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  # 右臂保持不动
+            # 左臂 (关节0-6)
+            joint_0_rad,   # 左臂关节0
+            joint_1_rad,   # 左臂关节1
+            0.0,           # 左臂关节2 (不动)
+            joint_3_rad,   # 左臂关节3
+            0.0,           # 左臂关节4 (不动)
+            0.0,           # 左臂关节5 (不动)
+            0.0,           # 左臂关节6 (不动)
+            # 右臂 (关节7-13) - 对称运动
+            -joint_0_rad,  # 右臂关节0 (相反)
+            joint_1_rad,   # 右臂关节1 (相反) 
+            0.0,           # 右臂关节2 (不动)
+            -joint_3_rad,  # 右臂关节3 (相反)
+            0.0,           # 右臂关节4 (不动)
+            0.0,           # 右臂关节5 (不动)
+            0.0,           # 右臂关节6 (不动)
         ]
         msg.is_abs = True
         msg.velocity = 1.0
