@@ -1,0 +1,33 @@
+# 头部舵机控制参数配置
+
+head_servo_node:
+  ros__parameters:
+    # 串口配置
+    serial_port: "/dev/ttyTHS1"  # Jetson Nano默认串口
+    baudrate: 115200
+    
+    # 舵机ID配置
+    pan_servo_id: 1    # 左右转动舵机ID
+    tilt_servo_id: 2   # 上下转动舵机ID
+    
+    # 更新频率 (Hz)
+    update_rate: 20.0
+    
+    # 默认运动时间 (ms)
+    default_duration: 100
+    
+    # Pan舵机范围限制 (0-1000)
+    pan_min_position: 100      # 最左位置
+    pan_max_position: 900      # 最右位置
+    pan_center_position: 500   # 中位
+    
+    # Tilt舵机范围限制 (0-1000)
+    tilt_min_position: 200     # 最下位置
+    tilt_max_position: 800     # 最上位置
+    tilt_center_position: 500  # 中位
+    
+    # 安全参数
+    voltage_min: 6000          # 最低电压 (mV)
+    voltage_max: 12000         # 最高电压 (mV)
+    temp_max: 65               # 最高温度 (℃)
+    enable_safety_check: true  # 是否启用安全检查
