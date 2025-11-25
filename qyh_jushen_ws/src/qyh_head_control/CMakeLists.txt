@@ -19,6 +19,7 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   qyh_head_control/head_servo_node.py
+  qyh_head_control/set_servo_id.py
   scripts/test_head_servo.py
   DESTINATION lib/${PROJECT_NAME}
 )

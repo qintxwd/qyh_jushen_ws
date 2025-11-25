@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'head_servo_node = qyh_head_control.head_servo_node:main',
+            'set_servo_id = qyh_head_control.set_servo_id:main',
             'test_head_servo = scripts.test_head_servo:main',
         ],
     },

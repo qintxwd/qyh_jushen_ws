@@ -36,16 +36,39 @@ pip3 install pyserial
 
 **重要**: 使用前必须为两个舵机设置不同的ID！
 
+HTD-85H舵机出厂默认ID都是1，必须修改其中一个为ID=2。
+
+### 方法一：交互式设置（推荐）
+
 ```bash
-# 1. 单独连接第一个舵机（左右转动）
+# 1. 只连接第一个舵机（Pan - 左右转动）
+ros2 run qyh_head_control set_servo_id
+# 选择选项1，设置为ID=1
+
+# 2. 断开第一个，只连接第二个舵机（Tilt - 上下转动）
+ros2 run qyh_head_control set_servo_id
+# 选择选项2，设置为ID=2
+
+# 3. 同时连接两个舵机，验证
+ros2 run qyh_head_control set_servo_id
+# 应该看到ID=1和ID=2两个舵机
+```
+
+### 方法二：使用Launch文件
+
+```bash
+# 只连接要设置为ID=2的舵机（Tilt - 上下转动）
+ros2 launch qyh_head_control set_servo_id.launch.py old_id:=1 new_id:=2
+```
+
+### 方法三：使用原始SDK工具
+
+```bash
 cd ~/qyh_jushen_ws/资料/头部电机/06\ Jetson\ Nano版本/程序文件/案例2\ 总线舵机ID设置/
 python3 set_serial_servo_status.py
-# 设置为 ID=1
-
-# 2. 断开第一个舵机，连接第二个舵机（上下转动）
-python3 set_serial_servo_status.py
-# 设置为 ID=2
 ```
+
+**详细说明**: 参见 [SERVO_ID_SETUP.md](SERVO_ID_SETUP.md)
 
 ## 编译
 
