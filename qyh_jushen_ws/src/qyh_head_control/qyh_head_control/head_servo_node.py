@@ -15,17 +15,20 @@ import sys
 import os
 
 # 添加 SDK 路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sdk_path = os.path.join(current_dir, 'sdk')
-if sdk_path not in sys.path:
-    sys.path.insert(0, sdk_path)
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# sdk_path = os.path.join(current_dir, 'sdk')
+# if sdk_path not in sys.path:
+#     sys.path.insert(0, sdk_path)
 
 try:
-    from sdk.hiwonder_servo_controller import HiwonderServoController
-except ImportError as e:
-    print(f"错误：无法导入SDK库: {e}")
-    print(f"SDK路径: {sdk_path}")
-    sys.exit(1)
+    from qyh_head_control.sdk.hiwonder_servo_controller import HiwonderServoController
+except ImportError:
+    try:
+        # Fallback for local testing or if structure is different
+        from sdk.hiwonder_servo_controller import HiwonderServoController
+    except ImportError as e:
+        print(f"错误：无法导入SDK库: {e}")
+        sys.exit(1)
 
 
 class HeadServoController(Node):
