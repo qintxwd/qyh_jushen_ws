@@ -1,0 +1,23 @@
+# 版本记录
+## 2.3.2~2.3.3(2025-08-31)
+- 修复edg_stat_free_key接口对于ZY老版本控制器的兼容性问题
+
+## 2.3.1(2025-07-31)
+- edg_send增加可选的cmd_index，用以配合ZY版本的edg数据诊断
+- 修改版本号规则为3位
+
+## 2.3.0.13(2025-07-18)
+- 特性:edg_get_stat接口增加末端传感器扭矩反馈。注意：需要搭配3.0.6_robohub7及其以上版本使用
+- 特性:支持读写双臂安装位置robot_get_default_base和robot_set_default_base。注意：需要搭配3.0.6_robohub7及其以上版本使用
+- 测试特性:robot_run_multi_movj支持tol转接参数。注意：需要搭配3.0.6_robohub7及其以上版本使用
+- 测试特性:robot_run_multi_movl支持tol转接参数。注意：需要搭配3.0.6_robohub7及其以上版本使用
+
+## 2.3.0.12(2025-07-09)
+- 修改edg_get_stat接口，脱离对edg_recv的依赖
+- edg读写接口多线程安全优化
+- 废弃edg_recv接口
+- 隔离外部依赖库符号
+- edg优先级改为98,并绑定到cpu10
+
+# old
+- 继承自主线版本22785d1927639f0992a947aeb51e1e3b3470b7ad,版本号2.3.0.11
