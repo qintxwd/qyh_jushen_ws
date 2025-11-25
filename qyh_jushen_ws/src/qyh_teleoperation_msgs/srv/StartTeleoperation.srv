@@ -1,0 +1,6 @@
+# Request
+bool enable_tracking
+---
+# Response
+bool success
+string message

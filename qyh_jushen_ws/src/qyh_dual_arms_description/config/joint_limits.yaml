@@ -1,0 +1,129 @@
+# JAKA Zu7 关节限制配置
+# 用于MoveIt和轨迹规划
+
+joint_limits:
+  left_joint1:
+    has_position_limits: true
+    min_position: -3.05
+    max_position: 3.05
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5  # 保守值，用于轨迹平滑
+  
+  left_joint2:
+    has_position_limits: true
+    min_position: -2.09
+    max_position: 2.09
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  left_joint3:
+    has_position_limits: true
+    min_position: -3.05
+    max_position: 3.05
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  left_joint4:
+    has_position_limits: true
+    min_position: -2.09
+    max_position: 2.09
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  left_joint5:
+    has_position_limits: true
+    min_position: -3.05
+    max_position: 3.05
+    has_velocity_limits: true
+    max_velocity: 3.32
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  left_joint6:
+    has_position_limits: true
+    min_position: -2.09
+    max_position: 2.09
+    has_velocity_limits: true
+    max_velocity: 3.32
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  left_joint7:
+    has_position_limits: true
+    min_position: -6.28
+    max_position: 6.28
+    has_velocity_limits: true
+    max_velocity: 3.32
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint1:
+    has_position_limits: true
+    min_position: -3.05
+    max_position: 3.05
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint2:
+    has_position_limits: true
+    min_position: -2.09
+    max_position: 2.09
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint3:
+    has_position_limits: true
+    min_position: -3.05
+    max_position: 3.05
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint4:
+    has_position_limits: true
+    min_position: -2.09
+    max_position: 2.09
+    has_velocity_limits: true
+    max_velocity: 2.79
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint5:
+    has_position_limits: true
+    min_position: -3.05
+    max_position: 3.05
+    has_velocity_limits: true
+    max_velocity: 3.32
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint6:
+    has_position_limits: true
+    min_position: -2.09
+    max_position: 2.09
+    has_velocity_limits: true
+    max_velocity: 3.32
+    has_acceleration_limits: true
+    max_acceleration: 0.5
+  
+  right_joint7:
+    has_position_limits: true
+    min_position: -6.28
+    max_position: 6.28
+    has_velocity_limits: true
+    max_velocity: 3.32
+    has_acceleration_limits: true
+    max_acceleration: 0.5

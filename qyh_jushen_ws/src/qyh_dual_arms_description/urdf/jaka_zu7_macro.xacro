@@ -1,0 +1,265 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  
+  <!-- JAKA Zu7 单臂宏定义 -->
+  <xacro:macro name="jaka_zu7_arm" params="prefix parent *origin">
+    
+    <!-- 基座连接 -->
+    <joint name="${prefix}_base_joint" type="fixed">
+      <xacro:insert_block name="origin"/>
+      <parent link="${parent}"/>
+      <child link="${prefix}_base_link"/>
+    </joint>
+
+    <link name="${prefix}_base_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/base_link.STL"/>
+        </geometry>
+        <material name="LightGrey">
+          <color rgba="0.7 0.7 0.7 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/base_link.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.05" rpy="0 0 0"/>
+        <mass value="2.0"/>
+        <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.01"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 1 -->
+    <joint name="${prefix}_joint1" type="revolute">
+      <origin xyz="0 0 0.1675" rpy="0 0 0"/>
+      <parent link="${prefix}_base_link"/>
+      <child link="${prefix}_link1"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-3.05" upper="3.05" effort="100" velocity="2.79"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link1">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link1.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link1.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.05" rpy="0 0 0"/>
+        <mass value="3.5"/>
+        <inertia ixx="0.02" ixy="0.0" ixz="0.0" iyy="0.02" iyz="0.0" izz="0.01"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 2 -->
+    <joint name="${prefix}_joint2" type="revolute">
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <parent link="${prefix}_link1"/>
+      <child link="${prefix}_link2"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-2.09" upper="2.09" effort="100" velocity="2.79"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link2">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link2.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link2.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.2" rpy="0 0 0"/>
+        <mass value="3.0"/>
+        <inertia ixx="0.03" ixy="0.0" ixz="0.0" iyy="0.03" iyz="0.0" izz="0.01"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 3 -->
+    <joint name="${prefix}_joint3" type="revolute">
+      <origin xyz="0 0.0075 0.283" rpy="0 0 0"/>
+      <parent link="${prefix}_link2"/>
+      <child link="${prefix}_link3"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-3.05" upper="3.05" effort="54" velocity="2.79"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link3">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link3.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link3.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.05" rpy="0 0 0"/>
+        <mass value="2.5"/>
+        <inertia ixx="0.015" ixy="0.0" ixz="0.0" iyy="0.015" iyz="0.0" izz="0.01"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 4 -->
+    <joint name="${prefix}_joint4" type="revolute">
+      <origin xyz="0 0 0.0725" rpy="-1.5708 0 0"/>
+      <parent link="${prefix}_link3"/>
+      <child link="${prefix}_link4"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-2.09" upper="2.09" effort="54" velocity="2.79"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link4">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link4.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link4.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.15" rpy="0 0 0"/>
+        <mass value="2.2"/>
+        <inertia ixx="0.02" ixy="0.0" ixz="0.0" iyy="0.02" iyz="0.0" izz="0.008"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 5 -->
+    <joint name="${prefix}_joint5" type="revolute">
+      <origin xyz="0 -0.0075 0.258" rpy="0 0 0"/>
+      <parent link="${prefix}_link4"/>
+      <child link="${prefix}_link5"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-3.05" upper="3.05" effort="29" velocity="3.32"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link5">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link5.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link5.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.04" rpy="0 0 0"/>
+        <mass value="1.5"/>
+        <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.006"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 6 -->
+    <joint name="${prefix}_joint6" type="revolute">
+      <origin xyz="0 0 0.064" rpy="1.5708 0 0"/>
+      <parent link="${prefix}_link5"/>
+      <child link="${prefix}_link6"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-2.09" upper="2.09" effort="29" velocity="3.32"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link6">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link6.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link6.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.03" rpy="0 0 0"/>
+        <mass value="1.0"/>
+        <inertia ixx="0.005" ixy="0.0" ixz="0.0" iyy="0.005" iyz="0.0" izz="0.004"/>
+      </inertial>
+    </link>
+
+    <!-- Joint 7 -->
+    <joint name="${prefix}_joint7" type="revolute">
+      <origin xyz="0 0.0045 0.0741" rpy="0 0 0"/>
+      <parent link="${prefix}_link6"/>
+      <child link="${prefix}_link7"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-6.28" upper="6.28" effort="29" velocity="3.32"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_link7">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link7.STL"/>
+        </geometry>
+        <material name="LightGrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://qyh_dual_arms_description/meshes/link7.STL"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0.02" rpy="0 0 0"/>
+        <mass value="0.8"/>
+        <inertia ixx="0.003" ixy="0.0" ixz="0.0" iyy="0.003" iyz="0.0" izz="0.003"/>
+      </inertial>
+    </link>
+
+    <!-- 末端工具坐标系 -->
+    <joint name="${prefix}_tool_joint" type="fixed">
+      <origin xyz="0 0 0.045" rpy="0 0 0"/>
+      <parent link="${prefix}_link7"/>
+      <child link="${prefix}_tool0"/>
+    </joint>
+
+    <link name="${prefix}_tool0"/>
+
+  </xacro:macro>
+
+</robot>
