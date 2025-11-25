@@ -158,6 +158,9 @@ class JakaControlGUI(QMainWindow):
         self.enabled = False
         self.servo_running = False
         self.vr_following = False
+        self.servo_testing = False
+        self.test_timer = None
+        self.test_counter = 0
 
         self.add_log("JAKA双臂机器人控制系统已启动", "info")
 
@@ -555,6 +558,27 @@ class JakaControlGUI(QMainWindow):
         servo_group.setLayout(servo_layout)
         layout.addWidget(servo_group)
 
+        # 伺服测试组
+        test_group = QGroupBox('● 伺服运动测试')
+        test_layout = QGridLayout()
+
+        self.btn_test_servo = QPushButton('开始测试')
+        self.btn_test_servo.setObjectName("infoButton")
+        self.btn_test_servo.clicked.connect(self.toggle_servo_test)
+        self.btn_test_servo.setEnabled(False)
+
+        self.test_status_label = QLabel('未测试')
+        self.test_progress_label = QLabel('')
+
+        test_layout.addWidget(QLabel('测试状态:'), 0, 0)
+        test_layout.addWidget(self.test_status_label, 0, 1)
+        test_layout.addWidget(self.test_progress_label, 0, 2)
+        test_layout.addWidget(self.btn_test_servo, 1, 0, 1, 3)
+        test_layout.addWidget(QLabel('说明: 执行慢速正弦波关节运动测试'), 2, 0, 1, 3)
+
+        test_group.setLayout(test_layout)
+        layout.addWidget(test_group)
+
         # 手动控制提示
         tip_group = QGroupBox('● 使用说明')
         tip_layout = QVBoxLayout()
@@ -866,6 +890,7 @@ class JakaControlGUI(QMainWindow):
             self.btn_start_servo.setEnabled(False)
             self.btn_stop_servo.setEnabled(True)
             self.btn_enable_vr.setEnabled(True)
+            self.btn_test_servo.setEnabled(True)
             self.servo_status_label.setText('已启动')
             self.add_log("伺服模式已启动", "success")
         else:
@@ -885,10 +910,98 @@ class JakaControlGUI(QMainWindow):
             self.btn_start_servo.setEnabled(True)
             self.btn_stop_servo.setEnabled(False)
             self.btn_enable_vr.setEnabled(False)
+            self.btn_test_servo.setEnabled(False)
             self.servo_status_label.setText('未启动')
             self.add_log("伺服模式已停止", "info")
+            
+            # 如果测试正在进行，停止测试
+            if self.servo_testing:
+                self.stop_servo_test()
         else:
             self.add_log(f"停止伺服模式失败: {response.message}", "error")
+
+    # ========== 伺服测试功能 ==========
+    def toggle_servo_test(self):
+        """切换伺服测试状态"""
+        if not self.servo_testing:
+            self.start_servo_test()
+        else:
+            self.stop_servo_test()
+
+    def start_servo_test(self):
+        """开始伺服测试"""
+        if not self.servo_running:
+            self.add_log("请先启动伺服模式", "warning")
+            return
+
+        # 直接从当前位置开始测试（伺服模式下不能使用MoveJ）
+        self.add_log("开始伺服测试，从当前位置开始慢速运动", "info")
+        self.servo_testing = True
+        self.test_counter = 0
+        self.btn_test_servo.setText('停止测试')
+        self.btn_test_servo.setObjectName("stopButton")
+        self.btn_test_servo.setStyleSheet("")  # 重置样式以应用新的objectName
+        self.test_status_label.setText('测试中...')
+
+        # 启动定时器发送伺服指令 (125Hz)
+        if self.test_timer is None:
+            self.test_timer = QTimer()
+            self.test_timer.timeout.connect(self.publish_test_command)
+        self.test_timer.start(8)  # 8ms = 125Hz
+
+    def publish_test_command(self):
+        """发布测试伺服指令 - 慢速正弦波运动"""
+        if not self.servo_testing:
+            return
+
+        # 时间系数（降低频率使运动更慢更安全）
+        t = self.test_counter / 10000.0
+        k = 0.5  # 降低频率系数（原SDK示例为3）
+        
+        # 安全的小幅度正弦波运动（角度单位：度）
+        import math
+        joint_0 = math.sin(k * t) * 10.0  # 降低幅度到10度（原为30度）
+        joint_1 = -math.cos(k * t) * 8.0 + 8.0  # 降低幅度（原为20度）
+        joint_3 = -math.cos(k * t) * 5.0 + 5.0  # 降低幅度（原为10度）
+
+        # 转换为弧度
+        joint_0_rad = math.radians(joint_0)
+        joint_1_rad = math.radians(joint_1)
+        joint_3_rad = math.radians(joint_3)
+
+        # 发布关节伺服指令（只控制左臂的前3个关节）
+        msg = JakaDualJointServo()
+        # positions: 14个关节 [左臂7个, 右臂7个]
+        msg.positions = [
+            joint_0_rad, joint_1_rad, 0.0, joint_3_rad, 0.0, 0.0, 0.0,  # 左臂
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  # 右臂保持不动
+        ]
+        msg.is_abs = True
+        msg.velocity = 1.0
+        msg.acceleration = 0.5
+        
+        self.ros_node.joint_pub.publish(msg)
+        
+        self.test_counter += 1
+        
+        # 更新进度显示
+        if self.test_counter % 125 == 0:  # 每秒更新一次
+            elapsed_sec = self.test_counter // 125
+            self.test_progress_label.setText(f'已运行 {elapsed_sec} 秒')
+
+    def stop_servo_test(self):
+        """停止伺服测试"""
+        if self.test_timer is not None:
+            self.test_timer.stop()
+        
+        self.servo_testing = False
+        self.test_counter = 0
+        self.btn_test_servo.setText('开始测试')
+        self.btn_test_servo.setObjectName("infoButton")
+        self.btn_test_servo.setStyleSheet("")  # 重置样式
+        self.test_status_label.setText('已停止')
+        self.test_progress_label.setText('')
+        self.add_log("伺服测试已停止", "info")
 
     # ========== 点到点运动功能 ==========
     def execute_move_j(self):
@@ -1088,6 +1201,10 @@ class JakaControlGUI(QMainWindow):
             self.log_text.verticalScrollBar().maximum())
 
     def closeEvent(self, event):
+        # 停止测试计时器
+        if self.test_timer is not None:
+            self.test_timer.stop()
+        
         self.ros_timer.stop()
         self.ros_node.destroy_node()
         rclpy.shutdown()
