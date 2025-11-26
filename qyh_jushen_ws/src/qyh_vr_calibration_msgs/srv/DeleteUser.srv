@@ -1,4 +1,6 @@
+# Delete user calibration
 string username
+
 ---
 bool success
 string message

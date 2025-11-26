@@ -1,0 +1,13 @@
+# Load calibration parameters for a specific user
+string username
+
+---
+bool success
+bool found  # True if user calibration exists
+string message
+
+# Calibration parameters
+float64[3] scaling  # [vertical_scale, forward_scale, lateral_scale]
+float64[9] rotation_matrix  # 3x3 rotation matrix (row-major)
+float64[3] vr_offset  # VR workspace center offset
+float64[3] robot_offset  # Robot workspace center offset

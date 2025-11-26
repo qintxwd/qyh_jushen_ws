@@ -1,20 +1,31 @@
-vr_interface_node:
+vr_interface_node_enhanced:
   ros__parameters:
-    # Frame IDs
-    vr_frame_id: "vr_world"
-    robot_frame_id: "base_link"
-    
     # Smoothing filters
-    position_smoothing_window: 5  # Moving average window size for position
-    orientation_smoothing_window: 3  # Moving average window size for orientation
+    position_smoothing_window: 5
+    orientation_smoothing_window: 3
+    position_deadzone: 0.002  # 2mm
+    orientation_deadzone: 0.01  # ~0.57 degrees
     
-    # Deadzone to filter jitter
-    position_deadzone: 0.002  # 2mm - ignore position changes smaller than this
-    orientation_deadzone: 0.01  # ~0.57 degrees - ignore orientation changes smaller than this
+    # Mapping mode: 'direct', 'incremental', or 'hybrid' (recommended)
+    mapping_mode: 'hybrid'
     
-    # Scaling factors (for workspace mapping)
-    position_scale: 1.0  # Scale VR motion to robot motion (e.g., 0.5 = half speed)
-    orientation_scale: 1.0  # Scale VR rotation to robot rotation
+    # Hybrid mapping parameters
+    hybrid_blend_velocity: 0.05  # m/s - velocity threshold for blending
+    hybrid_min_weight: 0.2  # Minimum direct weight (max incremental)
+    hybrid_max_weight: 0.8  # Maximum direct weight (min incremental)
+    
+    # Workspace limits (robot workspace in meters relative to base_link)
+    workspace_limit_x_min: 0.2
+    workspace_limit_x_max: 0.8
+    workspace_limit_y_min: -0.5
+    workspace_limit_y_max: 0.5
+    workspace_limit_z_min: 0.0
+    workspace_limit_z_max: 0.8
+    
+    # Velocity limits for incremental and hybrid modes
+    max_linear_velocity: 0.5  # m/s
+    max_angular_velocity: 1.0  # rad/s
     
     # Control state
-    control_enabled: true  # Start with control enabled
+    control_enabled: true
+    default_user: ''  # Set to auto-load user calibration on startup (e.g., 'john_doe')

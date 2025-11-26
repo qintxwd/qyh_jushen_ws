@@ -1,0 +1,17 @@
+# Calibrate a user with 4 natural postures
+# Robot poses are loaded from robot.yaml (fixed reference)
+string username
+
+# 4 calibration poses (VR controller poses only)
+# Index 0: Arms down naturally (手臂自然下垂)
+# Index 1: Arms up vertically (手臂垂直向上)
+# Index 2: Arms forward horizontal (手臂向前伸直)
+# Index 3: Arms side horizontal (双臂侧平举)
+CalibrationPose[4] vr_poses
+
+---
+bool success
+string message
+# Computed calibration parameters (for verification)
+float64[3] scaling  # [vertical_scale, forward_scale, lateral_scale]
+float64[9] rotation_matrix  # 3x3 rotation matrix (row-major)

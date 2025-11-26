@@ -11,15 +11,13 @@ find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
   "msg/CalibrationPose.msg"
-  "msg/CalibrationProfile.msg"
 )
 
 set(srv_files
-  "srv/ListProfiles.srv"
-  "srv/GetProfile.srv"
-  "srv/UpdateActionSample.srv"
-  "srv/DeleteActionSamples.srv"
-  "srv/DeleteProfile.srv"
+  "srv/CalibrateUser.srv"
+  "srv/LoadUserCalibration.srv"
+  "srv/DeleteUser.srv"
+  "srv/ListUsers.srv"
   "srv/GetRobotCalibration.srv"
   "srv/SetRobotCalibration.srv"
 )

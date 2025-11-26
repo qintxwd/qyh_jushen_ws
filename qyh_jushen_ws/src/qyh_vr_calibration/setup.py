@@ -27,6 +27,7 @@ setup(
             'vr_calibration_node = qyh_vr_calibration.vr_calibration_node:main',
             'vr_interface_node = qyh_vr_calibration.vr_interface_node:main',
             'vr_simulator_node = qyh_vr_calibration.vr_simulator_node:main',
+            'calibration_tool = qyh_vr_calibration.calibration_tool:main',
         ],
     },
 )

@@ -1,6 +1,0 @@
-string username
-CalibrationPose sample
----
-bool success
-CalibrationProfile profile
-string message

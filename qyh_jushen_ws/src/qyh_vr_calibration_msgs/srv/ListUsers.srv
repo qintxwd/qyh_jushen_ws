@@ -1,0 +1,4 @@
+# List all calibrated users
+---
+string[] usernames
+string message
