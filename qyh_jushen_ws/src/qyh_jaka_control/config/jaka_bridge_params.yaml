@@ -1,0 +1,13 @@
+jaka_bridge_node:
+  ros__parameters:
+    # Robot connection
+    robot_ip: "192.168.2.200"
+    auto_connect: true
+    
+    # Servo control
+    servo_frequency_hz: 125.0  # Target output frequency
+    
+    # Smooth servo bridge
+    buffer_size: 10  # Trajectory buffer size
+    interpolation_weight: 0.5  # 0.0-1.0, higher=faster response, lower=smoother
+    enable_interpolation: true  # Use interpolation between commands

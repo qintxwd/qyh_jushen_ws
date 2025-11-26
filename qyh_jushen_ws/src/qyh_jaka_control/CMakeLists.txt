@@ -43,6 +43,13 @@ target_link_libraries(jaka_interface
   ${JAKA_API_LIB}
 )
 
+add_library(smooth_servo_bridge src/smooth_servo_bridge.cpp)
+ament_target_dependencies(smooth_servo_bridge
+  rclcpp
+)
+target_link_libraries(smooth_servo_bridge
+)
+
 # Main control node (unified: basic + servo + VR)
 add_executable(jaka_control_node src/jaka_control_node.cpp)
 ament_target_dependencies(jaka_control_node
@@ -57,10 +64,24 @@ ament_target_dependencies(jaka_control_node
 )
 target_link_libraries(jaka_control_node
   jaka_interface
+  smooth_servo_bridge
   ${JAKA_API_LIB}
 )
 
-install(TARGETS jaka_interface
+# Bridge node for teleoperation (subscribes to /left_arm/joint_command, /right_arm/joint_command)
+add_executable(jaka_bridge_node src/jaka_bridge_node.cpp)
+ament_target_dependencies(jaka_bridge_node
+  rclcpp
+  std_srvs
+  sensor_msgs
+)
+target_link_libraries(jaka_bridge_node
+  jaka_interface
+  smooth_servo_bridge
+  ${JAKA_API_LIB}
+)
+
+install(TARGETS jaka_interface smooth_servo_bridge
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -68,6 +89,7 @@ install(TARGETS jaka_interface
 
 install(TARGETS
   jaka_control_node
+  jaka_bridge_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
