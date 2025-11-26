@@ -1,0 +1,20 @@
+vr_interface_node:
+  ros__parameters:
+    # Frame IDs
+    vr_frame_id: "vr_world"
+    robot_frame_id: "base_link"
+    
+    # Smoothing filters
+    position_smoothing_window: 5  # Moving average window size for position
+    orientation_smoothing_window: 3  # Moving average window size for orientation
+    
+    # Deadzone to filter jitter
+    position_deadzone: 0.002  # 2mm - ignore position changes smaller than this
+    orientation_deadzone: 0.01  # ~0.57 degrees - ignore orientation changes smaller than this
+    
+    # Scaling factors (for workspace mapping)
+    position_scale: 1.0  # Scale VR motion to robot motion (e.g., 0.5 = half speed)
+    orientation_scale: 1.0  # Scale VR rotation to robot rotation
+    
+    # Control state
+    control_enabled: true  # Start with control enabled
