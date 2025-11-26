@@ -1,0 +1,40 @@
+# Teleoperation Controller Configuration
+
+# Control parameters
+control_frequency: 125.0  # Hz
+
+# Robot model
+robot_description: "robot_description"
+left_arm_group: "left_arm"
+right_arm_group: "right_arm"
+
+# Differential IK parameters
+differential_ik:
+  position_tolerance: 0.001  # m
+  orientation_tolerance: 0.01  # rad
+  damping_factor: 0.01
+  max_iterations: 50
+  dt: 0.008  # 1/125 Hz
+
+# Trajectory smoothing parameters
+trajectory_smoothing:
+  max_velocity: 1.0  # rad/s (conservative for safety)
+  max_acceleration: 0.5  # rad/s²
+  max_jerk: 5.0  # rad/s³
+  low_pass_cutoff: 10.0  # Hz
+
+# Safety parameters
+safety:
+  joint_limit_margin: 0.05  # rad (stay 0.05 rad away from limits)
+  velocity_limit_scale: 0.8  # Use 80% of max velocity
+  collision_check_distance: 0.02  # m (2cm safety margin)
+  singularity_threshold: 0.05  # Manipulability threshold
+
+# VR tracking parameters
+vr_tracking:
+  position_smoothing_window: 5
+  orientation_smoothing_window: 3
+  position_deadzone: 0.002  # m (2mm)
+  orientation_deadzone: 0.01  # rad
+  position_scale: 1.0
+  orientation_scale: 1.0
