@@ -1,0 +1,6 @@
+# Cartesian velocity limits for Pilz planner
+cartesian_limits:
+  max_trans_vel: 0.05  # m/s - Conservative for teleoperation
+  max_trans_acc: 0.1   # m/s²
+  max_trans_dec: -0.1  # m/s²
+  max_rot_vel: 0.2     # rad/s

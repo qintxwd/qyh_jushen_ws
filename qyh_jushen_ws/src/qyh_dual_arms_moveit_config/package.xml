@@ -3,11 +3,27 @@
 <package format="3">
   <name>qyh_dual_arms_moveit_config</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>MoveIt2 configuration for QYH dual arms robot</description>
   <maintainer email="jsqinyinghao@live.com">qyh</maintainer>
-  <license>TODO: License declaration</license>
+  <license>BSD</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>moveit_ros_move_group</depend>
+  <depend>moveit_ros_planning_interface</depend>
+  <depend>moveit_kinematics</depend>
+  <depend>moveit_planners_ompl</depend>
+  <depend>moveit_simple_controller_manager</depend>
+  <depend>moveit_configs_utils</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>joint_state_publisher</depend>
+  <depend>tf2_ros</depend>
+  <depend>xacro</depend>
+  <depend>qyh_dual_arms_description</depend>
+
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>rviz_default_plugins</exec_depend>
+  <exec_depend>moveit_ros_visualization</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
