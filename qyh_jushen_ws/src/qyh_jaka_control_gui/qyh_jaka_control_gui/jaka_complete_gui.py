@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 JAKA双臂机器人完整控制GUI
-集成所有基础控制和VR跟随功能
+基础控制、伺服模式、点到点运动和参数配置
+
+注意：VR跟随功能已移至 qyh_teleoperation_controller
 """
 import sys
 import signal
@@ -24,12 +26,10 @@ from qyh_jaka_control_msgs.msg import (
     JakaDualJointServo,
     JakaDualCartesianServo,
     JakaServoStatus,
-    VRFollowStatus,
     RobotState
 )
 from qyh_jaka_control_msgs.srv import (
     StartServo, StopServo,
-    EnableVRFollow, CalibrateVR,
     MoveJ, MoveL,
     SetCollisionLevel, SetToolOffset,
     GetRobotState
@@ -39,7 +39,6 @@ from qyh_jaka_control_msgs.srv import (
 class SignalBridge(QObject):
     """线程安全的信号桥接"""
     status_updated = pyqtSignal(object)
-    vr_status_updated = pyqtSignal(object)
     robot_state_updated = pyqtSignal(object)
     joint_state_updated = pyqtSignal(object)
     log_message = pyqtSignal(str, str)
@@ -60,9 +59,6 @@ class JakaControlNode(Node):
         self.status_sub = self.create_subscription(
             JakaServoStatus, '/jaka/servo/status',
             self.status_callback, 10)
-        self.vr_status_sub = self.create_subscription(
-            VRFollowStatus, '/jaka/vr/status',
-            self.vr_status_callback, 10)
         self.robot_state_sub = self.create_subscription(
             RobotState, '/jaka/robot_state',
             self.robot_state_callback, 10)
@@ -90,12 +86,6 @@ class JakaControlNode(Node):
         self.cli_stop_servo = self.create_client(
             StopServo, '/jaka/servo/stop')
 
-        # VR控制服务
-        self.cli_enable_vr = self.create_client(
-            EnableVRFollow, '/jaka/vr/enable')
-        self.cli_calibrate_vr = self.create_client(
-            CalibrateVR, '/jaka/vr/calibrate')
-
         # 点到点运动服务
         self.cli_move_j = self.create_client(
             MoveJ, '/jaka/move_j')
@@ -112,9 +102,6 @@ class JakaControlNode(Node):
 
     def status_callback(self, msg):
         self.signals.status_updated.emit(msg)
-
-    def vr_status_callback(self, msg):
-        self.signals.vr_status_updated.emit(msg)
 
     def robot_state_callback(self, msg):
         self.signals.robot_state_updated.emit(msg)
@@ -157,7 +144,6 @@ class JakaControlGUI(QMainWindow):
         self.powered_on = False
         self.enabled = False
         self.servo_running = False
-        self.vr_following = False
         self.servo_testing = False
         self.test_timer = None
         self.test_counter = 0
@@ -248,9 +234,11 @@ class JakaControlGUI(QMainWindow):
         tabs.addTab(self.create_basic_control_tab(), "基础控制")
         tabs.addTab(self.create_motion_tab(), "点到点运动")
         tabs.addTab(self.create_servo_tab(), "伺服模式")
-        tabs.addTab(self.create_vr_tab(), "VR跟随")
         tabs.addTab(self.create_config_tab(), "参数配置")
         tabs.addTab(self.create_status_tab(), "状态监控")
+        
+        # 注意：VR跟随功能已移至 qyh_teleoperation_controller
+        # 请使用完整的遥操作系统 launch 文件
         main_layout.addWidget(tabs)
 
         # 日志区域
@@ -624,58 +612,6 @@ class JakaControlGUI(QMainWindow):
         layout.addStretch()
         return widget
 
-    def create_vr_tab(self):
-        """VR跟随标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # VR跟随控制组
-        vr_control_group = QGroupBox('● VR跟随控制')
-        vr_control_layout = QGridLayout()
-
-        self.btn_enable_vr = QPushButton('启用VR跟随')
-        self.btn_enable_vr.setObjectName("infoButton")
-        self.btn_enable_vr.clicked.connect(self.toggle_vr_follow)
-        self.btn_enable_vr.setEnabled(False)
-
-        self.btn_calibrate_vr = QPushButton('校准VR坐标系')
-        self.btn_calibrate_vr.setObjectName("warningButton")
-        self.btn_calibrate_vr.clicked.connect(self.calibrate_vr)
-
-        self.vr_status_label = QLabel('未启用')
-
-        vr_control_layout.addWidget(QLabel('VR跟随状态:'), 0, 0)
-        vr_control_layout.addWidget(self.vr_status_label, 0, 1, 1, 2)
-        vr_control_layout.addWidget(self.btn_enable_vr, 1, 0)
-        vr_control_layout.addWidget(self.btn_calibrate_vr, 1, 1)
-
-        vr_control_group.setLayout(vr_control_layout)
-        layout.addWidget(vr_control_group)
-
-        # VR控制器信息
-        vr_info_group = QGroupBox('● VR控制器实时信息')
-        vr_info_layout = QGridLayout()
-
-        self.left_arm_status = QLabel('等待VR数据...')
-        self.right_arm_status = QLabel('等待VR数据...')
-        self.left_error = QLabel('0.0 mm')
-        self.right_error = QLabel('0.0 mm')
-
-        vr_info_layout.addWidget(QLabel('左臂状态:'), 0, 0)
-        vr_info_layout.addWidget(self.left_arm_status, 0, 1)
-        vr_info_layout.addWidget(QLabel('右臂状态:'), 1, 0)
-        vr_info_layout.addWidget(self.right_arm_status, 1, 1)
-        vr_info_layout.addWidget(QLabel('左臂跟随误差:'), 2, 0)
-        vr_info_layout.addWidget(self.left_error, 2, 1)
-        vr_info_layout.addWidget(QLabel('右臂跟随误差:'), 3, 0)
-        vr_info_layout.addWidget(self.right_error, 3, 1)
-
-        vr_info_group.setLayout(vr_info_layout)
-        layout.addWidget(vr_info_group)
-
-        layout.addStretch()
-        return widget
-
     def create_status_tab(self):
         """状态监控标签页"""
         widget = QWidget()
@@ -882,7 +818,6 @@ class JakaControlGUI(QMainWindow):
             self.btn_stop_servo.setEnabled(False)
             self.btn_move_j.setEnabled(False)
             self.btn_move_l.setEnabled(False)
-            self.btn_enable_vr.setEnabled(False)
             self.add_log("机器人已去使能", "info")
         else:
             self.add_log(f"去使能失败: {response.message}", "error")
@@ -979,7 +914,6 @@ class JakaControlGUI(QMainWindow):
                 'color: green; font-weight: bold;')
             self.btn_start_servo.setEnabled(False)
             self.btn_stop_servo.setEnabled(True)
-            self.btn_enable_vr.setEnabled(True)
             self.btn_test_servo.setEnabled(True)
             self.btn_move_to_init.setEnabled(False)
             self.add_log("伺服模式已启动，可以开始测试", "success")
@@ -999,10 +933,8 @@ class JakaControlGUI(QMainWindow):
     def on_servo_stopped(self, response):
         if response.success:
             self.servo_running = False
-            self.vr_following = False
             self.btn_start_servo.setEnabled(True)
             self.btn_stop_servo.setEnabled(False)
-            self.btn_enable_vr.setEnabled(False)
             self.btn_test_servo.setEnabled(False)
             self.servo_status_label.setText('未启动')
             self.add_log("伺服模式已停止", "info")
@@ -1209,56 +1141,12 @@ class JakaControlGUI(QMainWindow):
         else:
             self.add_log(f"工具偏移设置失败: {response.message}", "error")
 
-    # ========== VR跟随功能 ==========
-    def toggle_vr_follow(self):
-        req = EnableVRFollow.Request()
-        req.enable = not self.vr_following
-        future = self.ros_node.call_service_async(
-            self.ros_node.cli_enable_vr, req)
-        future.add_done_callback(lambda f: self.on_vr_toggled(f.result()))
-
-        action = "启用" if not self.vr_following else "停止"
-        self.add_log(f"正在{action}VR跟随...", "info")
-
-    def on_vr_toggled(self, response):
-        if response.success:
-            self.vr_following = not self.vr_following
-            if self.vr_following:
-                self.btn_enable_vr.setText('停止VR跟随')
-                self.vr_status_label.setText('已启用')
-                self.add_log("VR跟随已启用", "success")
-            else:
-                self.btn_enable_vr.setText('启用VR跟随')
-                self.vr_status_label.setText('未启用')
-                self.add_log("VR跟随已停止", "info")
-        else:
-            self.add_log(f"VR跟随操作失败: {response.message}", "error")
-
-    def calibrate_vr(self):
-        req = CalibrateVR.Request()
-        future = self.ros_node.call_service_async(
-            self.ros_node.cli_calibrate_vr, req)
-        future.add_done_callback(lambda f: self.on_vr_calibrated(f.result()))
-        self.add_log("正在校准VR坐标系...", "info")
-
-    def on_vr_calibrated(self, response):
-        if response.success:
-            self.add_log("VR坐标系校准成功", "success")
-        else:
-            self.add_log(f"VR校准失败: {response.message}", "error")
-
     # ========== 状态更新 ==========
     def update_status(self, msg):
         self.mode_label.setText(msg.mode)
         self.cycle_time_label.setText(f'{msg.cycle_time_ns / 1e6:.2f} ms')
         self.publish_rate_label.setText(f'{msg.publish_rate_hz:.1f} Hz')
         self.latency_label.setText(f'{msg.latency_ms:.2f} ms')
-
-    def update_vr_status(self, msg):
-        self.left_arm_status.setText(msg.left_arm_status)
-        self.right_arm_status.setText(msg.right_arm_status)
-        self.left_error.setText(f'{msg.left_pose_error:.2f} mm')
-        self.right_error.setText(f'{msg.right_pose_error:.2f} mm')
 
     def update_robot_state(self, msg):
         """更新机器人状态显示"""

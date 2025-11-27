@@ -65,9 +65,21 @@ VR设备(90Hz) → VR接口 → 校准 → 遥操作控制器 → JAKA桥接 →
 3. **仿真训练**: MoveIt2仿真环境
 4. **任务执行**: 复杂双臂协同操作
 
+## 🌐 Web 管理界面
+
+本项目包含一个完整的 Web 管理界面（**qyh_jushen_web**），可以在浏览器中管理 ROS GUI：
+
+- ✅ 在线启动/停止 ROS GUI（夹爪/机械臂/底盘）
+- ✅ 实时状态监控
+- ✅ 批量操作管理
+- ✅ 管理员权限控制
+
+**详细说明**: [ROS GUI Web 集成文档](./ROS_GUI_WEB_INTEGRATION.md)
+
 ## 📚 相关文档
 
 - [完整功能包文档](./PACKAGE_DOCUMENTATION.md) - 所有包的详细说明和接口
+- [ROS GUI Web 集成](./ROS_GUI_WEB_INTEGRATION.md) - Web 界面管理 ROS GUI
 - [遥操作集成指南](../TELEOPERATION_INTEGRATION_GUIDE.md)
 - [VR遥操作架构](../VR_TELEOPERATION_ARCHITECTURE.md)
 - [开发总结](../DEVELOPMENT_SUMMARY.md)

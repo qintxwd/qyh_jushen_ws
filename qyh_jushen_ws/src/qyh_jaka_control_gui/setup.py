@@ -17,7 +17,7 @@ setup(
     zip_safe=True,
     maintainer='qyh',
     maintainer_email='dev@example.com',
-    description='JAKA双臂机器人VR控制GUI',
+    description='JAKA双臂机器人控制GUI - 基础控制、伺服模式和点到点运动',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
