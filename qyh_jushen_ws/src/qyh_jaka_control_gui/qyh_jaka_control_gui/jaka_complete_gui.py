@@ -575,6 +575,21 @@ class JakaControlGUI(QMainWindow):
         test_group = QGroupBox('● 步骤3: 伺服运动测试')
         test_layout = QGridLayout()
 
+        # 测试参数
+        self.test_speed = QDoubleSpinBox()
+        self.test_speed.setRange(0.1, 5.0)
+        self.test_speed.setValue(1.0)
+        self.test_speed.setSingleStep(0.1)
+        self.test_speed.setDecimals(1)
+        self.test_speed.setSuffix(' x')
+        
+        self.test_amplitude = QDoubleSpinBox()
+        self.test_amplitude.setRange(0.1, 3.0)
+        self.test_amplitude.setValue(1.0)
+        self.test_amplitude.setSingleStep(0.1)
+        self.test_amplitude.setDecimals(1)
+        self.test_amplitude.setSuffix(' x')
+
         self.btn_test_servo = QPushButton('开始测试')
         self.btn_test_servo.setObjectName("infoButton")
         self.btn_test_servo.clicked.connect(self.toggle_servo_test)
@@ -583,13 +598,19 @@ class JakaControlGUI(QMainWindow):
         self.test_status_label = QLabel('未测试')
         self.test_progress_label = QLabel('')
 
-        test_layout.addWidget(QLabel('测试状态:'), 0, 0)
-        test_layout.addWidget(self.test_status_label, 0, 1)
-        test_layout.addWidget(self.test_progress_label, 0, 2)
-        test_layout.addWidget(self.btn_test_servo, 1, 0, 1, 3)
+        test_layout.addWidget(QLabel('动作速度:'), 0, 0)
+        test_layout.addWidget(self.test_speed, 0, 1)
+        test_layout.addWidget(QLabel('(默认1.0, 范围0.1-5.0)'), 0, 2)
+        test_layout.addWidget(QLabel('动作幅度:'), 1, 0)
+        test_layout.addWidget(self.test_amplitude, 1, 1)
+        test_layout.addWidget(QLabel('(默认1.0, 范围0.1-3.0)'), 1, 2)
+        test_layout.addWidget(QLabel('测试状态:'), 2, 0)
+        test_layout.addWidget(self.test_status_label, 2, 1)
+        test_layout.addWidget(self.test_progress_label, 2, 2)
+        test_layout.addWidget(self.btn_test_servo, 3, 0, 1, 3)
         test_layout.addWidget(
-            QLabel('说明: 执行慢速正弦波关节运动测试 (关节0,1,3)'),
-            2, 0, 1, 3)
+            QLabel('说明: 执行正弦波关节运动测试 (关节0,1,3)，可调整速度和幅度'),
+            4, 0, 1, 3)
 
         test_group.setLayout(test_layout)
         layout.addWidget(test_group)
@@ -975,19 +996,23 @@ class JakaControlGUI(QMainWindow):
         self.test_timer.start(8)  # 8ms = 125Hz
 
     def publish_test_command(self):
-        """发布测试伺服指令 - 慢速正弦波运动"""
+        """发布测试伺服指令 - 可调速度和幅度的正弦波运动"""
         if not self.servo_testing:
             return
 
-        # 时间系数（与SDK示例一致）
+        # 获取用户设置的速度和幅度参数
+        speed_factor = self.test_speed.value()  # 速度倍数 (默认1.0)
+        amplitude_factor = self.test_amplitude.value()  # 幅度倍数 (默认1.0)
+
+        # 时间系数
         t = self.test_counter / 10000.0
-        k = 20.0  # 频率系数（SDK示例为35，这里用20更安全平滑）
+        k = 20.0 * speed_factor  # 频率系数，乘以速度倍数
         
-        # 正弦波运动（角度单位：度）
+        # 正弦波运动（角度单位：度），乘以幅度倍数
         import math
-        joint_0 = math.sin(k * t) * 15.0  # 幅度15度（SDK为30度）
-        joint_1 = -math.cos(k * t) * 12.0 + 12.0  # 幅度12度（SDK为20度）
-        joint_3 = -math.cos(k * t) * 8.0 + 8.0  # 幅度8度（SDK为10度）
+        joint_0 = math.sin(k * t) * 15.0 * amplitude_factor  # 基础幅度15度
+        joint_1 = -math.cos(k * t) * 12.0 * amplitude_factor + 12.0 * amplitude_factor  # 基础幅度12度
+        joint_3 = -math.cos(k * t) * 8.0 * amplitude_factor + 8.0 * amplitude_factor  # 基础幅度8度
 
         # 转换为弧度
         joint_0_rad = math.radians(joint_0)
