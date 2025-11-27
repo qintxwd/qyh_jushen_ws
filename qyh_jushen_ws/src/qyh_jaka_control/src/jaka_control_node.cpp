@@ -5,26 +5,15 @@
 #include <qyh_jaka_control_msgs/msg/jaka_dual_joint_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_dual_cartesian_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_servo_status.hpp>
-#include <qyh_jaka_control_msgs/msg/vr_pose.hpp>
-#include <qyh_jaka_control_msgs/msg/vr_follow_status.hpp>
 #include <qyh_jaka_control_msgs/msg/robot_state.hpp>
 #include <qyh_jaka_control_msgs/srv/start_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/stop_servo.hpp>
-#include <qyh_jaka_control_msgs/srv/enable_vr_follow.hpp>
-#include <qyh_jaka_control_msgs/srv/calibrate_vr.hpp>
 #include <qyh_jaka_control_msgs/srv/set_filter.hpp>
 #include <qyh_jaka_control_msgs/srv/move_j.hpp>
 #include <qyh_jaka_control_msgs/srv/move_l.hpp>
 #include <qyh_jaka_control_msgs/srv/set_collision_level.hpp>
 #include <qyh_jaka_control_msgs/srv/set_tool_offset.hpp>
 #include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
-#include <qyh_vr_calibration_msgs/srv/get_profile.hpp>
-#include <qyh_vr_calibration_msgs/srv/get_robot_calibration.hpp>
-#include <tf2/LinearMath/Transform.h>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Vector3.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <Eigen/Dense>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -35,12 +24,15 @@
 using namespace std::chrono_literals;
 
 /**
- * @brief JAKA双臂机器人完整控制节点
+ * @brief JAKA双臂机器人控制节点
  * 
  * 功能：
  * 1. 基础控制：上电、下电、使能、去使能、清除错误、急停
  * 2. 伺服模式：125Hz实时控制、关节空间、笛卡尔空间
- * 3. VR跟随：实时跟随、坐标校准、误差监控
+ * 3. 接收命令：从遥操作控制器接收关节/笛卡尔命令
+ * 4. 轨迹平滑：缓冲和插值（由 smooth_servo_bridge 处理）
+ * 
+ * 注意：VR 数据处理和坐标变换由 qyh_vr_calibration 和 qyh_teleoperation_controller 负责
  */
 class JakaControlNode : public rclcpp::Node
 {
@@ -51,8 +43,7 @@ public:
           connected_(false),
           powered_(false),
           enabled_(false),
-          servo_running_(false),
-          vr_following_(false)
+          servo_running_(false)
     {
         // 参数声明
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
@@ -80,15 +71,9 @@ public:
         auto_power_on_ = false;  // 废弃，使用auto_initialize
         auto_enable_ = false;     // 废弃，使用auto_initialize
 
-        // 初始化VR坐标变换
-        vr_to_robot_left_.setIdentity();
-        vr_to_robot_right_.setIdentity();
-
         // Publishers
         status_pub_ = create_publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>(
             "/jaka/servo/status", 10);
-        vr_status_pub_ = create_publisher<qyh_jaka_control_msgs::msg::VRFollowStatus>(
-            "/jaka/vr/status", 10);
         robot_state_pub_ = create_publisher<qyh_jaka_control_msgs::msg::RobotState>(
             "/jaka/robot_state", 10);
         joint_states_pub_ = create_publisher<sensor_msgs::msg::JointState>(
@@ -103,14 +88,6 @@ public:
         cartesian_sub_ = create_subscription<qyh_jaka_control_msgs::msg::JakaDualCartesianServo>(
             "/jaka/servo/cartesian_cmd", qos,
             std::bind(&JakaControlNode::cartesianCmdCallback, this, std::placeholders::_1));
-
-        vr_left_sub_ = create_subscription<qyh_jaka_control_msgs::msg::VRPose>(
-            "/vr/left_controller", qos,
-            std::bind(&JakaControlNode::vrLeftCallback, this, std::placeholders::_1));
-        
-        vr_right_sub_ = create_subscription<qyh_jaka_control_msgs::msg::VRPose>(
-            "/vr/right_controller", qos,
-            std::bind(&JakaControlNode::vrRightCallback, this, std::placeholders::_1));
 
         // 基础控制服务
         srv_power_on_ = create_service<std_srvs::srv::Trigger>(
@@ -150,15 +127,6 @@ public:
             "/jaka/servo/set_filter",
             std::bind(&JakaControlNode::handleSetFilter, this, std::placeholders::_1, std::placeholders::_2));
 
-        // VR控制服务
-        srv_enable_vr_ = create_service<qyh_jaka_control_msgs::srv::EnableVRFollow>(
-            "/jaka/vr/enable",
-            std::bind(&JakaControlNode::handleEnableVR, this, std::placeholders::_1, std::placeholders::_2));
-        
-        srv_calibrate_vr_ = create_service<qyh_jaka_control_msgs::srv::CalibrateVR>(
-            "/jaka/vr/calibrate",
-            std::bind(&JakaControlNode::handleCalibrateVR, this, std::placeholders::_1, std::placeholders::_2));
-
         // 点到点运动服务
         srv_move_j_ = create_service<qyh_jaka_control_msgs::srv::MoveJ>(
             "/jaka/move_j",
@@ -179,12 +147,6 @@ public:
         srv_get_robot_state_ = create_service<qyh_jaka_control_msgs::srv::GetRobotState>(
             "/jaka/get_robot_state",
             std::bind(&JakaControlNode::handleGetRobotState, this, std::placeholders::_1, std::placeholders::_2));
-
-        // VR Calibration Client
-        client_get_profile_ = create_client<qyh_vr_calibration_msgs::srv::GetProfile>(
-            "vr_calibration/get_profile");
-        client_get_robot_calibration_ = create_client<qyh_vr_calibration_msgs::srv::GetRobotCalibration>(
-            "vr_calibration/get_robot_calibration");
 
         // 自动连接和初始化
         if (auto_connect_) {
@@ -243,69 +205,32 @@ private:
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // VR跟随模式
-        if (vr_following_) {
-            processVRFollow();
+        // 关节指令模式
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        auto now = this->now();
+        
+        // 超时保护（500ms无指令则停止）
+        if (last_cmd_time_.seconds() > 0 && 
+            (now - last_cmd_time_).seconds() > 0.5) {
+            // 超时，不发送指令
+            return;
         }
-        // 手动指令模式
-        else {
-            std::lock_guard<std::mutex> lock(cmd_mutex_);
-            auto now = this->now();
-            
-            // 超时保护（500ms无指令则停止）
-            if (last_cmd_time_.seconds() > 0 && 
-                (now - last_cmd_time_).seconds() > 0.5) {
-                // 超时，不发送指令
-                return;
-            }
 
-            // 发送关节或笛卡尔指令
-            if (last_joint_cmd_) {
-                std::vector<double> positions(last_joint_cmd_->positions.begin(), 
-                                             last_joint_cmd_->positions.end());
-                jaka_interface_.servoJ(-1, positions, last_joint_cmd_->is_abs);
-                
-                // Send command to robot (CRITICAL!)
-                jaka_interface_.edgSend();
-            }
-            else if (last_cartesian_cmd_) {
-                // 笛卡尔控制（待实现双臂分别控制）
-            }
+        // 发送关节或笛卡尔指令
+        if (last_joint_cmd_) {
+            std::vector<double> positions(last_joint_cmd_->positions.begin(), 
+                                         last_joint_cmd_->positions.end());
+            jaka_interface_.servoJ(-1, positions, last_joint_cmd_->is_abs);
+            
+            // Send command to robot (CRITICAL!)
+            jaka_interface_.edgSend();
+        }
+        else if (last_cartesian_cmd_) {
+            // 笛卡尔控制（待实现双臂分别控制）
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         last_cycle_duration_us_ = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-    }
-
-    void processVRFollow()
-    {
-        std::lock_guard<std::mutex> lock(vr_mutex_);
-        
-        if (!last_vr_left_ || !last_vr_right_) {
-            return;  // 等待VR数据
-        }
-
-        // 转换VR位姿到机器人坐标系
-        geometry_msgs::msg::Pose left_target, right_target;
-        
-        // 左臂
-        tf2::Transform vr_left;
-        tf2::fromMsg(last_vr_left_->pose, vr_left);
-        tf2::Transform robot_left = vr_to_robot_left_ * vr_left;
-        tf2::toMsg(robot_left, left_target);
-        
-        // 右臂
-        tf2::Transform vr_right;
-        tf2::fromMsg(last_vr_right_->pose, vr_right);
-        tf2::Transform robot_right = vr_to_robot_right_ * vr_right;
-        tf2::toMsg(robot_right, right_target);
-
-        // 发送伺服指令（笛卡尔空间）
-        jaka_interface_.servoP(0, left_target, true);   // 左臂
-        jaka_interface_.servoP(1, right_target, true);  // 右臂
-        
-        // Send all commands at once (CRITICAL!)
-        jaka_interface_.edgSend();
     }
 
     void publishStatus()
@@ -412,16 +337,6 @@ private:
             robot_state_msg.right_joint_positions.end());
         
         joint_states_pub_->publish(joint_state_msg);
-
-        // VR跟随状态
-        if (vr_following_) {
-            auto vr_msg = qyh_jaka_control_msgs::msg::VRFollowStatus();
-            vr_msg.left_arm_status = "Following";
-            vr_msg.right_arm_status = "Following";
-            vr_msg.left_pose_error = 0.0;  // TODO: 计算实际误差
-            vr_msg.right_pose_error = 0.0;
-            vr_status_pub_->publish(vr_msg);
-        }
     }
 
     // ==================== 回调函数 ====================
@@ -437,18 +352,6 @@ private:
         std::lock_guard<std::mutex> lock(cmd_mutex_);
         last_cartesian_cmd_ = msg;
         last_cmd_time_ = this->now();
-    }
-
-    void vrLeftCallback(const qyh_jaka_control_msgs::msg::VRPose::SharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(vr_mutex_);
-        last_vr_left_ = msg;
-    }
-
-    void vrRightCallback(const qyh_jaka_control_msgs::msg::VRPose::SharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(vr_mutex_);
-        last_vr_right_ = msg;
     }
 
     // ==================== 基础控制服务 ====================
@@ -558,7 +461,6 @@ private:
     {
         if (jaka_interface_.motionAbort()) {
             servo_running_ = false;
-            vr_following_ = false;
             res->success = true;
             res->message = "Motion aborted successfully";
             RCLCPP_WARN(get_logger(), "⚠ Motion ABORTED");
@@ -608,7 +510,6 @@ private:
     {
         if (jaka_interface_.servoMoveEnable(false)) {
             servo_running_ = false;
-            vr_following_ = false;
             res->success = true;
             res->message = "Servo mode stopped";
             RCLCPP_INFO(get_logger(), "✓ Servo mode STOPPED");
@@ -635,264 +536,6 @@ private:
         
         res->success = success;
         res->message = success ? "Filter set successfully" : "Failed to set filter";
-    }
-
-    // ==================== VR坐标变换计算 ====================
-    /**
-     * @brief 使用4个对应点计算VR到机器人的刚体变换
-     * 
-     * 该方法使用最小二乘法求解刚体变换，考虑4个标定姿态：
-     * - 姿态0: T-Pose
-     * - 姿态1: 双臂前伸
-     * - 姿态2: 双臂上举
-     * - 姿态3: 双臂下垂
-     * 
-     * 算法步骤：
-     * 1. 计算VR点集和机器人点集的质心
-     * 2. 将点集去中心化
-     * 3. 使用SVD分解计算最优旋转矩阵
-     * 4. 计算平移向量
-     * 
-     * @param vr_poses VR控制器的4个姿态（从VRCalibrationProfile获取）
-     * @param robot_poses 机器人末端的4个姿态（从RobotCalibrationProfile获取）
-     * @return tf2::Transform VR到机器人的变换矩阵
-     */
-    tf2::Transform computeRigidTransform(
-        const std::vector<geometry_msgs::msg::Pose>& vr_poses,
-        const std::vector<geometry_msgs::msg::Pose>& robot_poses)
-    {
-        if (vr_poses.size() != 4 || robot_poses.size() != 4) {
-            RCLCPP_ERROR(get_logger(), "Need exactly 4 corresponding poses");
-            return tf2::Transform::getIdentity();
-        }
-
-        // 使用Eigen进行数值计算
-        Eigen::Matrix3Xd vr_points(3, 4);
-        Eigen::Matrix3Xd robot_points(3, 4);
-
-        // 填充点云
-        for (size_t i = 0; i < 4; ++i) {
-            vr_points(0, i) = vr_poses[i].position.x;
-            vr_points(1, i) = vr_poses[i].position.y;
-            vr_points(2, i) = vr_poses[i].position.z;
-
-            robot_points(0, i) = robot_poses[i].position.x;
-            robot_points(1, i) = robot_poses[i].position.y;
-            robot_points(2, i) = robot_poses[i].position.z;
-        }
-
-        // 计算质心
-        Eigen::Vector3d vr_centroid = vr_points.rowwise().mean();
-        Eigen::Vector3d robot_centroid = robot_points.rowwise().mean();
-
-        // 去中心化
-        Eigen::Matrix3Xd vr_centered = vr_points.colwise() - vr_centroid;
-        Eigen::Matrix3Xd robot_centered = robot_points.colwise() - robot_centroid;
-
-        // 计算协方差矩阵 H = vr_centered * robot_centered^T
-        Eigen::Matrix3d H = vr_centered * robot_centered.transpose();
-
-        // SVD分解
-        Eigen::JacobiSVD<Eigen::Matrix3d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
-        Eigen::Matrix3d U = svd.matrixU();
-        Eigen::Matrix3d V = svd.matrixV();
-
-        // 计算旋转矩阵 R = V * U^T
-        Eigen::Matrix3d R = V * U.transpose();
-
-        // 确保是右手坐标系（行列式为1）
-        if (R.determinant() < 0) {
-            V.col(2) *= -1;
-            R = V * U.transpose();
-        }
-
-        // 计算平移向量 t = robot_centroid - R * vr_centroid
-        Eigen::Vector3d t = robot_centroid - R * vr_centroid;
-
-        // 转换为tf2::Transform
-        tf2::Matrix3x3 tf2_rotation(
-            R(0,0), R(0,1), R(0,2),
-            R(1,0), R(1,1), R(1,2),
-            R(2,0), R(2,1), R(2,2)
-        );
-        tf2::Vector3 tf2_translation(t(0), t(1), t(2));
-
-        tf2::Transform transform;
-        transform.setBasis(tf2_rotation);
-        transform.setOrigin(tf2_translation);
-
-        // 输出变换信息用于调试
-        RCLCPP_INFO(get_logger(), 
-            "Computed transform - Translation: [%.3f, %.3f, %.3f]",
-            t(0), t(1), t(2));
-
-        return transform;
-    }
-
-    // ==================== VR控制服务 ====================
-    void handleEnableVR(
-        const qyh_jaka_control_msgs::srv::EnableVRFollow::Request::SharedPtr req,
-        qyh_jaka_control_msgs::srv::EnableVRFollow::Response::SharedPtr res)
-    {
-        if (!servo_running_) {
-            res->success = false;
-            res->message = "Servo mode not running";
-            return;
-        }
-
-        if (req->enable) {
-            // Check if username is provided
-            if (req->username.empty()) {
-                res->success = false;
-                res->message = "Username is required to enable VR follow";
-                return;
-            }
-
-            // 1. Get VR user calibration profile
-            if (!client_get_profile_->wait_for_service(std::chrono::seconds(1))) {
-                res->success = false;
-                res->message = "VR calibration service not available";
-                return;
-            }
-
-            auto vr_profile_req = std::make_shared<qyh_vr_calibration_msgs::srv::GetProfile::Request>();
-            vr_profile_req->username = req->username;
-
-            auto vr_future = client_get_profile_->async_send_request(vr_profile_req);
-            
-            if (vr_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
-                res->success = false;
-                res->message = "Timeout waiting for VR user profile";
-                return;
-            }
-
-            auto vr_profile_res = vr_future.get();
-            if (!vr_profile_res->found) {
-                res->success = false;
-                res->message = "VR profile not found for user: " + req->username + 
-                               ". Please calibrate VR first.";
-                return;
-            }
-
-            // 2. Get robot calibration profile
-            if (!client_get_robot_calibration_->wait_for_service(std::chrono::seconds(1))) {
-                res->success = false;
-                res->message = "Robot calibration service not available";
-                return;
-            }
-
-            auto robot_profile_req = std::make_shared<qyh_vr_calibration_msgs::srv::GetRobotCalibration::Request>();
-            auto robot_future = client_get_robot_calibration_->async_send_request(robot_profile_req);
-            
-            if (robot_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
-                res->success = false;
-                res->message = "Timeout waiting for robot calibration profile";
-                return;
-            }
-
-            auto robot_profile_res = robot_future.get();
-            if (!robot_profile_res->found) {
-                res->success = false;
-                res->message = "Robot calibration not found. Please calibrate robot first using set_robot_calibration service.";
-                return;
-            }
-
-            // 3. Extract poses from both profiles
-            std::map<uint32_t, geometry_msgs::msg::Pose> vr_left_poses;
-            std::map<uint32_t, geometry_msgs::msg::Pose> vr_right_poses;
-            std::map<uint32_t, geometry_msgs::msg::Pose> robot_left_poses;
-            std::map<uint32_t, geometry_msgs::msg::Pose> robot_right_poses;
-            
-            // VR poses (from user's calibration)
-            for (const auto& sample : vr_profile_res->profile.samples) {
-                if (sample.sample_index < 4) {
-                    vr_left_poses[sample.sample_index] = sample.left_hand_pose;
-                    vr_right_poses[sample.sample_index] = sample.right_hand_pose;
-                }
-            }
-
-            // Robot poses (from robot calibration)
-            for (const auto& sample : robot_profile_res->profile.samples) {
-                if (sample.sample_index < 4) {
-                    robot_left_poses[sample.sample_index] = sample.left_hand_pose;
-                    robot_right_poses[sample.sample_index] = sample.right_hand_pose;
-                }
-            }
-
-            // 4. Validate all 4 poses exist for both VR and robot
-            std::vector<uint32_t> missing_vr_indices;
-            std::vector<uint32_t> missing_robot_indices;
-            
-            for (uint32_t i = 0; i < 4; ++i) {
-                if (vr_left_poses.find(i) == vr_left_poses.end() ||
-                    vr_right_poses.find(i) == vr_right_poses.end()) {
-                    missing_vr_indices.push_back(i);
-                }
-                if (robot_left_poses.find(i) == robot_left_poses.end() ||
-                    robot_right_poses.find(i) == robot_right_poses.end()) {
-                    missing_robot_indices.push_back(i);
-                }
-            }
-
-            if (!missing_vr_indices.empty() || !missing_robot_indices.empty()) {
-                res->success = false;
-                std::string msg = "Incomplete calibration data. Missing poses: ";
-                if (!missing_vr_indices.empty()) {
-                    msg += "VR user [";
-                    for (size_t i = 0; i < missing_vr_indices.size(); ++i) {
-                        msg += std::to_string(missing_vr_indices[i]);
-                        if (i < missing_vr_indices.size() - 1) msg += ",";
-                    }
-                    msg += "]";
-                }
-                if (!missing_robot_indices.empty()) {
-                    if (!missing_vr_indices.empty()) msg += ", ";
-                    msg += "Robot [";
-                    for (size_t i = 0; i < missing_robot_indices.size(); ++i) {
-                        msg += std::to_string(missing_robot_indices[i]);
-                        if (i < missing_robot_indices.size() - 1) msg += ",";
-                    }
-                    msg += "]";
-                }
-                msg += ". Required: 0-3 (T-Pose, Forward, Up, Down)";
-                res->message = msg;
-                return;
-            }
-
-            // 5. Compute transformations for left and right arms
-            std::vector<geometry_msgs::msg::Pose> vr_left_vec, vr_right_vec;
-            std::vector<geometry_msgs::msg::Pose> robot_left_vec, robot_right_vec;
-            
-            for (uint32_t i = 0; i < 4; ++i) {
-                vr_left_vec.push_back(vr_left_poses[i]);
-                vr_right_vec.push_back(vr_right_poses[i]);
-                robot_left_vec.push_back(robot_left_poses[i]);
-                robot_right_vec.push_back(robot_right_poses[i]);
-            }
-
-            vr_to_robot_left_ = computeRigidTransform(vr_left_vec, robot_left_vec);
-            vr_to_robot_right_ = computeRigidTransform(vr_right_vec, robot_right_vec);
-
-            RCLCPP_INFO(get_logger(), 
-                "✓ Loaded and computed VR-to-robot transforms for user: %s", 
-                req->username.c_str());
-        }
-
-        vr_following_ = req->enable;
-        res->success = true;
-        res->message = vr_following_ ? "VR following enabled" : "VR following disabled";
-        RCLCPP_INFO(get_logger(), vr_following_ ? "✓ VR following ENABLED" : "✓ VR following DISABLED");
-    }
-
-    void handleCalibrateVR(
-        const qyh_jaka_control_msgs::srv::CalibrateVR::Request::SharedPtr req,
-        qyh_jaka_control_msgs::srv::CalibrateVR::Response::SharedPtr res)
-    {
-        // 简单实现：设置VR到机器人的坐标变换
-        // TODO: 实现完整的校准流程
-        res->success = true;
-        res->message = "VR calibration completed";
-        RCLCPP_INFO(get_logger(), "✓ VR calibrated");
     }
 
     // ==================== 自动初始化流程 ====================
@@ -950,11 +593,6 @@ private:
         }
         servo_running_ = true;
         RCLCPP_INFO(get_logger(), "✓ Servo mode started");
-
-        // 步骤6: 启用VR跟随
-        RCLCPP_INFO(get_logger(), "[6/6] Enabling VR follow mode...");
-        vr_following_ = true;
-        RCLCPP_INFO(get_logger(), "✓ VR follow mode enabled");
 
         return true;
     }
@@ -1048,15 +686,7 @@ private:
     std::atomic<bool> powered_;
     std::atomic<bool> enabled_;
     std::atomic<bool> servo_running_;
-    std::atomic<bool> vr_following_;
     int64_t last_cycle_duration_us_ = 0;
-
-    // VR相关
-    std::mutex vr_mutex_;
-    qyh_jaka_control_msgs::msg::VRPose::SharedPtr last_vr_left_;
-    qyh_jaka_control_msgs::msg::VRPose::SharedPtr last_vr_right_;
-    tf2::Transform vr_to_robot_left_;
-    tf2::Transform vr_to_robot_right_;
 
     // 指令缓存
     std::mutex cmd_mutex_;
@@ -1066,14 +696,11 @@ private:
 
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;
-    rclcpp::Publisher<qyh_jaka_control_msgs::msg::VRFollowStatus>::SharedPtr vr_status_pub_;
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::RobotState>::SharedPtr robot_state_pub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_states_pub_;
     
     rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualJointServo>::SharedPtr joint_sub_;
     rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualCartesianServo>::SharedPtr cartesian_sub_;
-    rclcpp::Subscription<qyh_jaka_control_msgs::msg::VRPose>::SharedPtr vr_left_sub_;
-    rclcpp::Subscription<qyh_jaka_control_msgs::msg::VRPose>::SharedPtr vr_right_sub_;
 
     // 基础控制服务
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_on_;
@@ -1087,10 +714,6 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::StartServo>::SharedPtr srv_start_servo_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::StopServo>::SharedPtr srv_stop_servo_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetFilter>::SharedPtr srv_set_filter_;
-    
-    // VR控制服务
-    rclcpp::Service<qyh_jaka_control_msgs::srv::EnableVRFollow>::SharedPtr srv_enable_vr_;
-    rclcpp::Service<qyh_jaka_control_msgs::srv::CalibrateVR>::SharedPtr srv_calibrate_vr_;
 
     // 点到点运动服务
     rclcpp::Service<qyh_jaka_control_msgs::srv::MoveJ>::SharedPtr srv_move_j_;
@@ -1098,10 +721,6 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetCollisionLevel>::SharedPtr srv_set_collision_level_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetToolOffset>::SharedPtr srv_set_tool_offset_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::GetRobotState>::SharedPtr srv_get_robot_state_;
-
-    // VR Calibration Client
-    rclcpp::Client<qyh_vr_calibration_msgs::srv::GetProfile>::SharedPtr client_get_profile_;
-    rclcpp::Client<qyh_vr_calibration_msgs::srv::GetRobotCalibration>::SharedPtr client_get_robot_calibration_;
 
     // 定时器
     rclcpp::TimerBase::SharedPtr main_timer_;

@@ -1,6 +1,25 @@
 # qyh_jaka_control
 
-本功能包提供了JAKA双臂机器人系统的核心控制节点。它负责与机器人控制器通信，提供ROS 2控制接口，并集成了VR遥操作和数据录制功能。
+本功能包提供了JAKA双臂机器人系统的核心控制节点。它负责与机器人控制器通信，提供ROS 2控制接口，**接收来自遥操作控制器的关节/笛卡尔命令**，并执行平滑伺服控制。
+
+## 架构说明
+
+根据新的VR遥操作架构，本包在整个系统中的位置：
+
+```
+VR手柄 → qyh_vr_calibration → qyh_teleoperation_controller → qyh_jaka_control → JAKA机器人
+          (坐标变换+校准)      (差分IK+轨迹平滑)          (伺服执行)
+```
+
+**关键职责**:
+- ✅ 接收关节/笛卡尔命令（来自 `qyh_teleoperation_controller`）
+- ✅ 轨迹缓冲和插值平滑（通过 `smooth_servo_bridge`）
+- ✅ 125Hz EtherCAT实时伺服控制
+- ✅ 基础机器人控制（上下电、使能、错误处理）
+- ❌ **不再**直接订阅VR数据
+- ❌ **不再**计算VR到机器人的坐标变换
+
+详细架构请参考: [TELEOPERATION_INTEGRATION_GUIDE.md](/TELEOPERATION_INTEGRATION_GUIDE.md)
 
 ## SDK 版本
 
@@ -20,8 +39,10 @@
 `jaka_control_node` 通过以太网连接到JAKA机器人控制器，主要功能包括：
 - **基础控制**：上下电、使能/去使能、错误清除、急停。
 - **实时伺服**：支持关节空间和笛卡尔空间的实时控制（默认125Hz）。
-- **VR遥操作**：订阅VR手柄位姿，控制机械臂跟随。
-- **数据录制**：以CSV格式记录机器人状态和VR数据，用于具身智能训练。
+- **平滑执行**：通过 `smooth_servo_bridge` 提供轨迹缓冲和插值。
+- **状态发布**：发布机器人状态和关节状态供其他节点使用。
+
+**注意**: VR数据处理和坐标变换由 `qyh_vr_calibration` 和 `qyh_teleoperation_controller` 负责。
 
 ### 参数列表 (Parameters)
 
@@ -31,27 +52,19 @@
 | `cycle_time_ms` | double | 8.0 | 控制周期（毫秒），8ms对应125Hz。 |
 | `use_cartesian` | bool | false | 是否使用笛卡尔空间控制（False为关节空间）。 |
 | `auto_connect` | bool | true | 启动时是否自动连接机器人。 |
-| `auto_power_on` | bool | false | 连接成功后是否自动上电。 |
-| `auto_enable` | bool | false | 上电成功后是否自动使能。 |
-| `recording_output_dir` | string | "/tmp/jaka_recordings" | 录制数据的保存目录。 |
+| `auto_initialize` | bool | false | 连接成功后是否自动执行初始化流程（上电+使能+归位）。 |
 
 ### 订阅话题 (Subscribed Topics)
 
 - `/jaka/servo/joint_cmd` (`qyh_jaka_control_msgs/msg/JakaDualJointServo`)
-    - 双臂关节位置控制指令。
+    - 双臂关节位置控制指令（通常来自 `qyh_teleoperation_controller`）。
 - `/jaka/servo/cartesian_cmd` (`qyh_jaka_control_msgs/msg/JakaDualCartesianServo`)
-    - 双臂笛卡尔位姿控制指令。
-- `/vr/left_controller` (`qyh_jaka_control_msgs/msg/VRPose`)
-    - 左手VR控制器的位姿数据。
-- `/vr/right_controller` (`qyh_jaka_control_msgs/msg/VRPose`)
-    - 右手VR控制器的位姿数据。
+    - 双臂笛卡尔位姿控制指令（可选）。
 
 ### 发布话题 (Published Topics)
 
 - `/jaka/servo/status` (`qyh_jaka_control_msgs/msg/JakaServoStatus`)
     - 伺服控制回路的实时状态（10Hz）。
-- `/jaka/vr/status` (`qyh_jaka_control_msgs/msg/VRFollowStatus`)
-    - VR跟随模式的状态（仅在跟随模式下发布）。
 - `/jaka/robot_state` (`qyh_jaka_control_msgs/msg/RobotState`)
     - 机器人完整状态（包括关节位置、笛卡尔位姿、错误信息等，10Hz）。
 - `/joint_states` (`sensor_msgs/msg/JointState`)
@@ -71,12 +84,6 @@
 - `/jaka/servo/start` (`qyh_jaka_control_msgs/srv/StartServo`)：进入实时伺服模式。
 - `/jaka/servo/stop` (`qyh_jaka_control_msgs/srv/StopServo`)：退出实时伺服模式。
 - `/jaka/servo/set_filter` (`qyh_jaka_control_msgs/srv/SetFilter`)：配置运动滤波器（LPF/NLF）。
-
-#### VR与录制
-- `/jaka/vr/enable` (`qyh_jaka_control_msgs/srv/EnableVRFollow`)：开启/关闭VR跟随。
-- `/jaka/vr/calibrate` (`qyh_jaka_control_msgs/srv/CalibrateVR`)：校准VR坐标系。
-- `/jaka/vr/start_recording` (`qyh_jaka_control_msgs/srv/StartRecording`)：开始录制数据。
-- `/jaka/vr/stop_recording` (`qyh_jaka_control_msgs/srv/StopRecording`)：停止录制并保存。
 
 #### 点到点运动
 - `/jaka/move_j` (`qyh_jaka_control_msgs/srv/MoveJ`)：关节空间点到点运动。
@@ -124,37 +131,38 @@ ros2 service call /jaka/move_l qyh_jaka_control_msgs/srv/MoveL \
 ```
 
 #### 2. 实时伺服控制
+
+**通常由 `qyh_teleoperation_controller` 发送命令，无需手动操作。**
+
 ```bash
 # 启动与使能（同上）
 
 # 开启伺服模式
 ros2 service call /jaka/servo/start qyh_jaka_control_msgs/srv/StartServo
 
-# 通过话题发送实时控制指令
-ros2 topic pub /jaka/servo/joint_cmd qyh_jaka_control_msgs/msg/JakaDualJointServo ...
+# 命令由 qyh_teleoperation_controller 自动发送到 /jaka/servo/joint_cmd
 
 # 停止伺服模式
 ros2 service call /jaka/servo/stop qyh_jaka_control_msgs/srv/StopServo
 ```
 
-#### 3. VR遥操作与录制
+#### 3. 完整VR遥操作系统
+
+参考 [TELEOPERATION_INTEGRATION_GUIDE.md](/TELEOPERATION_INTEGRATION_GUIDE.md) 中的完整启动流程：
+
 ```bash
-# 开启伺服模式后
+# 方式1: 完整系统launch
+ros2 launch qyh_teleoperation_bringup full_system.launch.py robot_ip:=192.168.2.200
 
-# 校准VR坐标系（首次使用）
-ros2 service call /jaka/vr/calibrate qyh_jaka_control_msgs/srv/CalibrateVR
-
-# 启用VR跟随
-ros2 service call /jaka/vr/enable qyh_jaka_control_msgs/srv/EnableVRFollow "{enable: true}"
-
-# 开始录制
-ros2 service call /jaka/vr/start_recording qyh_jaka_control_msgs/srv/StartRecording \
-  "{output_path: '/home/user/data'}"
-
-# ... 进行操作 ...
-
-# 停止录制
-ros2 service call /jaka/vr/stop_recording qyh_jaka_control_msgs/srv/StopRecording
+# 方式2: 分步启动（调试）
+# 终端1: VR接口
+ros2 launch qyh_vr_calibration vr_interface.launch.py
+# 终端2: MoveIt虚拟臂
+ros2 launch qyh_dual_arms_moveit_config move_group.launch.py
+# 终端3: 遥操作控制器
+ros2 launch qyh_teleoperation_controller teleoperation_controller.launch.py
+# 终端4: JAKA桥接（本包）
+ros2 launch qyh_jaka_control jaka_bridge.launch.py robot_ip:=192.168.2.200
 ```
 
 #### 4. 配置机器人参数
@@ -181,12 +189,7 @@ ros2 topic echo /jaka/robot_state
 rviz2
 ```
 
-## 数据格式
-录制的CSV文件包含以下字段：
-- `timestamp`: 相对录制开始的时间戳（秒）。
-- `left_vr_*`: 左手VR位姿 (x, y, z, qx, qy, qz, qw)。
-- `right_vr_*`: 右手VR位姿 (x, y, z, qx, qy, qz, qw)。
-- *(注：根据具体实现，可能还包含关节角度和末端位姿)*
+## 机械臂关节对称性
 
 
 对于人体的某个姿势（左右对称）的情况下，我们的机械臂： 1 3 5 6 轴是反的 ， 2 4轴是相同的
