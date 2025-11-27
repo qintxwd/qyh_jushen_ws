@@ -70,6 +70,8 @@ public:
                                 0.0, -0.785, 0.0, -2.356, 0.0, 1.571, -0.785});
         declare_parameter<double>("init_joint_velocity", 0.5);
         declare_parameter<double>("init_joint_acceleration", 0.3);
+        declare_parameter<std::string>("default_filter_type", "joint_lpf");
+        declare_parameter<double>("default_filter_cutoff", 5.0);
         
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
@@ -575,6 +577,18 @@ private:
             res->success = false;
             res->message = "Robot not enabled";
             return;
+        }
+
+        // Apply default filter to handle jitter from non-realtime sources (like Python)
+        std::string filter_type = get_parameter("default_filter_type").as_string();
+        double cutoff = get_parameter("default_filter_cutoff").as_double();
+        
+        if (filter_type == "joint_lpf") {
+            jaka_interface_.setFilterJointLPF(cutoff);
+            RCLCPP_INFO(get_logger(), "Applied default filter: Joint LPF (%.1f Hz)", cutoff);
+        } else if (filter_type == "none") {
+            jaka_interface_.setFilterNone();
+            RCLCPP_INFO(get_logger(), "Applied default filter: None");
         }
 
         if (jaka_interface_.servoMoveEnable(true)) {
