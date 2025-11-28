@@ -10,7 +10,7 @@ echo ""
 echo "Source ROS2 Humble环境..."
 source /opt/ros/humble/setup.bash
 
-cd /mnt/d/work/yc/qyh_jushen_ws/qyh_jushen_ws
+cd ~/qyh_jushen_ws/qyh_jushen_ws
 
 echo ""
 echo "步骤1: 编译消息定义包..."

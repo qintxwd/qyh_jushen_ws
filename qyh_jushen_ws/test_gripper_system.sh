@@ -7,7 +7,7 @@ echo "========================================="
 
 # Source environment
 source /opt/ros/humble/setup.bash
-cd /mnt/d/work/yc/qyh_jushen_ws/qyh_jushen_ws
+cd ~/qyh_jushen_ws/qyh_jushen_ws
 source install/setup.bash
 
 echo ""
