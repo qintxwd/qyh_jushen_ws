@@ -1,0 +1,18 @@
+# 升降电机控制服务
+# 统一控制接口
+
+# 命令类型
+uint8 CMD_ENABLE = 1          # 上使能
+uint8 CMD_DISABLE = 2         # 下使能
+uint8 CMD_SET_SPEED = 3       # 设置速度
+uint8 CMD_GO_POSITION = 4     # 去目标位置
+uint8 CMD_MOVE_UP = 5         # 手动上升 (hold=true开始, hold=false停止)
+uint8 CMD_MOVE_DOWN = 6       # 手动下降 (hold=true开始, hold=false停止)
+uint8 CMD_RESET_ALARM = 7     # 复位报警
+
+uint8 command                 # 命令类型
+float32 value                 # 参数值 (速度或目标位置)
+bool hold                     # 用于上升/下降: true=按住, false=松开
+---
+bool success
+string message
