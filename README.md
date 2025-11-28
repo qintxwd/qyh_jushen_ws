@@ -116,6 +116,17 @@ sudo apt install -y android-tools-adb \
 
 ### 9. Python依赖
 ```bash
+# 【推荐】配置国内pip镜像源（阿里云）加速下载
+mkdir -p ~/.pip
+cat > ~/.pip/pip.conf << 'EOF'
+[global]
+index-url = https://mirrors.aliyun.com/pypi/simple/
+trusted-host = mirrors.aliyun.com
+EOF
+
+# ROS2消息生成必需（必须使用3.3.4版本，与ROS2 Humble兼容）
+pip3 install 'empy==3.3.4'
+
 # 基础Python库
 pip3 install numpy scipy matplotlib
 
@@ -125,6 +136,10 @@ pip3 install transforms3d
 # 如需要数据采集
 pip3 install h5py pandas
 ```
+
+**重要**: 
+- `empy` 是 ROS2 编译自定义消息包（如 `qyh_lift_msgs`、`qyh_gripper_msgs` 等）时必需的依赖。如果缺少此包，编译时会报错 `ModuleNotFoundError: No module named 'em'`。
+- 使用阿里云镜像源可以大幅提升国内下载速度。
 
 ### 10. 一键安装脚本
 ```bash
@@ -211,6 +226,18 @@ sudo apt install -y \
     nlohmann-json3-dev
 
 # 9. Python依赖
+# 配置国内镜像源（推荐）
+mkdir -p ~/.pip
+cat > ~/.pip/pip.conf << 'PIPEOF'
+[global]
+index-url = https://mirrors.aliyun.com/pypi/simple/
+trusted-host = mirrors.aliyun.com
+PIPEOF
+
+# ROS2消息生成必需
+pip3 install 'empy==3.3.4'
+
+# 其他Python库
 pip3 install numpy scipy matplotlib transforms3d h5py pandas
 
 echo "=== 依赖安装完成 ==="
