@@ -1,0 +1,10 @@
+# 获取任务状态服务
+
+# 任务 ID (留空则返回当前任务)
+string task_id
+
+---
+
+bool success
+qyh_task_engine_msgs/TaskStatus status
+string message

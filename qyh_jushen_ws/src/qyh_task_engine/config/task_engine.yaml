@@ -1,0 +1,14 @@
+# 任务引擎配置
+task_engine:
+  ros__parameters:
+    # Tick 频率 (Hz)
+    tick_rate: 10.0
+    
+    # 状态发布频率 (Hz)
+    status_publish_rate: 5.0
+    
+    # 默认超时时间 (秒)
+    default_timeout: 60.0
+    
+    # 调试模式
+    debug_mode: false
