@@ -6,6 +6,7 @@ import time
 from typing import Dict, Any, Optional
 
 from ..base_node import SkillNode, SkillStatus, SkillResult
+from ..preset_loader import preset_loader
 
 
 class BaseMoveToNode(SkillNode):
@@ -153,20 +154,21 @@ class BaseMoveToNode(SkillNode):
         # 优先使用预设点位
         if 'location' in self.params:
             location_name = self.params['location']
+            
+            # 优先从持久化预设加载
+            loc_preset = preset_loader.get_location(location_name)
+            if loc_preset:
+                return (
+                    loc_preset.get('x', 0),
+                    loc_preset.get('y', 0),
+                    loc_preset.get('theta', 0)
+                )
+            
+            # 从黑板读取（兼容旧格式）
             locations = self.read_from_blackboard('assets.locations', {})
             if location_name in locations:
                 loc = locations[location_name]
                 return (loc.get('x', 0), loc.get('y', 0), loc.get('theta', 0))
-            
-            # 内置预设
-            builtin_locations = {
-                'charging_station': (0.0, 0.0, 0.0),
-                'point_A': (1.0, 0.0, 0.0),
-                'point_B': (2.0, 1.0, 1.57),
-                'point_C': (0.0, 2.0, 3.14),
-            }
-            if location_name in builtin_locations:
-                return builtin_locations[location_name]
             
             self.log_error(f"Unknown location: {location_name}")
             return None

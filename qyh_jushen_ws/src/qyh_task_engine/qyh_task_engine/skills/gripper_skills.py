@@ -3,9 +3,10 @@
 """
 
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from ..base_node import SkillNode, SkillStatus, SkillResult
+from ..preset_loader import preset_loader
 
 
 class GripperControlNode(SkillNode):
@@ -15,6 +16,8 @@ class GripperControlNode(SkillNode):
     参数:
         side: 机械臂选择 ("left", "right")
         action: 动作 ("open", "close")
+        position: 夹爪位置 (0.0-1.0)，可选
+        position_name: 预设位置名称（可选）
         force: 夹持力（可选），默认使用系统默认值
         wait_complete: 是否等待完成，默认 True
     """
@@ -23,7 +26,9 @@ class GripperControlNode(SkillNode):
     
     PARAM_SCHEMA = {
         'side': {'type': 'string', 'required': True, 'enum': ['left', 'right']},
-        'action': {'type': 'string', 'required': True, 'enum': ['open', 'close']},
+        'action': {'type': 'string', 'required': False, 'enum': ['open', 'close']},
+        'position': {'type': 'float', 'required': False},
+        'position_name': {'type': 'string', 'required': False},
         'force': {'type': 'float', 'required': False},
         'wait_complete': {'type': 'bool', 'default': True},
     }
@@ -55,10 +60,17 @@ class GripperControlNode(SkillNode):
     def execute(self) -> SkillResult:
         """执行夹爪控制"""
         side = self.params.get('side', 'left')
-        action = self.params.get('action', 'open')
         force = self.params.get('force')
         
-        self.log_info(f"{action.capitalize()} {side} gripper")
+        # 解析动作/位置
+        action, position = self._resolve_action()
+        if action is None and position is None:
+            return SkillResult(
+                status=SkillStatus.FAILURE,
+                message="Missing action or position"
+            )
+        
+        self.log_info(f"Gripper {side}: action={action}, position={position}")
         
         # Mock 模式
         if not self._gripper_client:
@@ -106,4 +118,48 @@ class GripperControlNode(SkillNode):
                     message=f"Gripper control failed: {e}"
                 )
         
-        return SkillResult(status=SkillStatus.RUNNING, message=f"Executing gripper {action}...")
+        return SkillResult(
+            status=SkillStatus.RUNNING, 
+            message="Executing gripper..."
+        )
+
+    def _resolve_action(self) -> tuple:
+        """
+        解析夹爪动作/位置
+        
+        Returns:
+            (action, position) tuple
+        """
+        side = self.params.get('side', 'left')
+        
+        # 使用预设位置名称
+        if 'position_name' in self.params:
+            pos_name = self.params['position_name']
+            
+            pos_preset = preset_loader.get_gripper_position(pos_name)
+            if pos_preset:
+                if side == 'left':
+                    position = pos_preset.get('left_position')
+                else:
+                    position = pos_preset.get('right_position')
+                
+                if position is not None:
+                    action = 'open' if position > 0.5 else 'close'
+                    return (action, position)
+            
+            self.log_error(f"Unknown gripper position: {pos_name}")
+            return (None, None)
+        
+        # 直接指定位置
+        if 'position' in self.params:
+            position = self.params['position']
+            action = 'open' if position > 0.5 else 'close'
+            return (action, position)
+        
+        # 使用动作
+        if 'action' in self.params:
+            action = self.params['action']
+            position = 1.0 if action == 'open' else 0.0
+            return (action, position)
+        
+        return (None, None)

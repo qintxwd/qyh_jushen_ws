@@ -3,9 +3,10 @@
 """
 
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from ..base_node import SkillNode, SkillStatus, SkillResult
+from ..preset_loader import preset_loader
 
 
 class HeadLookAtNode(SkillNode):
@@ -15,6 +16,7 @@ class HeadLookAtNode(SkillNode):
     参数:
         pitch: 俯仰角 (-1.0 到 1.0 归一化值，或弧度)
         yaw: 偏航角 (-1.0 到 1.0 归一化值，或弧度)
+        position_name: 预设位置名称（可选，与 pitch/yaw 二选一）
         use_normalized: 是否使用归一化值，默认 True
         wait_stable: 是否等待稳定，默认 True
     """
@@ -22,8 +24,9 @@ class HeadLookAtNode(SkillNode):
     NODE_TYPE = "HeadLookAt"
     
     PARAM_SCHEMA = {
-        'pitch': {'type': 'float', 'required': True},
-        'yaw': {'type': 'float', 'required': True},
+        'pitch': {'type': 'float', 'required': False},
+        'yaw': {'type': 'float', 'required': False},
+        'position_name': {'type': 'string', 'required': False},
         'use_normalized': {'type': 'bool', 'default': True},
         'wait_stable': {'type': 'bool', 'default': True},
     }
@@ -56,8 +59,15 @@ class HeadLookAtNode(SkillNode):
     
     def execute(self) -> SkillResult:
         """执行头部转向"""
-        pitch = self.params.get('pitch', 0.0)
-        yaw = self.params.get('yaw', 0.0)
+        # 解析目标位置
+        target = self._resolve_target()
+        if target is None:
+            return SkillResult(
+                status=SkillStatus.FAILURE,
+                message="Invalid head target: missing pitch/yaw or position_name"
+            )
+        
+        pitch, yaw = target
         wait_stable = self.params.get('wait_stable', True)
         
         self.log_info(f"Looking at pitch={pitch:.2f}, yaw={yaw:.2f}")
@@ -98,7 +108,33 @@ class HeadLookAtNode(SkillNode):
                 message="Head position reached"
             )
         
-        return SkillResult(status=SkillStatus.RUNNING, message="Waiting for head to stabilize...")
+        return SkillResult(
+            status=SkillStatus.RUNNING, 
+            message="Waiting for head..."
+        )
+
+    def _resolve_target(self) -> Optional[tuple]:
+        """解析头部目标位置"""
+        # 使用预设位置名称
+        if 'position_name' in self.params:
+            pos_name = self.params['position_name']
+            
+            # 从持久化预设加载
+            pos_preset = preset_loader.get_head_position(pos_name)
+            if pos_preset:
+                return (pos_preset.get('tilt', 0.0), pos_preset.get('pan', 0.0))
+            
+            self.log_error(f"Unknown head position: {pos_name}")
+            return None
+        
+        # 直接使用 pitch/yaw
+        if 'pitch' in self.params or 'yaw' in self.params:
+            return (
+                self.params.get('pitch', 0.0),
+                self.params.get('yaw', 0.0)
+            )
+        
+        return None
 
 
 class HeadScanNode(SkillNode):

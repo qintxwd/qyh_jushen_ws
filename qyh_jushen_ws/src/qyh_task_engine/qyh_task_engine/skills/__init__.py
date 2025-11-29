@@ -6,6 +6,7 @@
 - 夹爪技能: GripperControl
 - 头部技能: HeadLookAt, HeadScan
 - 底盘技能: BaseMoveTo, BaseVelocity
+- 升降技能: LiftMoveTo, LiftStop
 - 逻辑技能: Wait, CheckCondition
 """
 
@@ -13,7 +14,8 @@ from .arm_skills import ArmMoveJNode, ArmMoveLNode, ArmStopNode
 from .gripper_skills import GripperControlNode
 from .head_skills import HeadLookAtNode, HeadScanNode
 from .base_skills import BaseMoveToNode, BaseVelocityNode
-from .logic_skills import WaitNode, CheckConditionNode
+from .lift_skills import LiftMoveToNode, LiftStopNode
+from .logic_skills import WaitNode, CheckConditionNode, SubTaskNode
 
 __all__ = [
     # 机械臂
@@ -28,9 +30,13 @@ __all__ = [
     # 底盘
     'BaseMoveToNode',
     'BaseVelocityNode',
+    # 升降
+    'LiftMoveToNode',
+    'LiftStopNode',
     # 逻辑
     'WaitNode',
     'CheckConditionNode',
+    'SubTaskNode',
 ]
 
 # 节点类型注册表（用于 JSON 解析）
@@ -43,6 +49,9 @@ SKILL_REGISTRY = {
     'HeadScan': HeadScanNode,
     'BaseMoveTo': BaseMoveToNode,
     'BaseVelocity': BaseVelocityNode,
+    'LiftMoveTo': LiftMoveToNode,
+    'LiftStop': LiftStopNode,
     'Wait': WaitNode,
     'CheckCondition': CheckConditionNode,
+    'SubTask': SubTaskNode,
 }

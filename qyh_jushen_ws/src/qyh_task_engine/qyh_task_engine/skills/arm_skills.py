@@ -8,9 +8,10 @@
 """
 
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from ..base_node import SkillNode, SkillStatus, SkillResult
+from ..preset_loader import preset_loader
 
 
 class ArmMoveJNode(SkillNode):
@@ -133,28 +134,50 @@ class ArmMoveJNode(SkillNode):
         return SkillResult(status=SkillStatus.RUNNING, message="Executing MoveJ...")
     
     def _resolve_joint_positions(self) -> Optional[List[float]]:
-        """解析关节位置（从参数或预设资产）"""
+        """
+        解析关节位置（从参数或预设资产）
+        
+        支持的参数形式:
+        1. joint_positions: 直接指定7个关节角度
+        2. pose_name: 预设姿态名称（从持久化存储读取）
+        3. left_joints / right_joints: 分别指定左右臂
+        """
+        side = self.params.get('side', 'left')
+        
+        # 直接指定关节位置
         if 'joint_positions' in self.params:
             return list(self.params['joint_positions'])
         
+        # 从预设姿态读取
         if 'pose_name' in self.params:
             pose_name = self.params['pose_name']
-            # 从黑板读取预设姿态
+            
+            # 优先从持久化预设加载
+            pose_preset = preset_loader.get_arm_pose(pose_name)
+            if pose_preset:
+                if side == 'left' and pose_preset.get('left_joints'):
+                    return list(pose_preset['left_joints'])
+                elif side == 'right' and pose_preset.get('right_joints'):
+                    return list(pose_preset['right_joints'])
+                elif side == 'both':
+                    # both 模式下返回左臂的，右臂会单独处理
+                    if pose_preset.get('left_joints'):
+                        return list(pose_preset['left_joints'])
+                self.log_warn(f"Pose '{pose_name}' found but no joints for side '{side}'")
+            
+            # 从黑板读取预设姿态（兼容旧格式）
             poses = self.read_from_blackboard('assets.poses', {})
             if pose_name in poses:
                 return list(poses[pose_name])
             
-            # 内置预设
-            builtin_poses = {
-                'home_pose': [0.0] * 7,
-                'observe_pose': [0.0, -0.5, 0.0, 1.2, 0.0, 0.5, 0.0],
-                'handover_pose': [0.0, 0.3, 0.0, 1.0, 0.0, 0.7, 0.0],
-            }
-            if pose_name in builtin_poses:
-                return builtin_poses[pose_name]
-            
             self.log_error(f"Unknown pose_name: {pose_name}")
             return None
+        
+        # 直接指定 left_joints 或 right_joints
+        if side == 'left' and 'left_joints' in self.params:
+            return list(self.params['left_joints'])
+        if side == 'right' and 'right_joints' in self.params:
+            return list(self.params['right_joints'])
         
         self.log_error("Missing joint_positions or pose_name")
         return None

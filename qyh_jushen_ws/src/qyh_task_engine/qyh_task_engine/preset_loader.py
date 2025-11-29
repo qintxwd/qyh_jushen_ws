@@ -1,0 +1,208 @@
+"""
+预设加载器 (Preset Loader)
+
+用于 ROS2 任务引擎从持久化存储加载预设数据
+"""
+
+import os
+import json
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+
+
+class PresetLoader:
+    """
+    预设加载器
+    
+    从 ~/qyh_jushen_ws/persistent/preset/ 加载预设数据
+    供 ROS2 任务引擎使用
+    """
+    
+    FILE_MAP = {
+        "location": "locations.json",
+        "arm_pose": "arm_poses.json",
+        "lift_height": "lift_heights.json",
+        "head_position": "head_positions.json",
+        "gripper_position": "gripper_positions.json",
+        "task_template": "task_templates.json",
+    }
+    
+    def __init__(self, storage_path: str = None):
+        if storage_path is None:
+            home = Path.home()
+            storage_path = home / "qyh_jushen_ws" / "persistent" / "preset"
+        
+        self.storage_path = Path(storage_path)
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._load_all()
+        self._add_builtin_presets()
+    
+    def _load_all(self):
+        """加载所有预设文件"""
+        for preset_type, filename in self.FILE_MAP.items():
+            self._cache[preset_type] = {}
+            filepath = self.storage_path / filename
+            if filepath.exists():
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    for item in data.get('items', []):
+                        item_id = item.get('id')
+                        if item_id:
+                            self._cache[preset_type][item_id] = item
+                            # 同时用名称作为索引
+                            name = item.get('name')
+                            if name:
+                                self._cache[preset_type][name] = item
+                except Exception as e:
+                    print(f"⚠️  加载预设文件失败 [{filename}]: {e}")
+    
+    def _add_builtin_presets(self):
+        """添加内置预设"""
+        # 内置点位
+        builtin_locations = {
+            "loc_origin": {"id": "loc_origin", "name": "原点", "x": 0.0, "y": 0.0, "theta": 0.0},
+            "原点": {"id": "loc_origin", "name": "原点", "x": 0.0, "y": 0.0, "theta": 0.0},
+            "loc_charging": {"id": "loc_charging", "name": "充电桩", "x": 0.0, "y": 0.0, "theta": 0.0},
+            "充电桩": {"id": "loc_charging", "name": "充电桩", "x": 0.0, "y": 0.0, "theta": 0.0},
+        }
+        for k, v in builtin_locations.items():
+            if k not in self._cache.get("location", {}):
+                self._cache.setdefault("location", {})[k] = v
+        
+        # 内置姿态
+        builtin_arm_poses = {
+            "pose_home": {
+                "id": "pose_home", "name": "初始姿态", "side": "both",
+                "left_joints": [0.0] * 7, "right_joints": [0.0] * 7
+            },
+            "初始姿态": {
+                "id": "pose_home", "name": "初始姿态", "side": "both",
+                "left_joints": [0.0] * 7, "right_joints": [0.0] * 7
+            },
+            "pose_observe": {
+                "id": "pose_observe", "name": "观察姿态", "side": "both",
+                "left_joints": [0.0, -0.5, 0.0, 1.2, 0.0, 0.5, 0.0],
+                "right_joints": [0.0, -0.5, 0.0, 1.2, 0.0, 0.5, 0.0]
+            },
+            "观察姿态": {
+                "id": "pose_observe", "name": "观察姿态", "side": "both",
+                "left_joints": [0.0, -0.5, 0.0, 1.2, 0.0, 0.5, 0.0],
+                "right_joints": [0.0, -0.5, 0.0, 1.2, 0.0, 0.5, 0.0]
+            },
+            "pose_handover": {
+                "id": "pose_handover", "name": "递物姿态", "side": "both",
+                "left_joints": [0.0, 0.3, 0.0, 1.0, 0.0, 0.7, 0.0],
+                "right_joints": [0.0, 0.3, 0.0, 1.0, 0.0, 0.7, 0.0]
+            },
+            "递物姿态": {
+                "id": "pose_handover", "name": "递物姿态", "side": "both",
+                "left_joints": [0.0, 0.3, 0.0, 1.0, 0.0, 0.7, 0.0],
+                "right_joints": [0.0, 0.3, 0.0, 1.0, 0.0, 0.7, 0.0]
+            },
+            "pose_raise_hands": {
+                "id": "pose_raise_hands", "name": "举起双手", "side": "both",
+                "left_joints": [0.0, -1.5, 0.0, 0.5, 0.0, 0.3, 0.0],
+                "right_joints": [0.0, -1.5, 0.0, 0.5, 0.0, 0.3, 0.0]
+            },
+            "举起双手": {
+                "id": "pose_raise_hands", "name": "举起双手", "side": "both",
+                "left_joints": [0.0, -1.5, 0.0, 0.5, 0.0, 0.3, 0.0],
+                "right_joints": [0.0, -1.5, 0.0, 0.5, 0.0, 0.3, 0.0]
+            },
+        }
+        for k, v in builtin_arm_poses.items():
+            if k not in self._cache.get("arm_pose", {}):
+                self._cache.setdefault("arm_pose", {})[k] = v
+        
+        # 内置升降高度
+        builtin_lift_heights = {
+            "lift_bottom": {"id": "lift_bottom", "name": "底部", "height": 0.0},
+            "底部": {"id": "lift_bottom", "name": "底部", "height": 0.0},
+            "lift_middle": {"id": "lift_middle", "name": "中间", "height": 250.0},
+            "中间": {"id": "lift_middle", "name": "中间", "height": 250.0},
+            "lift_top": {"id": "lift_top", "name": "顶部", "height": 500.0},
+            "顶部": {"id": "lift_top", "name": "顶部", "height": 500.0},
+            "lift_desk": {"id": "lift_desk", "name": "桌面平齐", "height": 180.0},
+            "桌面平齐": {"id": "lift_desk", "name": "桌面平齐", "height": 180.0},
+        }
+        for k, v in builtin_lift_heights.items():
+            if k not in self._cache.get("lift_height", {}):
+                self._cache.setdefault("lift_height", {})[k] = v
+        
+        # 内置头部位置
+        builtin_head_positions = {
+            "head_center": {"id": "head_center", "name": "正前方", "pan": 0.0, "tilt": 0.0},
+            "正前方": {"id": "head_center", "name": "正前方", "pan": 0.0, "tilt": 0.0},
+            "head_left": {"id": "head_left", "name": "左侧", "pan": -0.8, "tilt": 0.0},
+            "左侧": {"id": "head_left", "name": "左侧", "pan": -0.8, "tilt": 0.0},
+            "head_right": {"id": "head_right", "name": "右侧", "pan": 0.8, "tilt": 0.0},
+            "右侧": {"id": "head_right", "name": "右侧", "pan": 0.8, "tilt": 0.0},
+            "head_up": {"id": "head_up", "name": "抬头", "pan": 0.0, "tilt": -0.5},
+            "抬头": {"id": "head_up", "name": "抬头", "pan": 0.0, "tilt": -0.5},
+            "head_down": {"id": "head_down", "name": "低头", "pan": 0.0, "tilt": 0.5},
+            "低头": {"id": "head_down", "name": "低头", "pan": 0.0, "tilt": 0.5},
+        }
+        for k, v in builtin_head_positions.items():
+            if k not in self._cache.get("head_position", {}):
+                self._cache.setdefault("head_position", {})[k] = v
+        
+        # 内置夹爪位置
+        builtin_gripper_positions = {
+            "gripper_open": {"id": "gripper_open", "name": "完全打开", "side": "both", "left_position": 1.0, "right_position": 1.0},
+            "完全打开": {"id": "gripper_open", "name": "完全打开", "side": "both", "left_position": 1.0, "right_position": 1.0},
+            "gripper_close": {"id": "gripper_close", "name": "完全关闭", "side": "both", "left_position": 0.0, "right_position": 0.0},
+            "完全关闭": {"id": "gripper_close", "name": "完全关闭", "side": "both", "left_position": 0.0, "right_position": 0.0},
+            "gripper_half": {"id": "gripper_half", "name": "半开", "side": "both", "left_position": 0.5, "right_position": 0.5},
+            "半开": {"id": "gripper_half", "name": "半开", "side": "both", "left_position": 0.5, "right_position": 0.5},
+        }
+        for k, v in builtin_gripper_positions.items():
+            if k not in self._cache.get("gripper_position", {}):
+                self._cache.setdefault("gripper_position", {})[k] = v
+    
+    def reload(self):
+        """重新加载所有预设"""
+        self._cache.clear()
+        self._load_all()
+        self._add_builtin_presets()
+    
+    def get_location(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取点位预设"""
+        return self._cache.get("location", {}).get(name_or_id)
+    
+    def get_arm_pose(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取手臂姿态预设"""
+        return self._cache.get("arm_pose", {}).get(name_or_id)
+    
+    def get_lift_height(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取升降高度预设"""
+        return self._cache.get("lift_height", {}).get(name_or_id)
+    
+    def get_head_position(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取头部位置预设"""
+        return self._cache.get("head_position", {}).get(name_or_id)
+    
+    def get_gripper_position(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取夹爪位置预设"""
+        return self._cache.get("gripper_position", {}).get(name_or_id)
+    
+    def get_task_template(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取任务模板预设"""
+        return self._cache.get("task_template", {}).get(name_or_id)
+    
+    def list_presets(self, preset_type: str) -> List[Dict[str, Any]]:
+        """列出指定类型的所有预设"""
+        presets = self._cache.get(preset_type, {})
+        # 去重（因为同时用 id 和 name 索引）
+        seen_ids = set()
+        result = []
+        for preset in presets.values():
+            preset_id = preset.get("id")
+            if preset_id and preset_id not in seen_ids:
+                seen_ids.add(preset_id)
+                result.append(preset)
+        return result
+
+
+# 全局单例
+preset_loader = PresetLoader()

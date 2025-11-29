@@ -3,9 +3,10 @@
 """
 
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union
 
 from ..base_node import SkillNode, SkillStatus, SkillResult
+from ..preset_loader import preset_loader
 
 
 class WaitNode(SkillNode):
@@ -160,3 +161,152 @@ class CheckConditionNode(SkillNode):
         elif op == '<=':
             return actual <= expected
         return False
+
+
+class SubTaskNode(SkillNode):
+    """
+    子任务引用节点
+    
+    引用并执行另一个已定义的任务模板。
+    支持参数覆盖和嵌套任务执行。
+    
+    参数:
+        task_name: 任务模板名称或 ID
+        params: 传递给子任务的参数（覆盖子任务的默认参数）
+    """
+    
+    NODE_TYPE = "SubTask"
+    
+    PARAM_SCHEMA = {
+        'task_name': {'type': 'string', 'required': True},
+        'params': {'type': 'object', 'required': False, 'default': {}},
+    }
+    
+    def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
+        super().__init__(node_id, params, **kwargs)
+        self._sub_tree = None
+        self._sub_engine = None
+        self._is_started = False
+    
+    def setup(self) -> bool:
+        """加载子任务树"""
+        task_name = self.params.get('task_name')
+        if not task_name:
+            self.log_error("Missing task_name")
+            return False
+        
+        # 从预设加载任务模板
+        task_template = preset_loader.get_task_template(task_name)
+        if not task_template:
+            self.log_error(f"Task template not found: {task_name}")
+            return False
+        
+        # 获取任务树
+        task_tree = task_template.get('task_tree')
+        if not task_tree:
+            self.log_error(f"Empty task tree in template: {task_name}")
+            return False
+        
+        # 应用参数覆盖
+        override_params = self.params.get('params', {})
+        if override_params:
+            task_tree = self._apply_params(task_tree, override_params)
+        
+        self.log_info(f"Loaded sub-task: {task_name}")
+        
+        # 保存任务树，稍后在 execute 中解析
+        self._task_tree_data = task_tree
+        return True
+    
+    def execute(self) -> SkillResult:
+        """执行子任务"""
+        if not self._is_started:
+            # 延迟解析子任务树（避免循环导入）
+            from ..parser import TaskParser
+            from ..engine import BehaviorTreeEngine
+            
+            parser = TaskParser(ros_node=self.ros_node)
+            parser.blackboard = self.blackboard  # 共享黑板
+            
+            try:
+                # 解析子任务
+                task_data = {'root': self._task_tree_data}
+                self._sub_tree = parser.parse(task_data)
+                
+                # 创建子引擎（共享 ROS 节点）
+                self._sub_engine = BehaviorTreeEngine(
+                    ros_node=self.ros_node,
+                    tick_rate=10.0
+                )
+                self._sub_engine._root = self._sub_tree
+                self._sub_engine._blackboard = self.blackboard
+                
+                # 设置所有节点
+                self._setup_tree(self._sub_tree)
+                
+                self._is_started = True
+                self.log_info("Sub-task started")
+            except Exception as e:
+                return SkillResult(
+                    status=SkillStatus.FAILURE,
+                    message=f"Failed to parse sub-task: {e}"
+                )
+        
+        # 执行一次 tick
+        result = self._tick_tree(self._sub_tree)
+        
+        if result.status == SkillStatus.SUCCESS:
+            self.log_info("Sub-task completed successfully")
+        elif result.status == SkillStatus.FAILURE:
+            self.log_error(f"Sub-task failed: {result.message}")
+        
+        return result
+    
+    def _setup_tree(self, node):
+        """递归设置节点"""
+        if hasattr(node, 'setup'):
+            node.setup()
+        if hasattr(node, 'children'):
+            for child in node.children:
+                self._setup_tree(child)
+    
+    def _tick_tree(self, node) -> SkillResult:
+        """递归执行节点树"""
+        if hasattr(node, 'tick'):
+            return node.tick()
+        elif hasattr(node, 'execute'):
+            return node.execute()
+        return SkillResult(status=SkillStatus.FAILURE, message="Invalid node")
+    
+    def _apply_params(
+        self, 
+        tree_data: Dict, 
+        params: Dict
+    ) -> Dict:
+        """递归应用参数覆盖"""
+        import copy
+        result = copy.deepcopy(tree_data)
+        
+        # 替换节点参数中的占位符
+        if 'params' in result:
+            for key, value in result['params'].items():
+                if isinstance(value, str) and value.startswith('$'):
+                    param_name = value[1:]
+                    if param_name in params:
+                        result['params'][key] = params[param_name]
+        
+        # 递归处理子节点
+        if 'children' in result:
+            result['children'] = [
+                self._apply_params(child, params) 
+                for child in result['children']
+            ]
+        
+        return result
+    
+    def halt(self):
+        """中断子任务"""
+        super().halt()
+        if self._sub_tree and hasattr(self._sub_tree, 'halt'):
+            self._sub_tree.halt()
+        self.log_info("Sub-task halted")
