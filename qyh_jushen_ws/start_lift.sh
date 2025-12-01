@@ -16,13 +16,13 @@ source /opt/ros/humble/setup.bash
 # Source 工作空间
 source "$HOME/qyh_jushen_ws/qyh_jushen_ws/install/setup.bash"
 
-# echo "🚀 启动升降电机控制节点..."
-# ros2 launch qyh_lift_control lift_control.launch.py
+echo "🚀 启动升降电机控制节点..."
+ros2 launch qyh_lift_control lift_control.launch.py
 
 # # 启动jaka臂控制节点
 # echo "🚀 启动JAKA臂控制节点..."
 # ros2 launch qyh_jaka_control jaka_control.launch.py
 
-# 启动底盘控制节点
-echo "🚀 启动底盘控制节点..."
-ros2 launch qyh_standard_robot standard_robot.launch.py
+# # 启动底盘控制节点
+# echo "🚀 启动底盘控制节点..."
+# ros2 launch qyh_standard_robot standard_robot.launch.py
