@@ -384,11 +384,18 @@ bool JakaInterface::checkReturn(errno_t ret, const std::string& operation)
         case -8: error_msg = "Motion in progress"; break;
         case -9: error_msg = "Servo mode not enabled"; break;
         case -10: error_msg = "Robot in emergency stop"; break;
-        default: error_msg = "Unknown error"; break;
+        case 255: error_msg = "Robot in error state or E-STOP active - check teach pendant"; break;
+        default: error_msg = "Unknown error (check teach pendant for details)"; break;
     }
     
     RCLCPP_ERROR(logger_, "Operation '%s' failed with error code: %d (%s)", 
                  operation.c_str(), ret, error_msg.c_str());
+    
+    // Additional hint for error 255
+    if (ret == 255 || ret < -10) {
+        RCLCPP_WARN(logger_, "Hint: Try calling clear_error service first, or check the robot teach pendant for error details");
+    }
+    
     return false;
 }
 

@@ -41,6 +41,7 @@ class SignalBridge(QObject):
     status_updated = pyqtSignal(object)
     robot_state_updated = pyqtSignal(object)
     joint_state_updated = pyqtSignal(object)
+    vr_status_updated = pyqtSignal(object)  # VR状态更新信号
     log_message = pyqtSignal(str, str)
 
 
@@ -1172,6 +1173,11 @@ class JakaControlGUI(QMainWindow):
         self.cycle_time_label.setText(f'{msg.cycle_time_ns / 1e6:.2f} ms')
         self.publish_rate_label.setText(f'{msg.publish_rate_hz:.1f} Hz')
         self.latency_label.setText(f'{msg.latency_ms:.2f} ms')
+
+    def update_vr_status(self, msg):
+        """更新VR状态显示（预留接口）"""
+        # VR跟随功能已移至 qyh_teleoperation_controller
+        pass
 
     def update_robot_state(self, msg):
         """更新机器人状态显示"""
