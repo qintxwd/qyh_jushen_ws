@@ -164,12 +164,20 @@ class HeadServoController(Node):
         try:
             # 检查电压
             voltage = self.servo_control.get_servo_vin(servo_id)
+            if voltage is None:
+                self.get_logger().warn(f'舵机{servo_id}电压读取失败 (None)')
+                return False
+
             if voltage < self.voltage_min or voltage > self.voltage_max:
                 self.get_logger().warn(f'舵机{servo_id}电压异常: {voltage}mV')
                 return False
             
             # 检查温度
             temp = self.servo_control.get_servo_temp(servo_id)
+            if temp is None:
+                self.get_logger().warn(f'舵机{servo_id}温度读取失败 (None)')
+                return False
+
             if temp > self.temp_max:
                 self.get_logger().error(f'舵机{servo_id}温度过高: {temp}℃')
                 return False

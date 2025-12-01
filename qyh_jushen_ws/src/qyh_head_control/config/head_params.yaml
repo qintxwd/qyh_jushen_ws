@@ -3,7 +3,7 @@
 head_servo_node:
   ros__parameters:
     # 串口配置
-    serial_port: "/dev/ttyTHS1"  # Jetson Nano默认串口
+    serial_port: "/dev/ttyUSB0"  # 使用USB转串口 (原为 /dev/ttyTHS1)
     baudrate: 115200
     
     # 舵机ID配置

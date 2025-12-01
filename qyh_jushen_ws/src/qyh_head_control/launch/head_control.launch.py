@@ -19,7 +19,7 @@ def generate_launch_description():
     # 声明启动参数
     declare_serial_port = DeclareLaunchArgument(
         'serial_port',
-        default_value='/dev/ttyTHS1',
+        default_value='/dev/ttyUSB0',
         description='Serial port for servo communication'
     )
     
