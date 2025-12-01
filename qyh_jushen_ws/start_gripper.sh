@@ -17,7 +17,7 @@ source /opt/ros/humble/setup.bash
 source "$HOME/qyh_jushen_ws/qyh_jushen_ws/install/setup.bash"
 
 echo "🚀 启动升降电机控制节点..."
-ros2 launch qyh_lift_control lift_control.launch.py
+ros2 launch qyh_gripper_control gripper_control_left.launch.py
 
 # # 启动jaka臂控制节点
 # echo "🚀 启动JAKA臂控制节点..."
