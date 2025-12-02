@@ -55,6 +55,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GoSetCurrentMap.srv"
   "srv/GoForceLocalize.srv"
   "srv/GoNavigateToPoseWithTask.srv"
+  "srv/GoNavigateToSite.srv"
   "srv/GoNavigateToSiteWithTask.srv"
   DEPENDENCIES geometry_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )

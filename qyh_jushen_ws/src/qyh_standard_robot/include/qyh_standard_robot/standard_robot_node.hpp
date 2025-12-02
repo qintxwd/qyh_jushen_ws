@@ -32,6 +32,7 @@
 #include <qyh_standard_robot_msgs/srv/go_set_current_map.hpp>
 #include <qyh_standard_robot_msgs/srv/go_force_localize.hpp>
 #include <qyh_standard_robot_msgs/srv/go_navigate_to_pose_with_task.hpp>
+#include <qyh_standard_robot_msgs/srv/go_navigate_to_site.hpp>
 #include <qyh_standard_robot_msgs/srv/go_navigate_to_site_with_task.hpp>
 #include <qyh_standard_robot_msgs/msg/navigation_status.hpp>
 #include <modbus/modbus.hpp>
@@ -101,6 +102,7 @@ private:
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetSpeedType>::SharedPtr srv_go_set_speed_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoNavigateToCoordinate>::SharedPtr srv_go_nav_coord_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoExecuteActionTask>::SharedPtr srv_go_nav_site_;
+  rclcpp::Service<qyh_standard_robot_msgs::srv::GoNavigateToSite>::SharedPtr srv_go_nav_site_simple_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetObstacleStrategy>::SharedPtr srv_go_obstacle_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetCurrentSite>::SharedPtr srv_go_current_site_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetSpeakerVolume>::SharedPtr srv_go_volume_;
@@ -151,6 +153,8 @@ private:
                            qyh_standard_robot_msgs::srv::GoNavigateToCoordinate::Response::SharedPtr);
   void handle_go_nav_site(const qyh_standard_robot_msgs::srv::GoExecuteActionTask::Request::SharedPtr,
                           qyh_standard_robot_msgs::srv::GoExecuteActionTask::Response::SharedPtr);
+  void handle_go_nav_site_simple(const qyh_standard_robot_msgs::srv::GoNavigateToSite::Request::SharedPtr,
+                                 qyh_standard_robot_msgs::srv::GoNavigateToSite::Response::SharedPtr);
   void handle_go_obstacle(const qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Request::SharedPtr,
                           qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Response::SharedPtr);
   void handle_go_current_site(const qyh_standard_robot_msgs::srv::GoSetCurrentSite::Request::SharedPtr,

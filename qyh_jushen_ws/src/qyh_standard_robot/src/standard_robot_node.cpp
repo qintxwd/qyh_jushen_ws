@@ -111,6 +111,9 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
   srv_go_nav_site_ = this->create_service<qyh_standard_robot_msgs::srv::GoExecuteActionTask>(
     "go_navigate_to_site",
     std::bind(&StandardRobotNode::handle_go_nav_site, this, std::placeholders::_1, std::placeholders::_2));
+  srv_go_nav_site_simple_ = this->create_service<qyh_standard_robot_msgs::srv::GoNavigateToSite>(
+    "go_navigate_to_site_simple",
+    std::bind(&StandardRobotNode::handle_go_nav_site_simple, this, std::placeholders::_1, std::placeholders::_2));
   srv_go_obstacle_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetObstacleStrategy>(
     "go_set_obstacle_strategy",
     std::bind(&StandardRobotNode::handle_go_obstacle, this, std::placeholders::_1, std::placeholders::_2));
@@ -697,6 +700,15 @@ void StandardRobotNode::handle_go_nav_site(const qyh_standard_robot_msgs::srv::G
   bool ok = write_holding_register(addr, req->site_id);
   res->success = ok;
   res->message = ok ? "Navigation to site set successfully" : "Failed to set navigation to site";
+}
+
+void StandardRobotNode::handle_go_nav_site_simple(const qyh_standard_robot_msgs::srv::GoNavigateToSite::Request::SharedPtr req,
+                                                  qyh_standard_robot_msgs::srv::GoNavigateToSite::Response::SharedPtr res)
+{
+  // Write to register 40015 (导航到站点)
+  bool ok = write_holding_register(40015, req->site_id);
+  res->success = ok;
+  res->message = ok ? "Navigate to site command sent" : "Failed to send navigate to site command";
 }
 
 void StandardRobotNode::handle_go_obstacle(const qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Request::SharedPtr req,

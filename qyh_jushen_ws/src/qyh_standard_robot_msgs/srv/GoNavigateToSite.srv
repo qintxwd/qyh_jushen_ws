@@ -1,0 +1,5 @@
+# Navigate to site (40015)
+uint16 site_id
+---
+bool success
+string message
