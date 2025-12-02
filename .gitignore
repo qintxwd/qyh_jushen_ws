@@ -12,3 +12,5 @@ log/
 *.pyc
 
 web.db
+
+dist/

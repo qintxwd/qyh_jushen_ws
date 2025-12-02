@@ -14,39 +14,32 @@ def generate_launch_description():
         'standard_robot.yaml'
     )
 
-    # Declare launch arguments
+    # Declare launch arguments (empty default means use config file value)
     modbus_ip_arg = DeclareLaunchArgument(
         'modbus_ip',
-        default_value='192.168.10.10',
-        description='IP address of the Standard robot chassis'
+        default_value='',
+        description='IP address of the Standard robot chassis (leave empty to use config file)'
     )
     
     modbus_port_arg = DeclareLaunchArgument(
         'modbus_port',
-        default_value='502',
-        description='Modbus TCP port'
+        default_value='',
+        description='Modbus TCP port (leave empty to use config file)'
     )
     
     slave_id_arg = DeclareLaunchArgument(
         'slave_id',
-        default_value='1',
-        description='Modbus slave ID'
+        default_value='',
+        description='Modbus slave ID (leave empty to use config file)'
     )
 
-    # Standard robot node
+    # Standard robot node - only use config file, launch args can override if provided
     standard_robot_node = Node(
         package='qyh_standard_robot',
         executable='qyh_standard_robot_node_exe',
         name='standard_robot_node',
         output='screen',
-        parameters=[
-            config_file,
-            {
-                'modbus_ip': LaunchConfiguration('modbus_ip'),
-                'modbus_port': LaunchConfiguration('modbus_port'),
-                'slave_id': LaunchConfiguration('slave_id'),
-            }
-        ]
+        parameters=[config_file]
     )
 
     return LaunchDescription([
