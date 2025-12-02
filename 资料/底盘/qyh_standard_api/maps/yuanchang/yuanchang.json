@@ -1,0 +1,199 @@
+{
+  "meta": {
+    "zero_offset.x": 2450,
+    "zero_offset.y": 1503,
+    "size.x": 3952,
+    "size.y": 3232,
+    "resolution": 2,
+    "image_scale": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "length_unit": "mm",
+    "angle_unit": "1/1000 rad",
+    "created_timestamp": 1763366498,
+    "modified_timestamp": 1763366498,
+    "version": "1.12.6"
+  },
+  "data": {
+    "area": [],
+    "noteArea": [],
+    "locationArea": [],
+    "node": [
+      {
+        "id": 1,
+        "desc": "",
+        "x": -2124.98,
+        "y": -1772.85,
+        "yaw": 0
+      },
+      {
+        "id": 2,
+        "desc": "",
+        "x": -7658.12,
+        "y": -1417.72,
+        "yaw": 0
+      }
+    ],
+    "tag": [],
+    "edge": [
+      {
+        "id": 1,
+        "sx": -2124.98,
+        "sy": -1772.85,
+        "ex": -7658.12,
+        "ey": -1417.72,
+        "s_node": 1,
+        "e_node": 2,
+        "cost": 5544.52,
+        "type": 1,
+        "desc": "",
+        "cx": 0,
+        "cy": 0,
+        "dx": 0,
+        "dy": 0,
+        "radius": 0,
+        "limit_v": 0,
+        "limit_w": 0,
+        "s_facing": 3077.498409501376,
+        "e_facing": 3077.498409501376,
+        "rotate_direction": 1,
+        "direction": 1,
+        "robot_direction": 1,
+        "param": 255,
+        "is_back_edge": false,
+        "user_define_properties": {},
+        "orientation": -0.017453292519943295,
+        "path_behavior": {
+          "type": 0,
+          "trigger_stage": 0,
+          "trigger_condition": {
+            "load_state": 0
+          }
+        }
+      },
+      {
+        "id": 2,
+        "sx": -7658.12,
+        "sy": -1417.72,
+        "ex": -2124.98,
+        "ey": -1772.85,
+        "s_node": 2,
+        "e_node": 1,
+        "cost": 5544.52,
+        "type": 1,
+        "desc": "",
+        "cx": 0,
+        "cy": 0,
+        "dx": 0,
+        "dy": 0,
+        "radius": 0,
+        "limit_v": 0,
+        "limit_w": 0,
+        "s_facing": 6219.091063091169,
+        "e_facing": 6219.091063091169,
+        "rotate_direction": 1,
+        "direction": 1,
+        "robot_direction": 1,
+        "param": 255,
+        "is_back_edge": false,
+        "user_define_properties": {},
+        "orientation": -0.017453292519943295,
+        "path_behavior": {
+          "type": 0,
+          "trigger_stage": 0,
+          "trigger_condition": {
+            "load_state": 0
+          }
+        }
+      }
+    ],
+    "station": [
+      {
+        "id": 1,
+        "type": 1,
+        "name": "站点1",
+        "desc": "",
+        "pos.x": -2124.98,
+        "pos.y": -1772.85,
+        "pos.yaw": 6219.0911,
+        "enter_pos.x": 0,
+        "enter_pos.y": 0,
+        "enter_pos.yaw": 0,
+        "exit_pos.x": 0,
+        "exit_pos.y": 0,
+        "exit_pos.yaw": 0,
+        "check_pos.x": 0,
+        "check_pos.y": 0,
+        "check_pos.yaw": 0,
+        "no_rotate": false,
+        "enter_backward": false,
+        "exit_backward": false,
+        "pos_dynamic": false,
+        "station_offset": 0,
+        "edge_id": 2,
+        "node_id": 1,
+        "user_define_properties": {},
+        "dmcode_id": "",
+        "pgv_offset.x": 0,
+        "pgv_offset.y": 0,
+        "pgv_offset.yaw": 0,
+        "param": 0,
+        "wareroomAreaId": 0,
+        "wareroomRegionId": 0,
+        "wareroomLocationRow": 0,
+        "wareroomLocationColumn": 0,
+        "wareroomLocationStorey": 0
+      },
+      {
+        "id": 2,
+        "type": 1,
+        "name": "站点2",
+        "desc": "",
+        "pos.x": -7658.12,
+        "pos.y": -1417.72,
+        "pos.yaw": 6219.0911,
+        "enter_pos.x": 0,
+        "enter_pos.y": 0,
+        "enter_pos.yaw": 0,
+        "exit_pos.x": 0,
+        "exit_pos.y": 0,
+        "exit_pos.yaw": 0,
+        "check_pos.x": 0,
+        "check_pos.y": 0,
+        "check_pos.yaw": 0,
+        "no_rotate": false,
+        "enter_backward": false,
+        "exit_backward": false,
+        "pos_dynamic": false,
+        "station_offset": 0,
+        "edge_id": 2,
+        "node_id": 2,
+        "user_define_properties": {},
+        "dmcode_id": "",
+        "pgv_offset.x": 0,
+        "pgv_offset.y": 0,
+        "pgv_offset.yaw": 0,
+        "param": 0,
+        "wareroomAreaId": 0,
+        "wareroomRegionId": 0,
+        "wareroomLocationRow": 0,
+        "wareroomLocationColumn": 0,
+        "wareroomLocationStorey": 0
+      }
+    ],
+    "dmcode": [],
+    "edgeGroup": [],
+    "feature": [],
+    "wareroom": {
+      "wareroomArea": [],
+      "wareroomRegion": []
+    }
+  },
+  "private": {
+    "cleanArea": [],
+    "redrawArea": []
+  }
+}

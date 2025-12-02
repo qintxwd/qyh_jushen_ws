@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="96" height="96" viewBox="0 0 96 96">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: none;
+      }
+
+      .cls-2 {
+        clip-path: url(#clip-path);
+      }
+
+      .cls-3 {
+        fill: #09f;
+      }
+
+      .cls-4 {
+        fill: #fff;
+      }
+    </style>
+    <clipPath id="clip-path">
+      <rect class="cls-1" width="96" height="96"/>
+    </clipPath>
+  </defs>
+  <g id="logo" class="cls-2">
+    <g id="组_764" data-name="组 764" transform="translate(-222 -3433)">
+      <rect id="矩形_916" data-name="矩形 916" class="cls-3" width="96" height="96" transform="translate(222 3433)"/>
+      <g id="组_762" data-name="组 762">
+        <g id="组_1" data-name="组 1" transform="translate(231 3489.531)">
+          <path id="路径_1" data-name="路径 1" class="cls-4" d="M869.8,2373v1.684h3.524v3.271h-4.962l-.261-.737h3.7v-1.8h-3.5v-3.143h5.044v.73Z" transform="translate(-868.104 -2372.268)"/>
+          <path id="路径_2" data-name="路径 2" class="cls-4" d="M887.953,2378.563h-2.347v-3.278h-.768v-.7h.768v-1.311h1.423v1.311H888.1v.7h-1.073v2.593h1.229Z" transform="translate(-878.268 -2372.878)"/>
+          <path id="路径_3" data-name="路径 3" class="cls-4" d="M901.079,2380.573h-1.445v-.537l-.38.537h-2.347v-3.979h2.362l.365.536v-.536h1.379v3.323h.41Zm-1.445-3.316H898.3v2.66h1.333Z" transform="translate(-885.598 -2374.896)"/>
+          <path id="路径_4" data-name="路径 4" class="cls-4" d="M914.407,2380.591v-3.271h-1.371v3.271h-1.423v-3.979h1.423v.589l.41-.589h2.377v3.979Z" transform="translate(-894.688 -2374.906)"/>
+          <path id="路径_5" data-name="路径 5" class="cls-4" d="M928.975,2377.952v-.589l-.41.589h-2.4v-3.986h2.391l.417.581v-2.279H930.4v5.684Zm0-3.278H927.59v2.563h1.386Z" transform="translate(-903.581 -2372.268)"/>
+          <path id="路径_6" data-name="路径 6" class="cls-4" d="M944.949,2380.573H943.5v-.537l-.38.537h-2.347v-3.979h2.362l.365.536v-.536h1.378v3.323h.41Zm-1.445-3.316H942.17v2.66H943.5Z" transform="translate(-912.509 -2374.896)"/>
+          <path id="路径_7" data-name="路径 7" class="cls-4" d="M956.943,2377.309v3.271h-1.461v-3.986h1.461v.589l.439-.589H958.8v.715Z" transform="translate(-921.489 -2374.896)"/>
+          <path id="路径_8" data-name="路径 8" class="cls-4" d="M970.151,2377.952v-.589l-.41.589h-2.4v-3.986h2.392l.417.581v-2.279h1.423v5.684Zm0-3.278h-1.386v2.563h1.386Z" transform="translate(-928.739 -2372.268)"/>
+          <path id="路径_9" data-name="路径 9" class="cls-4" d="M990.946,2377.952l-1.222-2.369h-.373l-.35-.633v3h-1.5v-5.684H989v.618l.447-.618h2.675v3.315h-.79l1.214,2.369Zm-.305-4.939H989v1.833h1.639Z" transform="translate(-941.063 -2372.268)"/>
+          <path id="路径_10" data-name="路径 10" class="cls-4" d="M1003.823,2380.58v-3.986h4.194v3.986Zm2.779-3.278h-1.356v2.585h1.356Z" transform="translate(-951.029 -2374.896)"/>
+          <path id="路径_11" data-name="路径 11" class="cls-4" d="M1020.156,2377.945l-.41-.582v.582h-1.408v-5.677h1.408v2.294l.454-.6h2.355v3.979Zm.984-3.263h-1.393v2.556h1.393Z" transform="translate(-959.898 -2372.268)"/>
+          <path id="路径_12" data-name="路径 12" class="cls-4" d="M1032.911,2380.58v-3.986h4.194v3.986Zm2.779-3.278h-1.356v2.585h1.356Z" transform="translate(-968.897 -2374.896)"/>
+          <path id="路径_13" data-name="路径 13" class="cls-4" d="M1050.142,2378.563H1047.8v-3.278h-.768v-.7h.768v-1.311h1.423v1.311h1.073v.7h-1.073v2.593h1.229Z" transform="translate(-977.471 -2372.878)"/>
+          <path id="路径_14" data-name="路径 14" class="cls-4" d="M1060.46,2377.294v.917h2.727v2.369h-4.023l-.276-.693h2.9v-.961h-2.764v-2.332h4.18v.7Z" transform="translate(-984.675 -2374.896)"/>
+        </g>
+        <path id="路径_15" data-name="路径 15" class="cls-4" d="M828.8,2360.483H818.449l3.318,4.16h-5.4l-4.415,5.535h8.727l-1.943,2.435h-6.785l3.318,4.16h-4.121l-4.29-5.378,5.386-6.753h-3.115l-5.387,6.753,5.387,6.753h10.351l-3.318-4.161h5.4l4.415-5.535h-8.727l1.943-2.435h6.785l-3.318-4.16h4.121l4.29,5.378-5.386,6.753H828.8l5.387-6.753Z" transform="translate(-548.754 1105.343)"/>
+      </g>
+    </g>
+  </g>
+</svg>

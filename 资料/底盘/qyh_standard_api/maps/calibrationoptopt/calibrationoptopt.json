@@ -1,0 +1,24 @@
+{
+  "data": {
+    "area": [],
+    "edge": [],
+    "node": [],
+    "station": []
+  },
+  "meta": {
+    "created_timestamp": 0,
+    "image_scale": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "modified_timestamp": 0,
+    "resolution": 2,
+    "resolution:": 2,
+    "size.x": 2048,
+    "size.y": 2048,
+    "zero_offset.x": 1023,
+    "zero_offset.y": 1023
+  }
+}

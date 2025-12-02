@@ -1,0 +1,233 @@
+{
+  "/api/v0/map": {
+    "status": 200,
+    "content_type": "application/json",
+    "length": 443,
+    "data": {
+      "maps": [
+        {
+          "name": "standard",
+          "md5": "642e71ff6a2e4b09934c5d9240cb20fa",
+          "modify_time": "2025-11-10 13:31:09"
+        },
+        {
+          "name": "xinjianditubiaoding",
+          "md5": "80691b1ef7b744d795d93b50266c8275",
+          "modify_time": "2025-11-09 09:05:40"
+        },
+        {
+          "name": "calibrationoptopt",
+          "md5": "17ebae724e703cdb0f0efa05b4328071",
+          "modify_time": "2024-06-01 22:01:03"
+        },
+        {
+          "name": "yuanchang",
+          "md5": "e2018b8987e9dc0f1106a3ec1f79dd1c",
+          "modify_time": "2025-11-17 16:09:08"
+        }
+      ]
+    }
+  },
+  "/api/v0/map/current": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/map/list": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/maps": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/current_map": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/currentmap": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/system": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/system/state": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/system/status": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/system/info": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/robot": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/robot/state": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/robot/status": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/robot/info": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/status": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/state": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/info": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/mission": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/missions": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/task": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/tasks": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/account": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/accounts": {
+    "status": 200,
+    "content_type": "",
+    "length": 517,
+    "data": [
+      {
+        "id": 1,
+        "session_id": 0,
+        "username": "user",
+        "passwd": "ee11cbb19052e40b07aac0ca060c23ee",
+        "permission": "10",
+        "login_time": 0,
+        "item_valid": 1,
+        "pincode": ""
+      },
+      {
+        "id": 2,
+        "session_id": 0,
+        "username": "admin",
+        "passwd": "21232f297a57a5a743894a0e4a801fc3",
+        "permission": "20",
+        "login_time": 1764635750440,
+        "item_valid": 880,
+        "pincode": ""
+      },
+      {
+        "id": 6,
+        "session_id": 0,
+        "username": "fms",
+        "passwd": "ac143e067407736c0da2fbe65d7cf7cf",
+        "permission": "20",
+        "login_time": 1711692764866,
+        "item_valid": 277,
+        "pincode": ""
+      }
+    ]
+  },
+  "/api/v0/user": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/users": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/config": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/configs": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/settings": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/param": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/params": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/version": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/navigation": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/position": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/pose": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  },
+  "/api/v0/location": {
+    "status": 404,
+    "content_type": "text/html; charset=utf-8",
+    "length": 9
+  }
+}

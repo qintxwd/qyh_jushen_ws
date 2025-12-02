@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      .cls-1, .cls-2 {
+        fill: #ced0d8;
+      }
+
+      .cls-1 {
+        opacity: 0;
+      }
+    </style>
+  </defs>
+  <g id="组_1036" data-name="组 1036" transform="translate(-5950 -1646)">
+    <rect id="矩形_789" data-name="矩形 789" class="cls-1" width="16" height="16" transform="translate(5950 1646)"/>
+    <path id="路径_331" data-name="路径 331" class="cls-2" d="M185.487,61.44H173.764a.751.751,0,0,0-.684.8v6.4a.751.751,0,0,0,.684.8h5.185v7.6a.376.376,0,0,0,.343.4h.667a.376.376,0,0,0,.343-.4v-7.6h5.185a.751.751,0,0,0,.684-.8v-6.4A.751.751,0,0,0,185.487,61.44Zm-.685,6.4H174.449v-4.8H184.8Zm-1.321-3.162h-7.7v1.58h7.7v-1.58Z" transform="translate(5778.375 1584.56)"/>
+  </g>
+</svg>

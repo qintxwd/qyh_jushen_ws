@@ -1,0 +1,15 @@
+# Standard Robots Matrix API 配置
+matrix:
+  # 机器人底盘 IP 地址
+  host: "192.168.71.50"
+  port: 80
+  
+  # 登录凭据
+  username: "dev"
+  password: "_sr_dev_"
+  
+  # API 超时设置 (秒)
+  timeout: 10
+  
+  # 地图保存路径
+  map_save_path: "./maps"
