@@ -27,6 +27,7 @@ endif()
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/StandardRobotStatus.msg"
   "msg/ManualMotionCommand.msg"
+  "msg/ManualVelocityCommand.msg"
   "msg/NavigationPose.msg"
   "msg/NavigationStatus.msg"
   "srv/ControlPauseMove.srv"
@@ -48,7 +49,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GoSetSpeedType.srv"
   "srv/GoNavigateToCoordinate.srv"
   "srv/GoExecuteActionTask.srv"
-  "srv/GoSetManualControl.srv"
   "srv/GoSetObstacleStrategy.srv"
   "srv/GoSetCurrentSite.srv"
   "srv/GoSetSpeakerVolume.srv"

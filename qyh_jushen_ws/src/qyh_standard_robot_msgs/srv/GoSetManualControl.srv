@@ -1,9 +1,0 @@
-# Manual control mode velocity setting (40022-40024)
-# Must be set atomically: vx, vy, w
-# Standard ROS units (converted to mm/s, mm/s, 1/1000 rad/s when writing to Modbus)
-float64 vx   # Linear velocity X [m/s]
-float64 vy   # Linear velocity Y [m/s] - set to 0 for differential drive
-float64 w    # Angular velocity [rad/s]
----
-bool success
-string message

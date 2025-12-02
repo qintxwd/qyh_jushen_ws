@@ -31,7 +31,6 @@ from qyh_standard_robot_msgs.srv import (
     GoSetSpeedType,
     GoNavigateToCoordinate,
     GoExecuteActionTask,
-    GoSetManualControl,
     GoSetObstacleStrategy,
     GoSetCurrentSite,
     GoSetSpeakerVolume,
@@ -107,7 +106,6 @@ class StandardRobotMonitor(Node):
         self.cli_go_set_speed = self.create_client(GoSetSpeedType, 'go_set_speed_level')
         self.cli_go_nav_coord = self.create_client(GoNavigateToCoordinate, 'go_navigate_to_coordinate')
         self.cli_go_nav_site = self.create_client(GoExecuteActionTask, 'go_navigate_to_site')
-        self.cli_go_manual = self.create_client(GoSetManualControl, 'go_set_manual_control')
         self.cli_go_obstacle = self.create_client(GoSetObstacleStrategy, 'go_set_obstacle_strategy')
         self.cli_go_current_site = self.create_client(GoSetCurrentSite, 'go_set_current_site')
         self.cli_go_volume = self.create_client(GoSetSpeakerVolume, 'go_set_speaker_volume')

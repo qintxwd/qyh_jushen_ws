@@ -6,6 +6,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <qyh_standard_robot_msgs/msg/standard_robot_status.hpp>
 #include <qyh_standard_robot_msgs/msg/manual_motion_command.hpp>
+#include <qyh_standard_robot_msgs/msg/manual_velocity_command.hpp>
 #include <qyh_standard_robot_msgs/srv/control_cancel_mission.hpp>
 #include <qyh_standard_robot_msgs/srv/control_emergency_stop.hpp>
 #include <qyh_standard_robot_msgs/srv/control_enter_low_power_mode.hpp>
@@ -25,7 +26,6 @@
 #include <qyh_standard_robot_msgs/srv/go_set_speed_type.hpp>
 #include <qyh_standard_robot_msgs/srv/go_navigate_to_coordinate.hpp>
 #include <qyh_standard_robot_msgs/srv/go_execute_action_task.hpp>
-#include <qyh_standard_robot_msgs/srv/go_set_manual_control.hpp>
 #include <qyh_standard_robot_msgs/srv/go_set_obstacle_strategy.hpp>
 #include <qyh_standard_robot_msgs/srv/go_set_current_site.hpp>
 #include <qyh_standard_robot_msgs/srv/go_set_speaker_volume.hpp>
@@ -60,6 +60,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   qyh_standard_robot_msgs::msg::StandardRobotStatus status_msg_;
   rclcpp::Subscription<qyh_standard_robot_msgs::msg::ManualMotionCommand>::SharedPtr manual_motion_sub_;
+  rclcpp::Subscription<qyh_standard_robot_msgs::msg::ManualVelocityCommand>::SharedPtr manual_velocity_sub_;
   rclcpp::TimerBase::SharedPtr command_timer_;
 
   // Modbus members - use C++ API
@@ -75,7 +76,9 @@ private:
   double manual_control_rate_;
   int manual_command_timeout_ms_;  
   std::chrono::steady_clock::time_point last_cmd_time_;
+  std::chrono::steady_clock::time_point last_vel_cmd_time_;
   qyh_standard_robot_msgs::msg::ManualMotionCommand::SharedPtr last_cmd_;
+  qyh_standard_robot_msgs::msg::ManualVelocityCommand::SharedPtr last_vel_cmd_;
 
   rclcpp::Service<qyh_standard_robot_msgs::srv::ControlPauseMove>::SharedPtr srv_pause_move_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::ControlResumeMove>::SharedPtr srv_resume_move_;
@@ -98,7 +101,6 @@ private:
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetSpeedType>::SharedPtr srv_go_set_speed_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoNavigateToCoordinate>::SharedPtr srv_go_nav_coord_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoExecuteActionTask>::SharedPtr srv_go_nav_site_;
-  rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetManualControl>::SharedPtr srv_go_manual_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetObstacleStrategy>::SharedPtr srv_go_obstacle_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetCurrentSite>::SharedPtr srv_go_current_site_;
   rclcpp::Service<qyh_standard_robot_msgs::srv::GoSetSpeakerVolume>::SharedPtr srv_go_volume_;
@@ -149,8 +151,6 @@ private:
                            qyh_standard_robot_msgs::srv::GoNavigateToCoordinate::Response::SharedPtr);
   void handle_go_nav_site(const qyh_standard_robot_msgs::srv::GoExecuteActionTask::Request::SharedPtr,
                           qyh_standard_robot_msgs::srv::GoExecuteActionTask::Response::SharedPtr);
-  void handle_go_manual(const qyh_standard_robot_msgs::srv::GoSetManualControl::Request::SharedPtr,
-                        qyh_standard_robot_msgs::srv::GoSetManualControl::Response::SharedPtr);
   void handle_go_obstacle(const qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Request::SharedPtr,
                           qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Response::SharedPtr);
   void handle_go_current_site(const qyh_standard_robot_msgs::srv::GoSetCurrentSite::Request::SharedPtr,

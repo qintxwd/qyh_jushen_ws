@@ -10,7 +10,8 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
   modbus_ctx_(nullptr),
   is_connected_(false),
   is_manual_control_(false),
-  last_cmd_(nullptr)
+  last_cmd_(nullptr),
+  last_vel_cmd_(nullptr)
 {
   // Declare parameters
   this->declare_parameter<std::string>("modbus_ip", "192.168.1.100");
@@ -110,9 +111,6 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
   srv_go_nav_site_ = this->create_service<qyh_standard_robot_msgs::srv::GoExecuteActionTask>(
     "go_navigate_to_site",
     std::bind(&StandardRobotNode::handle_go_nav_site, this, std::placeholders::_1, std::placeholders::_2));
-  srv_go_manual_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetManualControl>(
-    "go_set_manual_control",
-    std::bind(&StandardRobotNode::handle_go_manual, this, std::placeholders::_1, std::placeholders::_2));
   srv_go_obstacle_ = this->create_service<qyh_standard_robot_msgs::srv::GoSetObstacleStrategy>(
     "go_set_obstacle_strategy",
     std::bind(&StandardRobotNode::handle_go_obstacle, this, std::placeholders::_1, std::placeholders::_2));
@@ -141,6 +139,15 @@ StandardRobotNode::StandardRobotNode(const rclcpp::NodeOptions & options)
       last_cmd_ = msg;
       last_cmd_time_ = std::chrono::steady_clock::now();
     });
+  
+  // 速度命令订阅 (写入寄存器 40022-40024)
+  manual_velocity_sub_ = this->create_subscription<qyh_standard_robot_msgs::msg::ManualVelocityCommand>(
+    "manual_velocity_cmd", 10,
+    [this](const qyh_standard_robot_msgs::msg::ManualVelocityCommand::SharedPtr msg) {
+      last_vel_cmd_ = msg;
+      last_vel_cmd_time_ = std::chrono::steady_clock::now();
+    });
+  
   auto cmd_period = std::chrono::duration<double>(1.0 / manual_control_rate_);
   command_timer_ = this->create_wall_timer(
     std::chrono::duration_cast<std::chrono::milliseconds>(cmd_period),
@@ -465,22 +472,45 @@ bool StandardRobotNode::write_holding_registers(uint16_t addr, const std::vector
 
 void StandardRobotNode::command_timer_callback()
 {
-  if(!is_manual_control_||!last_cmd_) {
+  if(!is_manual_control_) {
     return;
   }
+  
   auto now = std::chrono::steady_clock::now();
-  if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cmd_time_).count() > manual_command_timeout_ms_) {
-    return;
+  
+  // 处理线圈模式命令 (ManualMotionCommand)
+  if (last_cmd_) {
+    auto coil_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cmd_time_).count();
+    if (coil_elapsed <= manual_command_timeout_ms_) {
+      if (last_cmd_->forward && !last_cmd_->backward) {
+        write_coil(17);
+      } else if (last_cmd_->backward && !last_cmd_->forward) {
+        write_coil(18);
+      }
+      if (last_cmd_->rotate_left && !last_cmd_->rotate_right) {
+        write_coil(19);
+      } else if (last_cmd_->rotate_right && !last_cmd_->rotate_left) {
+        write_coil(20);
+      }
+    }
   }
-  if (last_cmd_->forward && !last_cmd_->backward > 0) {
-    write_coil(17);
-  } else if (last_cmd_->backward && !last_cmd_->forward ) {
-    write_coil(18);
-  }
-  if (last_cmd_->rotate_left && !last_cmd_->rotate_right) {
-    write_coil(19);
-  } else if (last_cmd_->rotate_right && !last_cmd_->rotate_left ) {
-    write_coil(20);
+  
+  // 处理速度模式命令 (ManualVelocityCommand) - 写入寄存器 40022-40024
+  if (last_vel_cmd_) {
+    auto vel_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_vel_cmd_time_).count();
+    if (vel_elapsed <= manual_command_timeout_ms_) {
+      // 转换单位: m/s -> mm/s, rad/s -> 1/1000 rad/s
+      int16_t vx_mms = static_cast<int16_t>(last_vel_cmd_->vx * 1000.0);
+      int16_t vy_mms = 0;  // 底盘无横向移动能力
+      int16_t w_mrads = static_cast<int16_t>(last_vel_cmd_->w * 1000.0);
+      
+      std::vector<uint16_t> values(3);
+      values[0] = static_cast<uint16_t>(vx_mms);
+      values[1] = static_cast<uint16_t>(vy_mms);
+      values[2] = static_cast<uint16_t>(w_mrads);
+      
+      write_holding_registers(40022, values);
+    }
   }
 }
 
@@ -667,25 +697,6 @@ void StandardRobotNode::handle_go_nav_site(const qyh_standard_robot_msgs::srv::G
   bool ok = write_holding_register(addr, req->site_id);
   res->success = ok;
   res->message = ok ? "Navigation to site set successfully" : "Failed to set navigation to site";
-}
-
-void StandardRobotNode::handle_go_manual(const qyh_standard_robot_msgs::srv::GoSetManualControl::Request::SharedPtr req,
-                                         qyh_standard_robot_msgs::srv::GoSetManualControl::Response::SharedPtr res)
-{
-  // Convert from ROS units (m/s, rad/s) to Modbus units (mm/s, 1/1000 rad/s)
-  int16_t vx_mms = static_cast<int16_t>(req->vx * 1000.0);
-  int16_t vy_mms = static_cast<int16_t>(req->vy * 1000.0);  // Should be 0 for differential drive
-  int16_t w_mrads = static_cast<int16_t>(req->w * 1000.0);
-  
-  // Write to registers 40022-40024 atomically
-  std::vector<uint16_t> values(3);
-  values[0] = static_cast<uint16_t>(vx_mms);
-  values[1] = static_cast<uint16_t>(vy_mms);
-  values[2] = static_cast<uint16_t>(w_mrads);
-  
-  bool ok = write_holding_registers(40022, values);
-  res->success = ok;
-  res->message = ok ? "Manual control velocities set successfully" : "Failed to set manual control velocities";
 }
 
 void StandardRobotNode::handle_go_obstacle(const qyh_standard_robot_msgs::srv::GoSetObstacleStrategy::Request::SharedPtr req,
