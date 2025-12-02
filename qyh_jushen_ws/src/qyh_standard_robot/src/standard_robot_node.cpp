@@ -648,9 +648,15 @@ void StandardRobotNode::handle_resume_mission(const qyh_standard_robot_msgs::srv
 void StandardRobotNode::handle_cancel_mission(const qyh_standard_robot_msgs::srv::ControlCancelMission::Request::SharedPtr,
                                               qyh_standard_robot_msgs::srv::ControlCancelMission::Response::SharedPtr res)
 {
-  bool ok = write_coil(99);
+  // 注意：线圈99可能不被所有底盘支持
+  // 如果底盘不支持线圈99，可尝试线圈4（取消当前任务）
+  // 或者使用REST API: POST /api/v0/mission/cancel
+  bool ok = write_coil(4);  // 使用线圈4（取消当前任务）
+  if (!ok) {
+    RCLCPP_WARN(get_logger(), "取消任务失败，线圈4写入失败。如果底盘不支持此功能，请使用REST API");
+  }
   res->success = ok;
-  res->message = ok ? "ok" : "failed";
+  res->message = ok ? "ok" : "取消任务失败：底盘可能不支持此Modbus线圈";
 }
 
 // Go series service handlers
