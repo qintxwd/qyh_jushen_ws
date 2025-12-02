@@ -1,0 +1,4 @@
+# Standard Robots Matrix 地图同步工具依赖
+requests>=2.28.0
+websocket-client>=1.4.0
+PyYAML>=6.0

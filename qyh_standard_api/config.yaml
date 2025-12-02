@@ -1,0 +1,13 @@
+# Standard Robots Matrix 地图同步配置
+matrix:
+  # 机器人底盘 IP 地址
+  host: "192.168.71.50"
+  port: 80        # HTTP API 端口
+  ws_port: 5002   # WebSocket 端口
+  
+  # 登录凭据 (用于 WebSocket 获取当前地图)
+  username: "dev"
+  password: "_sr_dev_"
+  
+  # API 超时设置 (秒)
+  timeout: 10
