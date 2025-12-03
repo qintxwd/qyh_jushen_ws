@@ -304,6 +304,26 @@ cd ~/qyh_jushen_ws/qyh_jushen_ws
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
+### Orbbec 相机驱动编译问题
+
+如果编译 `orbbec_camera` 时报错 `找不到 -lOrbbecSDK`：
+
+```bash
+# 原因：缺少 libOrbbecSDK.so 符号链接
+# 解决方案：创建符号链接
+
+cd ~/qyh_jushen_ws/qyh_jushen_ws/src/OrbbecSDK_ROS2/orbbec_camera/SDK/lib/arm64/
+ln -sf libOrbbecSDK.so.2.5.5 libOrbbecSDK.so
+
+# 或者 x64 系统：
+cd ~/qyh_jushen_ws/qyh_jushen_ws/src/OrbbecSDK_ROS2/orbbec_camera/SDK/lib/x64/
+ln -sf libOrbbecSDK.so.2.5.5 libOrbbecSDK.so
+
+# 然后重新编译
+cd ~/qyh_jushen_ws/qyh_jushen_ws
+colcon build --packages-select orbbec_camera
+```
+
 ### 清理构建
 ```bash
 cd ~/qyh_jushen_ws/qyh_jushen_ws
