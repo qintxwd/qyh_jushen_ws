@@ -79,6 +79,7 @@ private:
   bool go_to_position(float position);
   bool manual_move(bool up, bool hold);
   bool reset_alarm();
+  bool stop_move();
 
   // 服务回调
   void handle_control(

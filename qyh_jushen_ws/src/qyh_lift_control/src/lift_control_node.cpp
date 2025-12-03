@@ -336,6 +336,14 @@ bool LiftControlNode::reset_alarm()
   return write_coil(ModbusAddress::COIL_RESET, false);
 }
 
+bool LiftControlNode::stop_move()
+{
+  RCLCPP_INFO(this->get_logger(), "Stopping movement");
+
+  // 写入 COIL_GO_POSITION = 0 来取消当前的绝对位置移动
+  return write_coil(ModbusAddress::COIL_GO_POSITION, false);
+}
+
 void LiftControlNode::handle_control(
   const qyh_lift_msgs::srv::LiftControl::Request::SharedPtr request,
   qyh_lift_msgs::srv::LiftControl::Response::SharedPtr response)
@@ -380,6 +388,11 @@ void LiftControlNode::handle_control(
     case LiftControl::Request::CMD_RESET_ALARM:
       response->success = reset_alarm();
       response->message = response->success ? "Alarm reset" : "Failed to reset alarm";
+      break;
+
+    case LiftControl::Request::CMD_STOP:
+      response->success = stop_move();
+      response->message = response->success ? "Movement stopped" : "Failed to stop movement";
       break;
 
     default:
