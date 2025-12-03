@@ -1,0 +1,10 @@
+# 获取工具负载
+# robot_id: 0=左臂, 1=右臂
+int32 robot_id
+---
+bool success
+string message
+float64 mass          # 当前总负载质量 (kg)
+float64 centroid_x    # 质心X (mm)
+float64 centroid_y    # 质心Y (mm)
+float64 centroid_z    # 质心Z (mm)

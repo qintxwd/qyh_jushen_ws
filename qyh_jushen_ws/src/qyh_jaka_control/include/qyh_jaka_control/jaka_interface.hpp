@@ -76,6 +76,11 @@ public:
     // 配置功能
     bool setCollisionLevel(int robot_id, int level);
     bool setToolOffset(int robot_id, const geometry_msgs::msg::Pose& tool_offset);
+    
+    // 负载管理
+    // mass: 质量(kg), centroid_x: 质心X位置(mm), 默认150mm
+    bool setPayload(int robot_id, double mass, double centroid_x = 150.0);
+    bool getPayload(int robot_id, double& mass, double& centroid_x, double& centroid_y, double& centroid_z);
 
     // 状态查询
     bool getRobotState(RobotState& state);

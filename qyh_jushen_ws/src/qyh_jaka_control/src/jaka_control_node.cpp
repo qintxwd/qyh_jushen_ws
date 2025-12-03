@@ -16,6 +16,8 @@
 #include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
 #include <qyh_jaka_control_msgs/srv/jog.hpp>
 #include <qyh_jaka_control_msgs/srv/jog_stop.hpp>
+#include <qyh_jaka_control_msgs/srv/set_payload.hpp>
+#include <qyh_jaka_control_msgs/srv/get_payload.hpp>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -158,6 +160,15 @@ public:
         srv_jog_stop_ = create_service<qyh_jaka_control_msgs::srv::JogStop>(
             "/jaka/jog_stop",
             std::bind(&JakaControlNode::handleJogStop, this, std::placeholders::_1, std::placeholders::_2));
+
+        // 负载管理服务 (Payload)
+        srv_set_payload_ = create_service<qyh_jaka_control_msgs::srv::SetPayload>(
+            "/jaka/set_payload",
+            std::bind(&JakaControlNode::handleSetPayload, this, std::placeholders::_1, std::placeholders::_2));
+        
+        srv_get_payload_ = create_service<qyh_jaka_control_msgs::srv::GetPayload>(
+            "/jaka/get_payload",
+            std::bind(&JakaControlNode::handleGetPayload, this, std::placeholders::_1, std::placeholders::_2));
 
         // 自动连接和初始化
         if (auto_connect_) {
@@ -725,6 +736,42 @@ private:
         }
     }
 
+    void handleSetPayload(
+        const qyh_jaka_control_msgs::srv::SetPayload::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::SetPayload::Response::SharedPtr res)
+    {
+        // 质心固定为 x=150mm (末端向前15cm)
+        res->success = jaka_interface_.setPayload(req->robot_id, req->mass, 150.0);
+        res->message = res->success ? 
+            "Payload set: " + std::to_string(req->mass) + " kg" : 
+            "Failed to set payload";
+        
+        if (res->success) {
+            RCLCPP_INFO(get_logger(), "Payload set: robot=%d, mass=%.2f kg", 
+                req->robot_id, req->mass);
+        }
+    }
+
+    void handleGetPayload(
+        const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res)
+    {
+        double mass, cx, cy, cz;
+        res->success = jaka_interface_.getPayload(req->robot_id, mass, cx, cy, cz);
+        
+        if (res->success) {
+            res->mass = mass;
+            res->centroid_x = cx;
+            res->centroid_y = cy;
+            res->centroid_z = cz;
+            res->message = "Payload retrieved";
+            RCLCPP_INFO(get_logger(), "Payload: robot=%d, mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
+                req->robot_id, mass, cx, cy, cz);
+        } else {
+            res->message = "Failed to get payload";
+        }
+    }
+
     // ==================== 成员变量 ====================
     qyh_jaka_control::JakaInterface jaka_interface_;
     
@@ -780,6 +827,10 @@ private:
     // 点动控制服务 (Jog control)
     rclcpp::Service<qyh_jaka_control_msgs::srv::Jog>::SharedPtr srv_jog_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::JogStop>::SharedPtr srv_jog_stop_;
+
+    // 负载管理服务 (Payload)
+    rclcpp::Service<qyh_jaka_control_msgs::srv::SetPayload>::SharedPtr srv_set_payload_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::GetPayload>::SharedPtr srv_get_payload_;
 
     // 定时器
     rclcpp::TimerBase::SharedPtr main_timer_;

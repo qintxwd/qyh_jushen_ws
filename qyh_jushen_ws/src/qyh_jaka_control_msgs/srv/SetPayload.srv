@@ -1,0 +1,8 @@
+# 设置工具负载
+# robot_id: 0=左臂, 1=右臂
+int32 robot_id
+# 总质量 (kg) = 夹爪质量 + 物品质量
+float64 mass
+---
+bool success
+string message

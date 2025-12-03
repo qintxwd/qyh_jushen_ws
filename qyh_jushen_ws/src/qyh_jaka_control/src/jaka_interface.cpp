@@ -500,6 +500,40 @@ geometry_msgs::msg::Pose JakaInterface::jakaPoseToRos(const CartesianPose& jaka_
     return ros_pose;
 }
 
+bool JakaInterface::setPayload(int robot_id, double mass, double centroid_x)
+{
+    PayLoad payload;
+    payload.mass = mass;
+    payload.centroid.x = centroid_x;  // 默认150mm (15cm向前)
+    payload.centroid.y = 0.0;
+    payload.centroid.z = 0.0;
+    
+    RCLCPP_INFO(logger_, "Setting payload for robot %d: mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
+                robot_id, mass, centroid_x, payload.centroid.y, payload.centroid.z);
+    
+    errno_t ret = robot_->robot_set_tool_payload(robot_id, &payload);
+    return checkReturn(ret, "set_payload");
+}
+
+bool JakaInterface::getPayload(int robot_id, double& mass, double& centroid_x, double& centroid_y, double& centroid_z)
+{
+    // Note: JAKA SDK get_payload may not support robot_id parameter
+    // This is a limitation of the SDK
+    PayLoad payload;
+    errno_t ret = robot_->robot_get_tool_payload(&payload);
+    
+    if (ret == ERR_SUCC) {
+        mass = payload.mass;
+        centroid_x = payload.centroid.x;
+        centroid_y = payload.centroid.y;
+        centroid_z = payload.centroid.z;
+        RCLCPP_INFO(logger_, "Got payload for robot %d: mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
+                    robot_id, mass, centroid_x, centroid_y, centroid_z);
+        return true;
+    }
+    return checkReturn(ret, "get_payload");
+}
+
 bool JakaInterface::checkReturn(errno_t ret, const std::string& operation)
 {
     if (ret == ERR_SUCC) {
