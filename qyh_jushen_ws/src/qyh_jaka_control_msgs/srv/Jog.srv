@@ -1,0 +1,34 @@
+# 机械臂点动控制服务
+# 参考 JAKA SDK jog 接口
+
+# 机器人ID: 0=左臂, 1=右臂
+int8 robot_id
+
+# 轴/关节编号 (1-based)
+# 关节空间: 1-7 对应 J1-J7
+# 笛卡尔空间: 1=X, 2=Y, 3=Z, 4=RX, 5=RY, 6=RZ
+int8 axis_num
+
+# 运动模式
+int8 MOVE_CONTINUOUS = 0  # 连续运动 (按住持续运动，松开调用 jog_stop)
+int8 MOVE_STEP = 1        # 步进运动 (移动固定距离)
+int8 move_mode
+
+# 坐标系类型
+int8 COORD_JOINT = 0      # 关节空间
+int8 COORD_BASE = 1       # 基坐标系 (世界坐标系)
+int8 COORD_TOOL = 2       # 工具坐标系
+int8 coord_type
+
+# 速度指令
+# 关节/旋转轴: rad/s, 移动轴: mm/s
+# 正值=正向, 负值=反向
+float64 velocity
+
+# 位置指令 (仅步进模式有效)
+# 关节/旋转轴: rad, 移动轴: mm
+float64 position
+
+---
+bool success
+string message

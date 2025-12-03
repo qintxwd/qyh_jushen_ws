@@ -29,6 +29,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetCollisionLevel.srv"
   "srv/SetToolOffset.srv"
   "srv/GetRobotState.srv"
+  "srv/Jog.srv"
+  "srv/JogStop.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

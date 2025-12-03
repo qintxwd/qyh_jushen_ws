@@ -14,6 +14,8 @@
 #include <qyh_jaka_control_msgs/srv/set_collision_level.hpp>
 #include <qyh_jaka_control_msgs/srv/set_tool_offset.hpp>
 #include <qyh_jaka_control_msgs/srv/get_robot_state.hpp>
+#include <qyh_jaka_control_msgs/srv/jog.hpp>
+#include <qyh_jaka_control_msgs/srv/jog_stop.hpp>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -147,6 +149,15 @@ public:
         srv_get_robot_state_ = create_service<qyh_jaka_control_msgs::srv::GetRobotState>(
             "/jaka/get_robot_state",
             std::bind(&JakaControlNode::handleGetRobotState, this, std::placeholders::_1, std::placeholders::_2));
+
+        // 点动控制服务 (Jog control)
+        srv_jog_ = create_service<qyh_jaka_control_msgs::srv::Jog>(
+            "/jaka/jog",
+            std::bind(&JakaControlNode::handleJog, this, std::placeholders::_1, std::placeholders::_2));
+        
+        srv_jog_stop_ = create_service<qyh_jaka_control_msgs::srv::JogStop>(
+            "/jaka/jog_stop",
+            std::bind(&JakaControlNode::handleJogStop, this, std::placeholders::_1, std::placeholders::_2));
 
         // 自动连接和初始化
         if (auto_connect_) {
@@ -670,6 +681,50 @@ private:
         }
     }
 
+    // ==================== 点动控制服务 ====================
+    void handleJog(
+        const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res)
+    {
+        if (!enabled_) {
+            res->success = false;
+            res->message = "Robot not enabled";
+            return;
+        }
+
+        // 停止伺服模式下的jog可能会影响已有的servo命令
+        // 对于步进模式，直接执行
+        // 对于连续模式，需要持续发送命令（由调用方负责）
+        
+        res->success = jaka_interface_.jog(
+            req->robot_id,
+            req->axis_num,
+            req->move_mode,
+            req->coord_type,
+            req->velocity,
+            req->position
+        );
+        res->message = res->success ? "Jog command executed" : "Failed to execute jog command";
+        
+        if (res->success) {
+            RCLCPP_INFO(get_logger(), "Jog: robot=%d, axis=%d, mode=%d, coord=%d, vel=%.3f, pos=%.3f",
+                req->robot_id, req->axis_num, req->move_mode, req->coord_type, 
+                req->velocity, req->position);
+        }
+    }
+
+    void handleJogStop(
+        const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res)
+    {
+        res->success = jaka_interface_.jogStop(req->robot_id, req->axis_num);
+        res->message = res->success ? "Jog stopped" : "Failed to stop jog";
+        
+        if (res->success) {
+            RCLCPP_INFO(get_logger(), "Jog stopped: robot=%d, axis=%d", req->robot_id, req->axis_num);
+        }
+    }
+
     // ==================== 成员变量 ====================
     qyh_jaka_control::JakaInterface jaka_interface_;
     
@@ -721,6 +776,10 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetCollisionLevel>::SharedPtr srv_set_collision_level_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetToolOffset>::SharedPtr srv_set_tool_offset_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::GetRobotState>::SharedPtr srv_get_robot_state_;
+
+    // 点动控制服务 (Jog control)
+    rclcpp::Service<qyh_jaka_control_msgs::srv::Jog>::SharedPtr srv_jog_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::JogStop>::SharedPtr srv_jog_stop_;
 
     // 定时器
     rclcpp::TimerBase::SharedPtr main_timer_;

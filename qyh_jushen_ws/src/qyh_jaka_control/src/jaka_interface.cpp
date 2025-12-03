@@ -308,6 +308,141 @@ bool JakaInterface::moveL(int robot_id, const geometry_msgs::msg::Pose& target_p
     return checkReturn(ret, "move_l");
 }
 
+bool JakaInterface::jog(int robot_id, int axis_num, int move_mode, int coord_type, double velocity, double position)
+{
+    // Note: The C++ SDK (JAKAZuRobot class) does not have direct jog() method.
+    // We implement jog using edg_servo_j/edg_servo_p for step mode (INCR).
+    // For continuous mode (CONTINUE), caller should call this repeatedly.
+    // 
+    // axis_num: 1-7 for joints, 1-6 for X/Y/Z/RX/RY/RZ
+    // move_mode: 0=ABS, 1=INCR(step), 2=CONTINUE
+    // coord_type: 0=COORD_BASE, 1=COORD_JOINT, 2=COORD_TOOL
+    
+    if (!connected_) {
+        RCLCPP_ERROR(logger_, "Not connected to robot");
+        return false;
+    }
+
+    // Validate axis_num
+    if (coord_type == 1) { // COORD_JOINT
+        if (axis_num < 1 || axis_num > 7) {
+            RCLCPP_ERROR(logger_, "Invalid joint number: %d, must be 1-7", axis_num);
+            return false;
+        }
+    } else { // COORD_BASE or COORD_TOOL
+        if (axis_num < 1 || axis_num > 6) {
+            RCLCPP_ERROR(logger_, "Invalid cartesian axis: %d, must be 1-6", axis_num);
+            return false;
+        }
+    }
+
+    // For continuous mode, we use incremental motion with fixed step size
+    double step_size = 0.0;
+    if (move_mode == 2) { // CONTINUE
+        // Calculate step size based on velocity and cycle time (8ms)
+        double cycle_time_s = 0.008; // 8ms = 125Hz
+        step_size = velocity * cycle_time_s;
+    } else if (move_mode == 1) { // INCR (step mode)
+        step_size = position;
+    }
+
+    if (coord_type == 1) { // COORD_JOINT
+        // Joint space jog
+        JointValue jpos;
+        memset(&jpos, 0, sizeof(jpos));
+        
+        // Get current joint position
+        CartesianPose temp_pose;
+        errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &jpos, &temp_pose);
+        if (ret != ERR_SUCC) {
+            RCLCPP_ERROR(logger_, "Failed to get current joint position");
+            return false;
+        }
+
+        // Apply increment to target joint
+        if (move_mode == 0) { // ABS
+            jpos.jVal[axis_num - 1] = position;
+        } else {
+            // Create incremental command
+            JointValue incr_jpos;
+            memset(&incr_jpos, 0, sizeof(incr_jpos));
+            incr_jpos.jVal[axis_num - 1] = step_size;
+            
+            ret = robot_->edg_servo_j((unsigned char)robot_id, &incr_jpos, MoveMode::INCR);
+            if (ret != ERR_SUCC) {
+                return checkReturn(ret, "jog joint incr");
+            }
+            
+            ret = robot_->edg_send();
+            return checkReturn(ret, "jog joint send");
+        }
+
+        // For absolute mode
+        MoveMode modes[2] = {MoveMode::ABS, MoveMode::ABS};
+        double vel[2] = {velocity, velocity};
+        double acc[2] = {1.0, 1.0}; // Default acceleration
+        JointValue jpos_arr[2] = {jpos, jpos};
+        
+        ret = robot_->robot_run_multi_movj(robot_id, modes, false, jpos_arr, vel, acc);
+        return checkReturn(ret, "jog joint abs");
+    } else {
+        // Cartesian space jog
+        CartesianPose pose;
+        memset(&pose, 0, sizeof(pose));
+        
+        // Get current cartesian position
+        JointValue temp_joint;
+        errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &temp_joint, &pose);
+        if (ret != ERR_SUCC) {
+            RCLCPP_ERROR(logger_, "Failed to get current cartesian position");
+            return false;
+        }
+
+        // Create incremental command
+        CartesianPose incr_pose;
+        memset(&incr_pose, 0, sizeof(incr_pose));
+        
+        // Apply increment to target axis (1=X, 2=Y, 3=Z, 4=RX, 5=RY, 6=RZ)
+        switch (axis_num) {
+            case 1: incr_pose.tran.x = step_size; break;
+            case 2: incr_pose.tran.y = step_size; break;
+            case 3: incr_pose.tran.z = step_size; break;
+            case 4: incr_pose.rpy.rx = step_size; break;
+            case 5: incr_pose.rpy.ry = step_size; break;
+            case 6: incr_pose.rpy.rz = step_size; break;
+        }
+
+        ret = robot_->edg_servo_p((unsigned char)robot_id, &incr_pose, MoveMode::INCR);
+        if (ret != ERR_SUCC) {
+            return checkReturn(ret, "jog cartesian incr");
+        }
+        
+        ret = robot_->edg_send();
+        return checkReturn(ret, "jog cartesian send");
+    }
+}
+
+bool JakaInterface::jogStop(int robot_id, int axis_num)
+{
+    // For servo mode jog, stopping means just not sending more commands
+    // The servo timeout (500ms) will naturally stop the robot
+    // But we can also send a zero-increment command to stop immediately
+    
+    RCLCPP_INFO(logger_, "Jog stop requested for robot %d, axis %d", robot_id, axis_num);
+    
+    // Send zero increment to stop immediately
+    JointValue zero_jpos;
+    memset(&zero_jpos, 0, sizeof(zero_jpos));
+    
+    errno_t ret = robot_->edg_servo_j((unsigned char)robot_id, &zero_jpos, MoveMode::INCR);
+    if (ret != ERR_SUCC) {
+        return checkReturn(ret, "jog_stop");
+    }
+    
+    ret = robot_->edg_send();
+    return checkReturn(ret, "jog_stop send");
+}
+
 bool JakaInterface::setCollisionLevel(int robot_id, int level)
 {
     if (level < 0 || level > 5) {

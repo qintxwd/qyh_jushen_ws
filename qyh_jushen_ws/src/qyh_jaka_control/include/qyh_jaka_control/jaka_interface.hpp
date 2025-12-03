@@ -64,6 +64,15 @@ public:
     bool moveL(int robot_id, const geometry_msgs::msg::Pose& target_pose,
                bool move_mode, double velocity, double acceleration, bool is_block);
 
+    // 点动控制 (Jog control)
+    // axis_num: 1-7 for joints (COORD_JOINT), 1-6 for X/Y/Z/RX/RY/RZ (COORD_BASE/COORD_TOOL)
+    // move_mode: 0=ABS, 1=INCR(step), 2=CONTINUE(continuous)
+    // coord_type: 0=COORD_BASE, 1=COORD_JOINT, 2=COORD_TOOL
+    // velocity: rad/s for rotation/joints, mm/s for linear
+    // position: rad for rotation/joints, mm for linear (only for INCR mode)
+    bool jog(int robot_id, int axis_num, int move_mode, int coord_type, double velocity, double position = 0.0);
+    bool jogStop(int robot_id, int axis_num = 0);
+
     // 配置功能
     bool setCollisionLevel(int robot_id, int level);
     bool setToolOffset(int robot_id, const geometry_msgs::msg::Pose& tool_offset);
