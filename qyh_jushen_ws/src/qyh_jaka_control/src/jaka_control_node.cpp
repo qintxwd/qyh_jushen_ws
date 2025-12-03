@@ -259,10 +259,15 @@ private:
     {
         // 伺服状态
         auto servo_msg = qyh_jaka_control_msgs::msg::JakaServoStatus();
-        servo_msg.mode = use_cartesian_ ? "cartesian" : "joint";
+        // 根据 servo_running_ 状态设置 mode
+        if (servo_running_) {
+            servo_msg.mode = use_cartesian_ ? "cartesian" : "joint";
+        } else {
+            servo_msg.mode = "idle";
+        }
         servo_msg.is_abs = true;
         servo_msg.cycle_time_ns = static_cast<int32_t>(cycle_time_ms_ * 1e6);
-        servo_msg.publish_rate_hz = 1000.0 / cycle_time_ms_;
+        servo_msg.publish_rate_hz = servo_running_ ? (1000.0 / cycle_time_ms_) : 0.0;
         servo_msg.latency_ms = last_cycle_duration_us_ / 1000.0;
         servo_msg.packet_loss_rate = 0.0;
         servo_msg.error_code = 0;
@@ -280,6 +285,7 @@ private:
             robot_state_msg.powered_on = state.poweredOn;
             robot_state_msg.enabled = state.servoEnabled;
             robot_state_msg.in_estop = state.estoped;
+            robot_state_msg.servo_mode_enabled = servo_running_;  // 伺服模式状态
 
             // Only query detailed status if powered on
             if (state.poweredOn) {

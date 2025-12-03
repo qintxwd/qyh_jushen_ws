@@ -5,6 +5,7 @@ bool powered_on
 bool enabled
 bool in_estop
 bool in_error
+bool servo_mode_enabled
 bool left_in_position
 bool right_in_position
 string error_message
