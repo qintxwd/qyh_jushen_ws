@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <thread>
+#include <atomic>
 #include <JAKAZuRobot.h>
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose.hpp>
@@ -64,14 +66,38 @@ public:
     bool moveL(int robot_id, const geometry_msgs::msg::Pose& target_pose,
                bool move_mode, double velocity, double acceleration, bool is_block);
 
-    // 点动控制 (Jog control)
-    // axis_num: 1-7 for joints (COORD_JOINT), 1-6 for X/Y/Z/RX/RY/RZ (COORD_BASE/COORD_TOOL)
-    // move_mode: 0=ABS, 1=INCR(step), 2=CONTINUE(continuous)
-    // coord_type: 0=COORD_BASE, 1=COORD_JOINT, 2=COORD_TOOL
-    // velocity: rad/s for rotation/joints, mm/s for linear
-    // position: rad for rotation/joints, mm for linear (only for INCR mode)
-    bool jog(int robot_id, int axis_num, int move_mode, int coord_type, double velocity, double position = 0.0);
-    bool jogStop(int robot_id, int axis_num = 0);
+    // 点动控制 (Jog control) - 非伺服模式下使用
+    // 注意：伺服模式下禁止使用点动功能
+    //
+    // 关节点动 (Joint Jog)
+    // robot_id: 0=左臂, 1=右臂
+    // joint_index: 0-6 对应 J1-J7
+    // step_deg: 步进值(度), 正值正向，负值反向
+    //           支持: 0.01, 0.05, 0.1, 0.5, 1, 5, 10
+    //           特殊值 0 表示连续模式
+    // velocity_percent: 速度百分比 1-100
+    bool jogJoint(int robot_id, int joint_index, double step_deg, double velocity_percent = 30.0);
+    
+    // 笛卡尔点动 (Cartesian Jog)
+    // robot_id: 0=左臂, 1=右臂
+    // axis: 0=X, 1=Y, 2=Z, 3=RX, 4=RY, 5=RZ
+    // step: 步进值, X/Y/Z单位mm, RX/RY/RZ单位度
+    //       支持: 0.01, 0.05, 0.1, 0.5, 1, 5, 10
+    //       特殊值 0 表示连续模式
+    // velocity_percent: 速度百分比 1-100
+    // coord_type: 0=基座标系(COORD_BASE), 2=工具坐标系(COORD_TOOL)
+    bool jogCartesian(int robot_id, int axis, double step, double velocity_percent = 30.0, int coord_type = 0);
+    
+    // 连续点动 (Continuous Jog) - 按住持续运动
+    // direction: 1=正向, -1=反向
+    bool jogJointContinuous(int robot_id, int joint_index, int direction, double velocity_percent = 30.0);
+    bool jogCartesianContinuous(int robot_id, int axis, int direction, double velocity_percent = 30.0, int coord_type = 0);
+    
+    // 停止点动
+    bool jogStop(int robot_id);
+    
+    // 检查是否可以执行点动（非伺服模式）
+    bool canJog() const { return connected_ && !servo_enabled_; }
 
     // 配置功能
     bool setCollisionLevel(int robot_id, int level);
@@ -99,6 +125,20 @@ private:
     std::unique_ptr<JAKAZuRobot> robot_;
     bool connected_;
     bool servo_enabled_;
+    
+    // 点动状态
+    std::atomic<bool> jog_active_{false};
+    std::atomic<bool> jog_stop_requested_{false};
+    int jog_robot_id_{-1};
+    int jog_axis_num_{0};
+    int jog_coord_type_{0};
+    int jog_direction_{0};
+    double jog_velocity_percent_{30.0};
+    std::thread jog_thread_;
+    
+    // 点动内部实现
+    void jogContinuousThread();
+    double getStepValue(int step_mode);  // 获取步进值
 
     bool checkReturn(errno_t ret, const std::string& operation);
 };

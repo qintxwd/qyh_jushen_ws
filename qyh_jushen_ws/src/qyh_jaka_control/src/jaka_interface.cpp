@@ -1,5 +1,6 @@
 #include "qyh_jaka_control/jaka_interface.hpp"
 #include <cstring>
+#include <cmath>
 #include <chrono>
 #include <thread>
 #include <tf2/LinearMath/Quaternion.h>
@@ -308,139 +309,331 @@ bool JakaInterface::moveL(int robot_id, const geometry_msgs::msg::Pose& target_p
     return checkReturn(ret, "move_l");
 }
 
-bool JakaInterface::jog(int robot_id, int axis_num, int move_mode, int coord_type, double velocity, double position)
+// ==================== 点动控制实现 (非伺服模式) ====================
+
+// 步进值映射: 0=连续, 1=0.01, 2=0.05, 3=0.1, 4=0.5, 5=1, 6=5, 7=10
+static const double JOG_STEP_VALUES[] = {0.0, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0};
+static const int JOG_STEP_COUNT = 8;
+
+double JakaInterface::getStepValue(int step_mode)
 {
-    // Note: The C++ SDK (JAKAZuRobot class) does not have direct jog() method.
-    // We implement jog using edg_servo_j/edg_servo_p for step mode (INCR).
-    // For continuous mode (CONTINUE), caller should call this repeatedly.
-    // 
-    // axis_num: 1-7 for joints, 1-6 for X/Y/Z/RX/RY/RZ
-    // move_mode: 0=ABS, 1=INCR(step), 2=CONTINUE
-    // coord_type: 0=COORD_BASE, 1=COORD_JOINT, 2=COORD_TOOL
-    
-    if (!connected_) {
-        RCLCPP_ERROR(logger_, "Not connected to robot");
-        return false;
+    if (step_mode < 0 || step_mode >= JOG_STEP_COUNT) {
+        return 1.0;  // 默认1度或1mm
     }
-
-    // Validate axis_num
-    if (coord_type == 1) { // COORD_JOINT
-        if (axis_num < 1 || axis_num > 7) {
-            RCLCPP_ERROR(logger_, "Invalid joint number: %d, must be 1-7", axis_num);
-            return false;
-        }
-    } else { // COORD_BASE or COORD_TOOL
-        if (axis_num < 1 || axis_num > 6) {
-            RCLCPP_ERROR(logger_, "Invalid cartesian axis: %d, must be 1-6", axis_num);
-            return false;
-        }
-    }
-
-    // For continuous mode, we use incremental motion with fixed step size
-    double step_size = 0.0;
-    if (move_mode == 2) { // CONTINUE
-        // Calculate step size based on velocity and cycle time (8ms)
-        double cycle_time_s = 0.008; // 8ms = 125Hz
-        step_size = velocity * cycle_time_s;
-    } else if (move_mode == 1) { // INCR (step mode)
-        step_size = position;
-    }
-
-    if (coord_type == 1) { // COORD_JOINT
-        // Joint space jog
-        JointValue jpos;
-        memset(&jpos, 0, sizeof(jpos));
-        
-        // Get current joint position
-        CartesianPose temp_pose;
-        errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &jpos, &temp_pose);
-        if (ret != ERR_SUCC) {
-            RCLCPP_ERROR(logger_, "Failed to get current joint position");
-            return false;
-        }
-
-        // Apply increment to target joint
-        if (move_mode == 0) { // ABS
-            jpos.jVal[axis_num - 1] = position;
-        } else {
-            // Create incremental command
-            JointValue incr_jpos;
-            memset(&incr_jpos, 0, sizeof(incr_jpos));
-            incr_jpos.jVal[axis_num - 1] = step_size;
-            
-            ret = robot_->edg_servo_j((unsigned char)robot_id, &incr_jpos, MoveMode::INCR);
-            if (ret != ERR_SUCC) {
-                return checkReturn(ret, "jog joint incr");
-            }
-            
-            ret = robot_->edg_send();
-            return checkReturn(ret, "jog joint send");
-        }
-
-        // For absolute mode
-        MoveMode modes[2] = {MoveMode::ABS, MoveMode::ABS};
-        double vel[2] = {velocity, velocity};
-        double acc[2] = {1.0, 1.0}; // Default acceleration
-        JointValue jpos_arr[2] = {jpos, jpos};
-        
-        ret = robot_->robot_run_multi_movj(robot_id, modes, false, jpos_arr, vel, acc);
-        return checkReturn(ret, "jog joint abs");
-    } else {
-        // Cartesian space jog
-        CartesianPose pose;
-        memset(&pose, 0, sizeof(pose));
-        
-        // Get current cartesian position
-        JointValue temp_joint;
-        errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &temp_joint, &pose);
-        if (ret != ERR_SUCC) {
-            RCLCPP_ERROR(logger_, "Failed to get current cartesian position");
-            return false;
-        }
-
-        // Create incremental command
-        CartesianPose incr_pose;
-        memset(&incr_pose, 0, sizeof(incr_pose));
-        
-        // Apply increment to target axis (1=X, 2=Y, 3=Z, 4=RX, 5=RY, 6=RZ)
-        switch (axis_num) {
-            case 1: incr_pose.tran.x = step_size; break;
-            case 2: incr_pose.tran.y = step_size; break;
-            case 3: incr_pose.tran.z = step_size; break;
-            case 4: incr_pose.rpy.rx = step_size; break;
-            case 5: incr_pose.rpy.ry = step_size; break;
-            case 6: incr_pose.rpy.rz = step_size; break;
-        }
-
-        ret = robot_->edg_servo_p((unsigned char)robot_id, &incr_pose, MoveMode::INCR);
-        if (ret != ERR_SUCC) {
-            return checkReturn(ret, "jog cartesian incr");
-        }
-        
-        ret = robot_->edg_send();
-        return checkReturn(ret, "jog cartesian send");
-    }
+    return JOG_STEP_VALUES[step_mode];
 }
 
-bool JakaInterface::jogStop(int robot_id, int axis_num)
+bool JakaInterface::jogJoint(int robot_id, int joint_index, double step_deg, double velocity_percent)
 {
-    // For servo mode jog, stopping means just not sending more commands
-    // The servo timeout (500ms) will naturally stop the robot
-    // But we can also send a zero-increment command to stop immediately
-    
-    RCLCPP_INFO(logger_, "Jog stop requested for robot %d, axis %d", robot_id, axis_num);
-    
-    // Send zero increment to stop immediately
-    JointValue zero_jpos;
-    memset(&zero_jpos, 0, sizeof(zero_jpos));
-    
-    errno_t ret = robot_->edg_servo_j((unsigned char)robot_id, &zero_jpos, MoveMode::INCR);
-    if (ret != ERR_SUCC) {
-        return checkReturn(ret, "jog_stop");
+    // 检查前置条件
+    if (!connected_) {
+        RCLCPP_ERROR(logger_, "Jog failed: not connected to robot");
+        return false;
     }
     
-    ret = robot_->edg_send();
-    return checkReturn(ret, "jog_stop send");
+    if (servo_enabled_) {
+        RCLCPP_ERROR(logger_, "Jog failed: servo mode is enabled, please disable servo mode first");
+        return false;
+    }
+    
+    if (joint_index < 0 || joint_index > 6) {
+        RCLCPP_ERROR(logger_, "Invalid joint index: %d, must be 0-6", joint_index);
+        return false;
+    }
+    
+    if (velocity_percent < 1.0) velocity_percent = 1.0;
+    if (velocity_percent > 100.0) velocity_percent = 100.0;
+    
+    // 获取当前关节位置
+    JointValue current_jpos;
+    CartesianPose temp_pose;
+    errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &current_jpos, &temp_pose);
+    if (ret != ERR_SUCC) {
+        RCLCPP_ERROR(logger_, "Failed to get current joint position");
+        return false;
+    }
+    
+    // 计算目标位置 (step_deg 已经是度，转换为弧度)
+    double step_rad = step_deg * M_PI / 180.0;
+    JointValue target_jpos = current_jpos;
+    target_jpos.jVal[joint_index] += step_rad;
+    
+    RCLCPP_INFO(logger_, "JogJoint: robot=%d, J%d, step=%.3f deg (%.5f rad), vel=%.1f%%",
+                robot_id, joint_index + 1, step_deg, step_rad, velocity_percent);
+    
+    // 使用 robot_run_multi_movj 执行运动
+    // 只控制单个机器人，另一个机器人位置保持不变
+    JointValue jpos_arr[2];
+    MoveMode modes[2] = {MoveMode::ABS, MoveMode::ABS};
+    double vel[2] = {velocity_percent / 100.0, velocity_percent / 100.0};  // 速度比例
+    double acc[2] = {0.5, 0.5};  // 加速度，点动时用较小值更平滑
+    
+    // 获取另一个机器人的当前位置
+    int other_robot = (robot_id == 0) ? 1 : 0;
+    JointValue other_jpos;
+    CartesianPose other_pose;
+    ret = robot_->edg_get_stat((unsigned char)other_robot, &other_jpos, &other_pose);
+    if (ret != ERR_SUCC) {
+        RCLCPP_WARN(logger_, "Failed to get other robot position, using zeros");
+        memset(&other_jpos, 0, sizeof(other_jpos));
+    }
+    
+    if (robot_id == 0) {
+        jpos_arr[0] = target_jpos;
+        jpos_arr[1] = other_jpos;
+    } else {
+        jpos_arr[0] = other_jpos;
+        jpos_arr[1] = target_jpos;
+    }
+    
+    // 非阻塞执行，让调用方可以控制停止
+    ret = robot_->robot_run_multi_movj(robot_id, modes, FALSE, jpos_arr, vel, acc);
+    return checkReturn(ret, "jog_joint");
+}
+
+bool JakaInterface::jogCartesian(int robot_id, int axis, double step, double velocity_percent, int coord_type)
+{
+    // 检查前置条件
+    if (!connected_) {
+        RCLCPP_ERROR(logger_, "Jog failed: not connected to robot");
+        return false;
+    }
+    
+    if (servo_enabled_) {
+        RCLCPP_ERROR(logger_, "Jog failed: servo mode is enabled, please disable servo mode first");
+        return false;
+    }
+    
+    if (axis < 0 || axis > 5) {
+        RCLCPP_ERROR(logger_, "Invalid axis: %d, must be 0-5 (X/Y/Z/RX/RY/RZ)", axis);
+        return false;
+    }
+    
+    if (velocity_percent < 1.0) velocity_percent = 1.0;
+    if (velocity_percent > 100.0) velocity_percent = 100.0;
+    
+    // 获取当前笛卡尔位置和关节位置
+    JointValue current_jpos;
+    CartesianPose current_pose;
+    errno_t ret = robot_->edg_get_stat((unsigned char)robot_id, &current_jpos, &current_pose);
+    if (ret != ERR_SUCC) {
+        RCLCPP_ERROR(logger_, "Failed to get current position");
+        return false;
+    }
+    
+    // 计算目标笛卡尔位置
+    CartesianPose target_pose = current_pose;
+    
+    // axis: 0=X, 1=Y, 2=Z (mm), 3=RX, 4=RY, 5=RZ (度转弧度)
+    switch (axis) {
+        case 0: target_pose.tran.x += step; break;  // X (mm)
+        case 1: target_pose.tran.y += step; break;  // Y (mm)
+        case 2: target_pose.tran.z += step; break;  // Z (mm)
+        case 3: target_pose.rpy.rx += step * M_PI / 180.0; break;  // RX (deg to rad)
+        case 4: target_pose.rpy.ry += step * M_PI / 180.0; break;  // RY (deg to rad)
+        case 5: target_pose.rpy.rz += step * M_PI / 180.0; break;  // RZ (deg to rad)
+    }
+    
+    const char* axis_names[] = {"X", "Y", "Z", "RX", "RY", "RZ"};
+    const char* unit = (axis < 3) ? "mm" : "deg";
+    RCLCPP_INFO(logger_, "JogCartesian: robot=%d, axis=%s, step=%.3f %s, vel=%.1f%%, coord=%d",
+                robot_id, axis_names[axis], step, unit, velocity_percent, coord_type);
+    
+    // 逆运动学求解目标关节位置
+    JointValue target_jpos;
+    ret = robot_->kine_inverse(robot_id, &current_jpos, &target_pose, &target_jpos);
+    if (ret != ERR_SUCC) {
+        RCLCPP_ERROR(logger_, "Inverse kinematics failed, target pose may be unreachable");
+        return false;
+    }
+    
+    // 使用 robot_run_multi_movj 执行运动
+    JointValue jpos_arr[2];
+    MoveMode modes[2] = {MoveMode::ABS, MoveMode::ABS};
+    double vel[2] = {velocity_percent / 100.0, velocity_percent / 100.0};
+    double acc[2] = {0.5, 0.5};
+    
+    // 获取另一个机器人的当前位置
+    int other_robot = (robot_id == 0) ? 1 : 0;
+    JointValue other_jpos;
+    CartesianPose other_pose;
+    ret = robot_->edg_get_stat((unsigned char)other_robot, &other_jpos, &other_pose);
+    if (ret != ERR_SUCC) {
+        RCLCPP_WARN(logger_, "Failed to get other robot position, using zeros");
+        memset(&other_jpos, 0, sizeof(other_jpos));
+    }
+    
+    if (robot_id == 0) {
+        jpos_arr[0] = target_jpos;
+        jpos_arr[1] = other_jpos;
+    } else {
+        jpos_arr[0] = other_jpos;
+        jpos_arr[1] = target_jpos;
+    }
+    
+    ret = robot_->robot_run_multi_movj(robot_id, modes, FALSE, jpos_arr, vel, acc);
+    return checkReturn(ret, "jog_cartesian");
+}
+
+bool JakaInterface::jogJointContinuous(int robot_id, int joint_index, int direction, double velocity_percent)
+{
+    // 检查前置条件
+    if (!connected_) {
+        RCLCPP_ERROR(logger_, "Jog failed: not connected to robot");
+        return false;
+    }
+    
+    if (servo_enabled_) {
+        RCLCPP_ERROR(logger_, "Jog failed: servo mode is enabled");
+        return false;
+    }
+    
+    if (joint_index < 0 || joint_index > 6) {
+        RCLCPP_ERROR(logger_, "Invalid joint index: %d", joint_index);
+        return false;
+    }
+    
+    if (direction != 1 && direction != -1) {
+        RCLCPP_ERROR(logger_, "Invalid direction: %d, must be 1 or -1", direction);
+        return false;
+    }
+    
+    // 如果已经在点动，先停止
+    if (jog_active_) {
+        jogStop(robot_id);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    
+    // 设置点动参数
+    jog_robot_id_ = robot_id;
+    jog_axis_num_ = joint_index;
+    jog_coord_type_ = 1;  // COORD_JOINT
+    jog_direction_ = direction;
+    jog_velocity_percent_ = velocity_percent;
+    jog_stop_requested_ = false;
+    jog_active_ = true;
+    
+    // 启动连续点动线程
+    if (jog_thread_.joinable()) {
+        jog_thread_.join();
+    }
+    jog_thread_ = std::thread(&JakaInterface::jogContinuousThread, this);
+    
+    RCLCPP_INFO(logger_, "Started continuous jog: robot=%d, J%d, dir=%d, vel=%.1f%%",
+                robot_id, joint_index + 1, direction, velocity_percent);
+    
+    return true;
+}
+
+bool JakaInterface::jogCartesianContinuous(int robot_id, int axis, int direction, double velocity_percent, int coord_type)
+{
+    // 检查前置条件
+    if (!connected_) {
+        RCLCPP_ERROR(logger_, "Jog failed: not connected to robot");
+        return false;
+    }
+    
+    if (servo_enabled_) {
+        RCLCPP_ERROR(logger_, "Jog failed: servo mode is enabled");
+        return false;
+    }
+    
+    if (axis < 0 || axis > 5) {
+        RCLCPP_ERROR(logger_, "Invalid axis: %d", axis);
+        return false;
+    }
+    
+    if (direction != 1 && direction != -1) {
+        RCLCPP_ERROR(logger_, "Invalid direction: %d", direction);
+        return false;
+    }
+    
+    // 如果已经在点动，先停止
+    if (jog_active_) {
+        jogStop(robot_id);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    
+    // 设置点动参数
+    jog_robot_id_ = robot_id;
+    jog_axis_num_ = axis;
+    jog_coord_type_ = coord_type;  // 0=BASE, 2=TOOL
+    jog_direction_ = direction;
+    jog_velocity_percent_ = velocity_percent;
+    jog_stop_requested_ = false;
+    jog_active_ = true;
+    
+    // 启动连续点动线程
+    if (jog_thread_.joinable()) {
+        jog_thread_.join();
+    }
+    jog_thread_ = std::thread(&JakaInterface::jogContinuousThread, this);
+    
+    const char* axis_names[] = {"X", "Y", "Z", "RX", "RY", "RZ"};
+    RCLCPP_INFO(logger_, "Started continuous jog: robot=%d, %s, dir=%d, vel=%.1f%%, coord=%d",
+                robot_id, axis_names[axis], direction, velocity_percent, coord_type);
+    
+    return true;
+}
+
+void JakaInterface::jogContinuousThread()
+{
+    // 连续点动：每次移动一小步，循环执行直到停止请求
+    const double JOINT_STEP_DEG = 2.0;    // 关节每次移动2度
+    const double LINEAR_STEP_MM = 5.0;    // 线性每次移动5mm
+    const double ANGULAR_STEP_DEG = 2.0;  // 旋转每次移动2度
+    const int CYCLE_MS = 100;             // 每100ms执行一次
+    
+    RCLCPP_INFO(logger_, "Continuous jog thread started");
+    
+    while (!jog_stop_requested_ && connected_ && !servo_enabled_) {
+        bool success = false;
+        
+        if (jog_coord_type_ == 1) {
+            // 关节点动
+            double step = JOINT_STEP_DEG * jog_direction_;
+            success = jogJoint(jog_robot_id_, jog_axis_num_, step, jog_velocity_percent_);
+        } else {
+            // 笛卡尔点动
+            double step;
+            if (jog_axis_num_ < 3) {
+                step = LINEAR_STEP_MM * jog_direction_;  // X/Y/Z
+            } else {
+                step = ANGULAR_STEP_DEG * jog_direction_;  // RX/RY/RZ
+            }
+            success = jogCartesian(jog_robot_id_, jog_axis_num_, step, jog_velocity_percent_, jog_coord_type_);
+        }
+        
+        if (!success) {
+            RCLCPP_WARN(logger_, "Jog step failed, stopping continuous jog");
+            break;
+        }
+        
+        // 等待一个周期
+        std::this_thread::sleep_for(std::chrono::milliseconds(CYCLE_MS));
+    }
+    
+    jog_active_ = false;
+    RCLCPP_INFO(logger_, "Continuous jog thread ended");
+}
+
+bool JakaInterface::jogStop(int robot_id)
+{
+    RCLCPP_INFO(logger_, "Jog stop requested for robot %d", robot_id);
+    
+    // 请求停止连续点动线程
+    jog_stop_requested_ = true;
+    
+    // 等待线程结束
+    if (jog_thread_.joinable()) {
+        jog_thread_.join();
+    }
+    
+    // 调用 motion_abort 立即停止当前运动
+    errno_t ret = robot_->motion_abort();
+    
+    jog_active_ = false;
+    return checkReturn(ret, "jog_stop");
 }
 
 bool JakaInterface::setCollisionLevel(int robot_id, int level)
