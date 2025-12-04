@@ -24,6 +24,7 @@
 #include <set>
 #include <map>
 #include <array>
+#include <cmath>
 
 using namespace std::chrono_literals;
 
@@ -709,24 +710,65 @@ private:
             return;
         }
 
-        // 停止伺服模式下的jog可能会影响已有的servo命令
-        // 对于步进模式，直接执行
-        // 对于连续模式，需要持续发送命令（由调用方负责）
+        // 检查是否可以执行点动（非伺服模式）
+        if (!jaka_interface_.canJog()) {
+            res->success = false;
+            res->message = "Cannot jog: servo mode is enabled or not connected";
+            return;
+        }
+
+        // 新接口参数转换:
+        // axis_num: 服务是1-based, 新接口是0-based
+        // velocity/position: 服务是rad和mm, 新接口是度和mm
+        int axis_index = req->axis_num - 1;  // 转换为0-based
+        double velocity_percent = std::abs(req->velocity) * 100.0;  // 简单转换为百分比
+        if (velocity_percent < 1.0) velocity_percent = 30.0;
+        if (velocity_percent > 100.0) velocity_percent = 100.0;
         
-        res->success = jaka_interface_.jog(
-            req->robot_id,
-            req->axis_num,
-            req->move_mode,
-            req->coord_type,
-            req->velocity,
-            req->position
-        );
-        res->message = res->success ? "Jog command executed" : "Failed to execute jog command";
+        // 方向由速度符号决定
+        int direction = (req->velocity >= 0) ? 1 : -1;
         
-        if (res->success) {
-            RCLCPP_INFO(get_logger(), "Jog: robot=%d, axis=%d, mode=%d, coord=%d, vel=%.3f, pos=%.3f",
+        bool success = false;
+        
+        if (req->coord_type == req->COORD_JOINT) {
+            // 关节点动
+            if (req->move_mode == req->MOVE_CONTINUOUS) {
+                // 连续模式
+                success = jaka_interface_.jogJointContinuous(
+                    req->robot_id, axis_index, direction, velocity_percent);
+            } else {
+                // 步进模式: position 是 rad，转换为度
+                double step_deg = req->position * 180.0 / M_PI * direction;
+                success = jaka_interface_.jogJoint(
+                    req->robot_id, axis_index, step_deg, velocity_percent);
+            }
+        } else {
+            // 笛卡尔点动 (COORD_BASE 或 COORD_TOOL)
+            int coord = (req->coord_type == req->COORD_TOOL) ? 2 : 0;
+            
+            if (req->move_mode == req->MOVE_CONTINUOUS) {
+                // 连续模式
+                success = jaka_interface_.jogCartesianContinuous(
+                    req->robot_id, axis_index, direction, velocity_percent, coord);
+            } else {
+                // 步进模式: X/Y/Z是mm, RX/RY/RZ是rad转度
+                double step = req->position * direction;
+                if (axis_index >= 3) {
+                    // 旋转轴: rad 转 deg
+                    step = req->position * 180.0 / M_PI * direction;
+                }
+                success = jaka_interface_.jogCartesian(
+                    req->robot_id, axis_index, step, velocity_percent, coord);
+            }
+        }
+        
+        res->success = success;
+        res->message = success ? "Jog command executed" : "Failed to execute jog command";
+        
+        if (success) {
+            RCLCPP_INFO(get_logger(), "Jog: robot=%d, axis=%d, mode=%d, coord=%d, vel=%.1f%%, dir=%d",
                 req->robot_id, req->axis_num, req->move_mode, req->coord_type, 
-                req->velocity, req->position);
+                velocity_percent, direction);
         }
     }
 
@@ -734,11 +776,11 @@ private:
         const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req,
         qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res)
     {
-        res->success = jaka_interface_.jogStop(req->robot_id, req->axis_num);
+        res->success = jaka_interface_.jogStop(req->robot_id);
         res->message = res->success ? "Jog stopped" : "Failed to stop jog";
         
         if (res->success) {
-            RCLCPP_INFO(get_logger(), "Jog stopped: robot=%d, axis=%d", req->robot_id, req->axis_num);
+            RCLCPP_INFO(get_logger(), "Jog stopped: robot=%d", req->robot_id);
         }
     }
 
