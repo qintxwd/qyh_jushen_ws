@@ -340,8 +340,15 @@ bool LiftControlNode::stop_move()
 {
   RCLCPP_INFO(this->get_logger(), "Stopping movement");
 
-  // 写入 COIL_GO_POSITION = 0 来取消当前的绝对位置移动
-  return write_coil(ModbusAddress::COIL_GO_POSITION, false);
+  // 使用 COIL_GO_STOP (1006) 来停止绝对位置移动
+  // 写1触发停止，然后清除
+  if (!write_coil(ModbusAddress::COIL_GO_STOP, true)) {
+    return false;
+  }
+
+  // 短暂延时后清除停止信号
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  return write_coil(ModbusAddress::COIL_GO_STOP, false);
 }
 
 void LiftControlNode::handle_control(

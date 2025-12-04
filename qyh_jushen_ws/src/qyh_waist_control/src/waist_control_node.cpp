@@ -403,8 +403,15 @@ bool WaistControlNode::stop_move()
   write_coil(ModbusAddress::COIL_LEAN_FORWARD, false);
   write_coil(ModbusAddress::COIL_LEAN_BACK, false);
 
-  // 取消绝对位置移动
-  return write_coil(ModbusAddress::COIL_GO_POSITION, false);
+  // 使用 COIL_GO_STOP 来停止绝对位置移动
+  // 写1触发停止，然后清除
+  if (!write_coil(ModbusAddress::COIL_GO_STOP, true)) {
+    return false;
+  }
+
+  // 短暂延时后清除停止信号
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  return write_coil(ModbusAddress::COIL_GO_STOP, false);
 }
 
 bool WaistControlNode::go_upright()
