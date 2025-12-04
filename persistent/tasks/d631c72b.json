@@ -1,0 +1,38 @@
+{
+  "id": "d631c72b",
+  "name": "新任务2",
+  "description": "",
+  "category": "default",
+  "root": {
+    "id": "node_1764757536848_1",
+    "type": "Sequence",
+    "params": {},
+    "children": [
+      {
+        "id": "node_1764757563004_2",
+        "type": "ArmMoveJ",
+        "params": {
+          "side": "both",
+          "velocity": 0.5,
+          "acceleration": 0.3,
+          "pose_name": "zero"
+        },
+        "children": [
+          {
+            "id": "node_1764757566152_3",
+            "type": "ArmMoveJ",
+            "params": {
+              "side": "both",
+              "velocity": 0.5,
+              "acceleration": 0.3,
+              "pose_name": "point_fb243dcd"
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "created_at": "2025-12-03T17:44:28.677727",
+  "updated_at": "2025-12-03T18:26:45.034414"
+}
