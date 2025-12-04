@@ -1,8 +1,10 @@
 #include <memory>
 #include <chrono>
+#include <atomic>
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "moveit/robot_model_loader/robot_model_loader.h"
 #include "qyh_teleoperation_controller/differential_ik_controller.hpp"
 #include "qyh_teleoperation_controller/virtual_arm_follower.hpp"
@@ -13,7 +15,9 @@ class TeleoperationNode : public rclcpp::Node
 {
 public:
   TeleoperationNode()
-  : Node("teleoperation_node")
+  : Node("teleoperation_node"),
+    left_clutch_engaged_(false),
+    right_clutch_engaged_(false)
   {
     // Declare parameters
     this->declare_parameter<std::string>("robot_description", "robot_description");
@@ -72,6 +76,19 @@ public:
       "/vr/right_target_pose", 10,
       std::bind(&TeleoperationNode::rightTargetCallback, this, std::placeholders::_1));
     
+    // Subscribe to clutch status
+    left_clutch_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+      "/vr/left_clutch_engaged", 10,
+      [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        left_clutch_engaged_ = msg->data;
+      });
+    
+    right_clutch_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+      "/vr/right_clutch_engaged", 10,
+      [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        right_clutch_engaged_ = msg->data;
+      });
+    
     // Subscribe to current joint states
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 10,
@@ -89,7 +106,7 @@ public:
     
     RCLCPP_INFO(this->get_logger(), 
       "Teleoperation node initialized at %.1f Hz", control_freq);
-    RCLCPP_INFO(this->get_logger(), "Waiting for VR target poses...");
+    RCLCPP_INFO(this->get_logger(), "Using Clutch mode - waiting for grip button...");
   }
 
 private:
@@ -170,8 +187,14 @@ private:
   qyh_teleoperation_controller::JointState left_current_state_;
   qyh_teleoperation_controller::JointState right_current_state_;
   
+  // Clutch state
+  std::atomic<bool> left_clutch_engaged_;
+  std::atomic<bool> right_clutch_engaged_;
+  
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_target_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_target_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr left_clutch_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr right_clutch_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_command_pub_;

@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""
+VR Clutch Node - VR遥操作的Clutch模式控制节点
+
+功能:
+1. 订阅VR手柄位姿和按键
+2. 订阅机器人当前末端位姿
+3. 实现Clutch模式：按住grip跟踪，松开保持
+4. 发布机器人目标位姿
+
+Clutch模式工作原理:
+- 按住Grip键: 建立VR-机器人位姿参考，跟踪VR增量
+- 松开Grip键: 机器人保持最后位置
+- VR增量直接映射为机器人增量（无需复杂坐标变换）
+"""
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from geometry_msgs.msg import PoseStamped, Pose
+from sensor_msgs.msg import Joy
+from std_msgs.msg import Bool
+from qyh_jaka_control_msgs.msg import RobotState
+import numpy as np
+
+from .vr_clutch_controller import VRClutchController, ClutchConfig, ClutchState
+
+
+class VRClutchNode(Node):
+    """VR Clutch模式控制节点"""
+    
+    def __init__(self):
+        super().__init__('vr_clutch_node')
+        
+        # 声明参数
+        self._declare_parameters()
+        
+        # 加载配置
+        self.config = self._load_config()
+        
+        # 创建左右手的Clutch控制器
+        self.left_controller = VRClutchController(self.config, name="left")
+        self.right_controller = VRClutchController(self.config, name="right")
+        
+        # 机器人当前状态
+        self.robot_state: RobotState = None
+        self.robot_state_received = False
+        
+        # VR当前状态
+        self.left_vr_pose: PoseStamped = None
+        self.right_vr_pose: PoseStamped = None
+        self.left_grip_value: float = 0.0
+        self.right_grip_value: float = 0.0
+        
+        # QoS设置
+        reliable_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        
+        # === 订阅者 ===
+        # 机器人状态
+        self.robot_state_sub = self.create_subscription(
+            RobotState,
+            '/jaka/robot_state',
+            self.robot_state_callback,
+            10
+        )
+        
+        # VR手柄位姿
+        self.left_pose_sub = self.create_subscription(
+            PoseStamped,
+            '/vr/left_hand/pose',
+            self.left_pose_callback,
+            10
+        )
+        self.right_pose_sub = self.create_subscription(
+            PoseStamped,
+            '/vr/right_hand/pose',
+            self.right_pose_callback,
+            10
+        )
+        
+        # VR按键（获取grip值）
+        self.left_joy_sub = self.create_subscription(
+            Joy,
+            '/vr/left_hand/joy',
+            self.left_joy_callback,
+            10
+        )
+        self.right_joy_sub = self.create_subscription(
+            Joy,
+            '/vr/right_hand/joy',
+            self.right_joy_callback,
+            10
+        )
+        
+        # === 发布者 ===
+        # 机器人目标位姿（发送给teleoperation_controller）
+        self.left_target_pub = self.create_publisher(
+            PoseStamped,
+            '/vr/left_target_pose',
+            10
+        )
+        self.right_target_pub = self.create_publisher(
+            PoseStamped,
+            '/vr/right_target_pose',
+            10
+        )
+        
+        # Clutch状态（用于前端显示）
+        self.left_clutch_status_pub = self.create_publisher(
+            Bool,
+            '/vr/left_clutch_engaged',
+            10
+        )
+        self.right_clutch_status_pub = self.create_publisher(
+            Bool,
+            '/vr/right_clutch_engaged',
+            10
+        )
+        
+        # 控制循环定时器
+        control_rate = self.get_parameter('control_rate').value
+        self.timer = self.create_timer(1.0 / control_rate, self.control_loop)
+        
+        self.get_logger().info('=== VR Clutch Node Initialized ===')
+        self.get_logger().info(f'  Control rate: {control_rate} Hz')
+        self.get_logger().info(f'  Engage threshold: {self.config.engage_threshold}')
+        self.get_logger().info(f'  Release threshold: {self.config.release_threshold}')
+        self.get_logger().info(f'  Position scale: {self.config.position_scale}')
+        self.get_logger().info(f'  Rotation scale: {self.config.rotation_scale}')
+        self.get_logger().info('Waiting for VR data and robot state...')
+    
+    def _declare_parameters(self):
+        """声明ROS参数"""
+        # 控制频率
+        self.declare_parameter('control_rate', 50.0)  # Hz
+        
+        # Clutch阈值
+        self.declare_parameter('clutch.engage_threshold', 0.8)
+        self.declare_parameter('clutch.release_threshold', 0.2)
+        
+        # 缩放
+        self.declare_parameter('clutch.position_scale', 1.0)
+        self.declare_parameter('clutch.rotation_scale', 1.0)
+        
+        # 增量限制
+        self.declare_parameter('clutch.max_position_delta', 0.05)  # m
+        self.declare_parameter('clutch.max_rotation_delta', 0.1)   # rad
+        
+        # 坐标轴映射 (VR -> Robot)
+        # 默认: VR的XYZ直接对应机器人的XYZ
+        self.declare_parameter('clutch.axis_mapping', [0, 1, 2])
+        self.declare_parameter('clutch.axis_signs', [1, 1, 1])
+    
+    def _load_config(self) -> ClutchConfig:
+        """加载Clutch配置"""
+        axis_mapping = self.get_parameter('clutch.axis_mapping').value
+        axis_signs = self.get_parameter('clutch.axis_signs').value
+        
+        return ClutchConfig(
+            engage_threshold=self.get_parameter('clutch.engage_threshold').value,
+            release_threshold=self.get_parameter('clutch.release_threshold').value,
+            position_scale=self.get_parameter('clutch.position_scale').value,
+            rotation_scale=self.get_parameter('clutch.rotation_scale').value,
+            max_position_delta=self.get_parameter('clutch.max_position_delta').value,
+            max_rotation_delta=self.get_parameter('clutch.max_rotation_delta').value,
+            axis_mapping=tuple(axis_mapping),
+            axis_signs=tuple(axis_signs)
+        )
+    
+    # === 回调函数 ===
+    
+    def robot_state_callback(self, msg: RobotState):
+        """机器人状态回调"""
+        self.robot_state = msg
+        if not self.robot_state_received:
+            self.robot_state_received = True
+            self.get_logger().info('✓ Robot state received')
+    
+    def left_pose_callback(self, msg: PoseStamped):
+        """左手VR位姿回调"""
+        self.left_vr_pose = msg
+    
+    def right_pose_callback(self, msg: PoseStamped):
+        """右手VR位姿回调"""
+        self.right_vr_pose = msg
+    
+    def left_joy_callback(self, msg: Joy):
+        """左手按键回调"""
+        if len(msg.axes) >= 4:
+            self.left_grip_value = msg.axes[3]  # grip在axes[3]
+    
+    def right_joy_callback(self, msg: Joy):
+        """右手按键回调"""
+        if len(msg.axes) >= 4:
+            self.right_grip_value = msg.axes[3]  # grip在axes[3]
+    
+    # === 控制循环 ===
+    
+    def control_loop(self):
+        """主控制循环"""
+        # 检查是否有必要的数据
+        if not self.robot_state_received:
+            return
+        
+        now = self.get_clock().now()
+        
+        # 处理左手
+        if self.left_vr_pose is not None:
+            self._process_arm(
+                'left',
+                self.left_controller,
+                self.left_vr_pose,
+                self.left_grip_value,
+                self.robot_state.left_cartesian_pose,
+                self.left_target_pub,
+                self.left_clutch_status_pub,
+                now
+            )
+        
+        # 处理右手
+        if self.right_vr_pose is not None:
+            self._process_arm(
+                'right',
+                self.right_controller,
+                self.right_vr_pose,
+                self.right_grip_value,
+                self.robot_state.right_cartesian_pose,
+                self.right_target_pub,
+                self.right_clutch_status_pub,
+                now
+            )
+    
+    def _process_arm(self, arm_name: str, 
+                     controller: VRClutchController,
+                     vr_pose: PoseStamped,
+                     grip_value: float,
+                     robot_pose: Pose,
+                     target_pub,
+                     clutch_pub,
+                     now):
+        """处理单臂的Clutch控制"""
+        # 提取VR位姿
+        vr_pos = np.array([
+            vr_pose.pose.position.x,
+            vr_pose.pose.position.y,
+            vr_pose.pose.position.z
+        ])
+        vr_ori = np.array([
+            vr_pose.pose.orientation.x,
+            vr_pose.pose.orientation.y,
+            vr_pose.pose.orientation.z,
+            vr_pose.pose.orientation.w
+        ])
+        
+        # 提取机器人当前位姿
+        robot_pos = np.array([
+            robot_pose.position.x,
+            robot_pose.position.y,
+            robot_pose.position.z
+        ])
+        robot_ori = np.array([
+            robot_pose.orientation.x,
+            robot_pose.orientation.y,
+            robot_pose.orientation.z,
+            robot_pose.orientation.w
+        ])
+        
+        # 更新Clutch控制器
+        target_pos, target_ori, state = controller.update(
+            vr_pos, vr_ori,
+            robot_pos, robot_ori,
+            grip_value
+        )
+        
+        # 发布Clutch状态
+        clutch_msg = Bool()
+        clutch_msg.data = controller.is_engaged()
+        clutch_pub.publish(clutch_msg)
+        
+        # 如果有目标位姿，发布
+        if target_pos is not None and target_ori is not None:
+            target_msg = PoseStamped()
+            target_msg.header.stamp = now.to_msg()
+            target_msg.header.frame_id = 'base_link'
+            
+            target_msg.pose.position.x = float(target_pos[0])
+            target_msg.pose.position.y = float(target_pos[1])
+            target_msg.pose.position.z = float(target_pos[2])
+            
+            target_msg.pose.orientation.x = float(target_ori[0])
+            target_msg.pose.orientation.y = float(target_ori[1])
+            target_msg.pose.orientation.z = float(target_ori[2])
+            target_msg.pose.orientation.w = float(target_ori[3])
+            
+            target_pub.publish(target_msg)
+            
+            # 状态变化时打印日志
+            if state == ClutchState.ENGAGING:
+                self.get_logger().info(f'[{arm_name}] Clutch ENGAGED - grip={grip_value:.2f}')
+            elif state == ClutchState.RELEASING:
+                self.get_logger().info(f'[{arm_name}] Clutch RELEASED')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = VRClutchNode()
+    
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

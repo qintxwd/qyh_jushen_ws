@@ -1,0 +1,30 @@
+# VR Clutch Node 配置
+# Clutch模式: 按住grip跟踪VR，松开保持位置
+
+vr_clutch_node:
+  ros__parameters:
+    # 控制频率 (Hz)
+    control_rate: 50.0
+    
+    # Clutch阈值
+    clutch:
+      engage_threshold: 0.8    # grip > 0.8 时接合clutch
+      release_threshold: 0.2   # grip < 0.2 时释放clutch
+      
+      # 缩放因子
+      position_scale: 1.0      # VR位移到机器人位移的缩放 (1.0 = 1:1)
+      rotation_scale: 1.0      # VR旋转到机器人旋转的缩放
+      
+      # 单步增量限制 (安全保护)
+      max_position_delta: 0.05  # 单步最大位移 (m), 50mm
+      max_rotation_delta: 0.1   # 单步最大旋转 (rad), ~5.7度
+      
+      # 坐标轴映射: VR轴索引 -> 机器人轴
+      # [0, 1, 2] 表示: VR_X->Robot_X, VR_Y->Robot_Y, VR_Z->Robot_Z
+      # 如果VR和机器人坐标系不同，可以调整这里
+      axis_mapping: [0, 1, 2]
+      
+      # 坐标轴方向符号
+      # [1, 1, 1] 表示方向相同
+      # [-1, 1, 1] 表示X轴反向
+      axis_signs: [1, 1, 1]
