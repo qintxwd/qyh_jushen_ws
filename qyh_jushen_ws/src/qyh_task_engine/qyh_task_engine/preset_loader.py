@@ -40,9 +40,9 @@ class PresetLoader:
         
         self.storage_path = Path(storage_path)
         
-        # 地图文件路径 (在工作区根目录的 maps 文件夹)
-        workspace_root = Path(__file__).parent.parent.parent.parent.parent
-        self.maps_dir = workspace_root / "maps"
+        # 地图文件路径 (在 ~/qyh_jushen_ws/maps 文件夹)
+        home = Path.home()
+        self.maps_dir = home / "qyh_jushen_ws" / "maps"
         
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._load_all()
