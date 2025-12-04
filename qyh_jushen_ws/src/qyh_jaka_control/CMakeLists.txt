@@ -17,7 +17,6 @@ find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(qyh_jaka_control_msgs REQUIRED)
-find_package(qyh_vr_calibration_msgs REQUIRED)
 
 # Include directories
 include_directories(
@@ -60,7 +59,6 @@ ament_target_dependencies(jaka_control_node
   tf2
   tf2_geometry_msgs
   qyh_jaka_control_msgs
-  qyh_vr_calibration_msgs
 )
 target_link_libraries(jaka_control_node
   jaka_interface
