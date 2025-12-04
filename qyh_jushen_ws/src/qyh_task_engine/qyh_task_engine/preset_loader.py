@@ -20,11 +20,16 @@ class PresetLoader:
     
     FILE_MAP = {
         "location": "locations.json",
-        "arm_pose": "arm_poses.json",
+        "arm_pose": "arm_points.json",  # 机械臂点位
         "lift_height": "lift_heights.json",
         "head_position": "head_positions.json",
         "gripper_position": "gripper_positions.json",
         "task_template": "task_templates.json",
+    }
+    
+    # 不同文件的数据字段名
+    DATA_FIELD_MAP = {
+        "arm_pose": "points",  # arm_points.json 使用 "points" 字段
     }
     
     def __init__(self, storage_path: str = None):
@@ -46,7 +51,12 @@ class PresetLoader:
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    for item in data.get('items', []):
+                    
+                    # 获取数据字段名（默认为 items）
+                    data_field = self.DATA_FIELD_MAP.get(preset_type, 'items')
+                    items = data.get(data_field, data.get('items', []))
+                    
+                    for item in items:
                         item_id = item.get('id')
                         if item_id:
                             self._cache[preset_type][item_id] = item
@@ -54,11 +64,12 @@ class PresetLoader:
                             name = item.get('name')
                             if name:
                                 self._cache[preset_type][name] = item
+                    print(f"✓ 加载预设文件 [{filename}]: {len(items)} 个条目")
                 except Exception as e:
                     print(f"⚠️  加载预设文件失败 [{filename}]: {e}")
     
     def _add_builtin_presets(self):
-        """添加内置预设"""
+        """添加内置预设（只在文件中没有时才添加）"""
         # 内置点位
         builtin_locations = {
             "loc_origin": {"id": "loc_origin", "name": "原点", "x": 0.0, "y": 0.0, "theta": 0.0},
@@ -72,6 +83,26 @@ class PresetLoader:
         
         # 内置姿态
         builtin_arm_poses = {
+            # 常用别名
+            "zero": {
+                "id": "zero", "name": "零位", "side": "both",
+                "left_joints": [0.0] * 7, "right_joints": [0.0] * 7
+            },
+            "零位": {
+                "id": "zero", "name": "零位", "side": "both",
+                "left_joints": [0.0] * 7, "right_joints": [0.0] * 7
+            },
+            "home": {
+                "id": "home", "name": "初始点", "side": "both",
+                "left_joints": [0.0, -0.79, 0.0, -1.56, 0.0, 1.36, 0.0],
+                "right_joints": [0.0, -0.75, 0.0, -1.45, 0.0, -1.14, 0.0]
+            },
+            "初始点": {
+                "id": "home", "name": "初始点", "side": "both",
+                "left_joints": [0.0, -0.79, 0.0, -1.56, 0.0, 1.36, 0.0],
+                "right_joints": [0.0, -0.75, 0.0, -1.45, 0.0, -1.14, 0.0]
+            },
+            # 兼容旧命名
             "pose_home": {
                 "id": "pose_home", "name": "初始姿态", "side": "both",
                 "left_joints": [0.0] * 7, "right_joints": [0.0] * 7

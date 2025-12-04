@@ -167,18 +167,20 @@ class SubTaskNode(SkillNode):
     """
     子任务引用节点
     
-    引用并执行另一个已定义的任务模板。
-    支持参数覆盖和嵌套任务执行。
+    引用并执行另一个已定义的任务。
+    支持从已保存任务文件加载或从预设模板加载。
     
     参数:
-        task_name: 任务模板名称或 ID
+        task_id: 任务 ID（从已保存任务列表选择）
+        task_name: 任务模板名称或 ID（兼容旧格式）
         params: 传递给子任务的参数（覆盖子任务的默认参数）
     """
     
     NODE_TYPE = "SubTask"
     
     PARAM_SCHEMA = {
-        'task_name': {'type': 'string', 'required': True},
+        'task_id': {'type': 'string', 'required': False},
+        'task_name': {'type': 'string', 'required': False},  # 兼容旧格式
         'params': {'type': 'object', 'required': False, 'default': {}},
     }
     
@@ -190,21 +192,28 @@ class SubTaskNode(SkillNode):
     
     def setup(self) -> bool:
         """加载子任务树"""
-        task_name = self.params.get('task_name')
-        if not task_name:
-            self.log_error("Missing task_name")
+        task_id = self.params.get('task_id')
+        task_name = self.params.get('task_name')  # 兼容旧格式
+        
+        if not task_id and not task_name:
+            self.log_error("Missing task_id or task_name")
             return False
         
-        # 从预设加载任务模板
-        task_template = preset_loader.get_task_template(task_name)
-        if not task_template:
-            self.log_error(f"Task template not found: {task_name}")
-            return False
+        task_tree = None
+        task_label = task_id or task_name
         
-        # 获取任务树
-        task_tree = task_template.get('task_tree')
-        if not task_tree:
-            self.log_error(f"Empty task tree in template: {task_name}")
+        # 1. 首先尝试从已保存任务文件加载
+        if task_id:
+            task_tree = self._load_from_task_file(task_id)
+        
+        # 2. 如果没找到，尝试从预设模板加载
+        if task_tree is None:
+            task_template = preset_loader.get_task_template(task_name or task_id)
+            if task_template:
+                task_tree = task_template.get('task_tree') or task_template.get('root')
+        
+        if task_tree is None:
+            self.log_error(f"Task not found: {task_label}")
             return False
         
         # 应用参数覆盖
@@ -212,11 +221,30 @@ class SubTaskNode(SkillNode):
         if override_params:
             task_tree = self._apply_params(task_tree, override_params)
         
-        self.log_info(f"Loaded sub-task: {task_name}")
+        self.log_info(f"Loaded sub-task: {task_label}")
         
         # 保存任务树，稍后在 execute 中解析
         self._task_tree_data = task_tree
         return True
+    
+    def _load_from_task_file(self, task_id: str):
+        """从持久化任务文件加载"""
+        import json
+        from pathlib import Path
+        
+        tasks_dir = Path.home() / "qyh_jushen_ws" / "persistent" / "tasks"
+        task_file = tasks_dir / f"{task_id}.json"
+        
+        if not task_file.exists():
+            return None
+        
+        try:
+            with open(task_file, 'r', encoding='utf-8') as f:
+                task_data = json.load(f)
+            return task_data.get('root')
+        except Exception as e:
+            self.log_error(f"Failed to load task file {task_id}: {e}")
+            return None
     
     def execute(self) -> SkillResult:
         """执行子任务"""
