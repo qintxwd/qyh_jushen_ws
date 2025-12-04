@@ -16,20 +16,17 @@
           "velocity": 0.5,
           "acceleration": 0.3,
           "pose_name": "zero"
-        },
-        "children": [
-          {
-            "id": "node_1764757566152_3",
-            "type": "ArmMoveJ",
-            "params": {
-              "side": "both",
-              "velocity": 0.5,
-              "acceleration": 0.3,
-              "pose_name": "point_fb243dcd"
-            },
-            "children": []
-          }
-        ]
+        }
+      },
+      {
+        "id": "node_1764757566152_3",
+        "type": "ArmMoveJ",
+        "params": {
+          "side": "both",
+          "velocity": 0.5,
+          "acceleration": 0.3,
+          "pose_name": "point_fb243dcd"
+        }
       }
     ]
   },
