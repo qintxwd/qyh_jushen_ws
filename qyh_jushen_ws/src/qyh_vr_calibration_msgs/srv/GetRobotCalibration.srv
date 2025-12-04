@@ -1,5 +1,0 @@
-# Get robot calibration data
----
-bool found
-CalibrationProfile profile  # username will be 'ROBOT'
-string message

@@ -1,0 +1,45 @@
+# 仿真测试配置
+# 用于VR Clutch功能的仿真验证
+
+vr_simulator_node:
+  ros__parameters:
+    publish_rate: 50.0
+    # 初始位置（在机器人工作空间内）
+    initial_left_pos: [0.4, 0.25, 0.4]
+    initial_right_pos: [0.4, -0.25, 0.4]
+    move_speed: 0.005  # 5mm per key press
+
+sim_clutch_node:
+  ros__parameters:
+    control_rate: 50.0
+    
+    # Frame names (与URDF/SRDF一致)
+    base_frame: "base_link"
+    left_ee_frame: "left_tool0"
+    right_ee_frame: "right_tool0"
+    
+    clutch:
+      engage_threshold: 0.8
+      release_threshold: 0.2
+      position_scale: 1.0
+      rotation_scale: 1.0
+      max_position_delta: 0.02   # 2cm per frame max
+      max_rotation_delta: 0.05   # ~3 deg per frame max
+      position_deadzone: 0.002   # 2mm deadzone
+      rotation_deadzone: 0.01    # ~0.5 deg deadzone
+      smoothing_factor: 0.5
+      axis_mapping: [0, 1, 2]
+      axis_signs: [1, 1, 1]
+
+sim_arm_controller:
+  ros__parameters:
+    left_group_name: "left_arm"
+    right_group_name: "right_arm"
+    left_ee_link: "left_tool0"
+    right_ee_link: "right_tool0"
+    planning_frame: "base_link"
+    position_tolerance: 0.01     # 1cm tolerance
+    orientation_tolerance: 0.1   # ~6 deg tolerance
+    planning_time: 0.5           # 500ms max planning time
+    max_velocity_scaling: 0.3    # 30% max velocity (safety)
+    max_acceleration_scaling: 0.3
