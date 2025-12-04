@@ -14,10 +14,10 @@ class BaseMoveToNode(SkillNode):
     底盘导航节点
     
     参数:
-        x: 目标 X 坐标 (米)
-        y: 目标 Y 坐标 (米)
+        location: 预设点位名称（如 station_1）
+        x: 目标 X 坐标 (米) - 仅当不使用预设时
+        y: 目标 Y 坐标 (米) - 仅当不使用预设时  
         theta: 目标朝向 (弧度)
-        location: 预设点位名称（可选，与 x/y/theta 二选一）
         timeout: 超时时间 (秒)，默认 60
     """
     
@@ -33,162 +33,159 @@ class BaseMoveToNode(SkillNode):
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
-        self._nav_client = None
-        self._goal_handle = None
+        self._nav_site_client = None  # 站点导航服务客户端
         self._is_navigating = False
         self._start_time: Optional[float] = None
+        self._station_id: Optional[int] = None
     
     def setup(self) -> bool:
-        """初始化导航动作客户端"""
+        """初始化导航服务客户端"""
         if not self.ros_node:
             self.log_warn("No ROS node available, running in mock mode")
             return True
         
         try:
-            from nav2_msgs.action import NavigateToPose
-            from rclpy.action import ActionClient
-            
-            self._nav_client = ActionClient(
-                self.ros_node,
-                NavigateToPose,
-                '/navigate_to_pose'
+            # 使用底盘的站点导航服务
+            from qyh_standard_robot_msgs.srv import GoNavigateToSite
+            self._nav_site_client = self.ros_node.create_client(
+                GoNavigateToSite,
+                'go_navigate_to_site_simple'
             )
+            self.log_info("Created chassis navigation client")
             return True
         except Exception as e:
             self.log_warn(f"Failed to create navigation client: {e}")
-            # 导航可能不可用，使用 mock 模式
             return True
     
     def execute(self) -> SkillResult:
         """执行导航"""
         timeout = self.params.get('timeout', 60.0)
         
-        # 解析目标位置
-        target = self._resolve_target()
-        if target is None:
+        # 解析站点ID
+        station_id = self._resolve_station_id()
+        if station_id is None:
             return SkillResult(
                 status=SkillStatus.FAILURE,
-                message="Invalid target: missing x/y or location"
+                message="Invalid target: cannot resolve station ID"
             )
         
-        x, y, theta = target
-        self.log_info(f"Navigating to ({x:.2f}, {y:.2f}, θ={theta:.2f})")
+        self._station_id = station_id
         
         # Mock 模式
-        if not self._nav_client:
+        if not self._nav_site_client:
             if self._start_time is None:
                 self._start_time = time.time()
+                self.log_info(f"Navigating to station {station_id} (mock mode)")
             
-            # 模拟导航时间
             elapsed = time.time() - self._start_time
             if elapsed > 2.0:
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
-                    message=f"Arrived at ({x:.2f}, {y:.2f}) (mock mode)"
+                    message=f"Arrived at station {station_id} (mock mode)"
                 )
             
             return SkillResult(
                 status=SkillStatus.RUNNING,
-                message=f"Navigating... {elapsed:.1f}s"
+                message=f"Navigating to station {station_id}... {elapsed:.1f}s"
             )
         
         # 真实执行
         if not self._is_navigating:
-            if not self._nav_client.wait_for_server(timeout_sec=5.0):
+            if not self._nav_site_client.wait_for_service(timeout_sec=5.0):
                 return SkillResult(
                     status=SkillStatus.FAILURE,
-                    message="Navigation server not available"
+                    message="Navigation service not available"
                 )
             
-            from nav2_msgs.action import NavigateToPose
-            from geometry_msgs.msg import PoseStamped
-            import math
+            from qyh_standard_robot_msgs.srv import GoNavigateToSite
             
-            goal_msg = NavigateToPose.Goal()
-            goal_msg.pose = PoseStamped()
-            goal_msg.pose.header.frame_id = 'map'
-            goal_msg.pose.pose.position.x = x
-            goal_msg.pose.pose.position.y = y
-            goal_msg.pose.pose.orientation.z = math.sin(theta / 2)
-            goal_msg.pose.pose.orientation.w = math.cos(theta / 2)
+            request = GoNavigateToSite.Request()
+            request.site_id = station_id
             
-            self._goal_handle = self._nav_client.send_goal_async(goal_msg)
+            self.log_info(f"Sending navigation request to station {station_id}")
+            self._future = self._nav_site_client.call_async(request)
             self._is_navigating = True
             self._start_time = time.time()
             
-            return SkillResult(status=SkillStatus.RUNNING, message="Navigation started...")
+            return SkillResult(
+                status=SkillStatus.RUNNING,
+                message=f"Navigation to station {station_id} started..."
+            )
         
         # 检查超时
-        if time.time() - self._start_time > timeout:
-            if self._goal_handle:
-                self._goal_handle.cancel_goal_async()
+        elapsed = time.time() - self._start_time
+        if elapsed > timeout:
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Navigation timeout ({timeout}s)"
             )
         
-        # 检查是否完成
-        if self._goal_handle and self._goal_handle.done():
-            goal_handle = self._goal_handle.result()
-            if goal_handle.accepted:
-                result = goal_handle.get_result_async()
-                if result.done():
+        # 检查服务调用是否完成
+        if hasattr(self, '_future') and self._future.done():
+            try:
+                result = self._future.result()
+                if result.success:
                     return SkillResult(
                         status=SkillStatus.SUCCESS,
-                        message="Navigation completed"
+                        message=f"Arrived at station {station_id}"
                     )
-            else:
+                else:
+                    return SkillResult(
+                        status=SkillStatus.FAILURE,
+                        message=f"Navigation failed: {result.message}"
+                    )
+            except Exception as e:
                 return SkillResult(
                     status=SkillStatus.FAILURE,
-                    message="Navigation goal rejected"
+                    message=f"Navigation error: {e}"
                 )
         
-        elapsed = time.time() - self._start_time
         return SkillResult(
             status=SkillStatus.RUNNING,
-            message=f"Navigating... {elapsed:.1f}s"
+            message=f"Navigating to station {station_id}... {elapsed:.1f}s"
         )
     
-    def _resolve_target(self) -> Optional[tuple]:
-        """解析目标位置"""
+    def _resolve_station_id(self) -> Optional[int]:
+        """解析站点ID"""
         # 优先使用预设点位
         if 'location' in self.params:
             location_name = self.params['location']
             
-            # 优先从持久化预设加载
+            # 从预设加载
             loc_preset = preset_loader.get_location(location_name)
             if loc_preset:
-                return (
-                    loc_preset.get('x', 0),
-                    loc_preset.get('y', 0),
-                    loc_preset.get('theta', 0)
-                )
+                # 获取原始站点ID
+                station_id = loc_preset.get('station_id')
+                if station_id is not None:
+                    return int(station_id)
+                
+                # 尝试从 id 字段解析 (格式: station_X)
+                preset_id = loc_preset.get('id', '')
+                if preset_id.startswith('station_'):
+                    try:
+                        return int(preset_id.replace('station_', ''))
+                    except ValueError:
+                        pass
             
-            # 从黑板读取（兼容旧格式）
-            locations = self.read_from_blackboard('assets.locations', {})
-            if location_name in locations:
-                loc = locations[location_name]
-                return (loc.get('x', 0), loc.get('y', 0), loc.get('theta', 0))
+            # 尝试直接从 location 参数解析 (格式: station_X)
+            if location_name.startswith('station_'):
+                try:
+                    return int(location_name.replace('station_', ''))
+                except ValueError:
+                    pass
             
-            self.log_error(f"Unknown location: {location_name}")
+            self.log_error(f"Cannot resolve station ID from location: {location_name}")
             return None
         
-        # 使用坐标
-        if 'x' in self.params and 'y' in self.params:
-            return (
-                self.params['x'],
-                self.params['y'],
-                self.params.get('theta', 0.0)
-            )
-        
+        # 如果没有 location 参数，不支持坐标导航（底盘只支持站点）
+        self.log_error("No location parameter provided")
         return None
     
     def halt(self):
         """中断导航"""
         super().halt()
-        if self._goal_handle:
-            self._goal_handle.cancel_goal_async()
-            self.log_info("Navigation cancelled")
+        self._is_navigating = False
+        self.log_info("Navigation halted")
 
 
 class BaseVelocityNode(SkillNode):
