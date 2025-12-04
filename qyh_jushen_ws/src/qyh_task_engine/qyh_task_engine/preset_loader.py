@@ -39,8 +39,14 @@ class PresetLoader:
             storage_path = home / "qyh_jushen_ws" / "persistent" / "preset"
         
         self.storage_path = Path(storage_path)
+        
+        # 地图文件路径 (在工作区根目录的 maps 文件夹)
+        workspace_root = Path(__file__).parent.parent.parent.parent.parent
+        self.maps_dir = workspace_root / "maps"
+        
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._load_all()
+        self._load_map_stations()  # 从地图加载站点
         self._add_builtin_presets()
     
     def _load_all(self):
@@ -68,6 +74,59 @@ class PresetLoader:
                     print(f"✓ 加载预设文件 [{filename}]: {len(items)} 个条目")
                 except Exception as e:
                     print(f"⚠️  加载预设文件失败 [{filename}]: {e}")
+    
+    def _load_map_stations(self):
+        """从地图数据加载站点到 location 预设"""
+        if not self.maps_dir.exists():
+            print("⚠️  地图目录不存在，跳过站点加载")
+            return
+        
+        # 读取当前地图名
+        current_map_file = self.maps_dir / "current_map.txt"
+        if not current_map_file.exists():
+            print("⚠️  未找到当前地图信息，跳过站点加载")
+            return
+        
+        current_map = current_map_file.read_text(encoding='utf-8').strip()
+        if not current_map:
+            return
+        
+        # 读取地图JSON数据
+        map_json_file = self.maps_dir / current_map / f"{current_map}.json"
+        if not map_json_file.exists():
+            print(f"⚠️  地图数据文件不存在: {current_map}")
+            return
+        
+        try:
+            with open(map_json_file, 'r', encoding='utf-8') as f:
+                map_data = json.load(f)
+            
+            stations = map_data.get('data', {}).get('station', [])
+            self._cache.setdefault("location", {})
+            
+            count = 0
+            for station in stations:
+                station_id = station.get('id')
+                station_name = station.get('name', f"站点{station_id}")
+                
+                # 转换为预设格式 (mm -> m, 1/1000 rad -> rad)
+                loc_data = {
+                    "id": f"station_{station_id}",
+                    "name": station_name,
+                    "x": station.get('pos.x', 0.0) / 1000.0,  # mm -> m
+                    "y": station.get('pos.y', 0.0) / 1000.0,  # mm -> m
+                    "theta": station.get('pos.yaw', 0.0) / 1000.0,  # 1/1000 rad -> rad
+                    "station_id": station_id  # 保留原始站点ID
+                }
+                
+                # 用 id 和 name 都作为索引
+                self._cache["location"][f"station_{station_id}"] = loc_data
+                self._cache["location"][station_name] = loc_data
+                count += 1
+            
+            print(f"✓ 从地图 [{current_map}] 加载了 {count} 个站点")
+        except Exception as e:
+            print(f"⚠️  加载地图站点失败: {e}")
     
     def _add_builtin_presets(self):
         """添加内置预设（只在文件中没有时才添加）"""
@@ -211,6 +270,7 @@ class PresetLoader:
         """重新加载所有预设"""
         self._cache.clear()
         self._load_all()
+        self._load_map_stations()  # 从地图加载站点
         self._add_builtin_presets()
     
     def get_location(self, name_or_id: str) -> Optional[Dict[str, Any]]:
