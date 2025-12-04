@@ -9,7 +9,7 @@ import uuid
 from typing import Dict, Any, Union, TYPE_CHECKING
 
 from .base_node import SkillNode
-from .composite_nodes import SequenceNode, ParallelNode, SelectorNode, CompositeNode
+from .composite_nodes import SequenceNode, ParallelNode, SelectorNode, LoopNode, CompositeNode
 from .skills import SKILL_REGISTRY
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ class TaskParser:
         'Sequence': SequenceNode,
         'Parallel': ParallelNode,
         'Selector': SelectorNode,
+        'Loop': LoopNode,
     }
     
     def __init__(self, ros_node: 'rclpy.node.Node' = None):
@@ -157,13 +158,20 @@ class TaskParser:
         """解析复合节点"""
         composite_class = self.COMPOSITE_TYPES[node_type]
         
-        # 额外参数（如 Parallel 的 success_threshold）
+        # 额外参数（如 Parallel 的 success_threshold, Loop 的 count）
         extra_params = {}
+        params = node_data.get('params', {})
+        
         if node_type == 'Parallel':
-            if 'success_threshold' in node_data.get('params', {}):
-                extra_params['success_threshold'] = node_data['params']['success_threshold']
-            if 'failure_threshold' in node_data.get('params', {}):
-                extra_params['failure_threshold'] = node_data['params']['failure_threshold']
+            if 'success_threshold' in params:
+                extra_params['success_threshold'] = params['success_threshold']
+            if 'failure_threshold' in params:
+                extra_params['failure_threshold'] = params['failure_threshold']
+        elif node_type == 'Loop':
+            if 'count' in params:
+                extra_params['count'] = int(params['count'])
+            if 'break_on_failure' in params:
+                extra_params['break_on_failure'] = bool(params['break_on_failure'])
         
         composite_node = composite_class(
             node_id=node_id,

@@ -281,3 +281,105 @@ class SelectorNode(CompositeNode):
         self.status = SkillStatus.FAILURE
         self._end_time = time.time()
         return self.status
+
+
+class LoopNode(CompositeNode):
+    """
+    循环节点 (Loop / Repeat)
+    
+    循环执行子节点指定次数:
+    - count: 循环次数，0 表示无限循环
+    - break_on_failure: 子节点失败时是否退出循环
+    
+    行为:
+    - 按顺序执行所有子节点（类似 Sequence）
+    - 一轮完成后重置子节点状态，开始下一轮
+    - 达到循环次数后返回 SUCCESS
+    - 如果 break_on_failure=True 且子节点失败，返回 FAILURE
+    """
+    
+    NODE_TYPE = "Loop"
+    
+    def __init__(
+        self,
+        node_id: str,
+        children: List[SkillNode] = None,
+        node_name: str = None,
+        blackboard: Dict[str, Any] = None,
+        count: int = 1,
+        break_on_failure: bool = True
+    ):
+        super().__init__(node_id, children, node_name, blackboard)
+        self.count = count  # 0 表示无限循环
+        self.break_on_failure = break_on_failure
+        self._current_iteration = 0
+    
+    def tick(self) -> SkillStatus:
+        if self._halt_requested:
+            self.status = SkillStatus.HALTED
+            self._end_time = time.time()
+            return self.status
+        
+        if self.status == SkillStatus.IDLE:
+            self._start_time = time.time()
+            self.status = SkillStatus.RUNNING
+            self._current_iteration = 0
+            self._current_child_index = 0
+        
+        # 检查是否完成所有循环（count=0 时永不完成）
+        if self.count > 0 and self._current_iteration >= self.count:
+            self.status = SkillStatus.SUCCESS
+            self._end_time = time.time()
+            return self.status
+        
+        # 执行当前子节点
+        while self._current_child_index < len(self.children):
+            child = self.children[self._current_child_index]
+            child_status = child.tick()
+            
+            if child_status == SkillStatus.RUNNING:
+                return SkillStatus.RUNNING
+            
+            if child_status == SkillStatus.FAILURE:
+                if self.break_on_failure:
+                    self.status = SkillStatus.FAILURE
+                    self._end_time = time.time()
+                    return self.status
+                # 不中断，继续下一个子节点
+            
+            if child_status == SkillStatus.HALTED:
+                self.status = SkillStatus.HALTED
+                self._end_time = time.time()
+                return self.status
+            
+            # 继续下一个子节点
+            self._current_child_index += 1
+        
+        # 一轮完成，重置并开始下一轮
+        self._current_iteration += 1
+        self._current_child_index = 0
+        
+        # 重置所有子节点
+        for child in self.children:
+            child.reset()
+        
+        # 检查是否还需要继续
+        if self.count > 0 and self._current_iteration >= self.count:
+            self.status = SkillStatus.SUCCESS
+            self._end_time = time.time()
+            return self.status
+        
+        # 继续循环
+        return SkillStatus.RUNNING
+    
+    def reset(self):
+        """重置节点"""
+        super().reset()
+        self._current_iteration = 0
+    
+    def get_state(self) -> Dict[str, Any]:
+        """获取节点状态"""
+        state = super().get_state()
+        state['current_iteration'] = self._current_iteration
+        state['total_iterations'] = self.count if self.count > 0 else 'infinite'
+        return state
