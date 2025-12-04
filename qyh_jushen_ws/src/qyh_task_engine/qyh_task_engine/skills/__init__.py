@@ -15,6 +15,7 @@ from .gripper_skills import GripperControlNode
 from .head_skills import HeadLookAtNode, HeadScanNode
 from .base_skills import BaseMoveToNode, BaseVelocityNode
 from .lift_skills import LiftMoveToNode, LiftStopNode
+from .waist_skills import WaistMoveToNode, WaistStopNode, WaistUprightNode
 from .logic_skills import WaitNode, CheckConditionNode, SubTaskNode
 
 __all__ = [
@@ -33,6 +34,10 @@ __all__ = [
     # 升降
     'LiftMoveToNode',
     'LiftStopNode',
+    # 腰部
+    'WaistMoveToNode',
+    'WaistStopNode',
+    'WaistUprightNode',
     # 逻辑
     'WaitNode',
     'CheckConditionNode',
@@ -51,6 +56,9 @@ SKILL_REGISTRY = {
     'BaseVelocity': BaseVelocityNode,
     'LiftMoveTo': LiftMoveToNode,
     'LiftStop': LiftStopNode,
+    'WaistMoveTo': WaistMoveToNode,
+    'WaistStop': WaistStopNode,
+    'WaistUpright': WaistUprightNode,
     'Wait': WaitNode,
     'CheckCondition': CheckConditionNode,
     'SubTask': SubTaskNode,

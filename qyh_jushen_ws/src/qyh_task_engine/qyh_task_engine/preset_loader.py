@@ -22,6 +22,7 @@ class PresetLoader:
         "location": "locations.json",
         "arm_pose": "arm_points.json",  # 机械臂点位
         "lift_height": "lift_heights.json",
+        "waist_angle": "waist_angles.json",  # 腰部角度
         "head_position": "head_positions.json",
         "gripper_position": "gripper_positions.json",
         "task_template": "task_templates.json",
@@ -161,6 +162,21 @@ class PresetLoader:
             if k not in self._cache.get("lift_height", {}):
                 self._cache.setdefault("lift_height", {})[k] = v
         
+        # 内置腰部角度
+        builtin_waist_angles = {
+            "upright": {"id": "upright", "name": "竖直", "angle": 0.0},
+            "竖直": {"id": "upright", "name": "竖直", "angle": 0.0},
+            "slight_lean": {"id": "slight_lean", "name": "轻微前倾", "angle": 15.0},
+            "轻微前倾": {"id": "slight_lean", "name": "轻微前倾", "angle": 15.0},
+            "medium_lean": {"id": "medium_lean", "name": "中等前倾", "angle": 30.0},
+            "中等前倾": {"id": "medium_lean", "name": "中等前倾", "angle": 30.0},
+            "max_lean": {"id": "max_lean", "name": "最大前倾", "angle": 45.0},
+            "最大前倾": {"id": "max_lean", "name": "最大前倾", "angle": 45.0},
+        }
+        for k, v in builtin_waist_angles.items():
+            if k not in self._cache.get("waist_angle", {}):
+                self._cache.setdefault("waist_angle", {})[k] = v
+        
         # 内置头部位置
         builtin_head_positions = {
             "head_center": {"id": "head_center", "name": "正前方", "pan": 0.0, "tilt": 0.0},
@@ -208,6 +224,10 @@ class PresetLoader:
     def get_lift_height(self, name_or_id: str) -> Optional[Dict[str, Any]]:
         """获取升降高度预设"""
         return self._cache.get("lift_height", {}).get(name_or_id)
+    
+    def get_waist_angle(self, name_or_id: str) -> Optional[Dict[str, Any]]:
+        """获取腰部角度预设"""
+        return self._cache.get("waist_angle", {}).get(name_or_id)
     
     def get_head_position(self, name_or_id: str) -> Optional[Dict[str, Any]]:
         """获取头部位置预设"""
