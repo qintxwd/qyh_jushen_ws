@@ -1,0 +1,46 @@
+{
+  "id": "0c78729d",
+  "name": "导航循环",
+  "description": "",
+  "category": "default",
+  "root": {
+    "id": "node_1764847013277_2",
+    "type": "Loop",
+    "params": {
+      "count": 0,
+      "break_on_failure": true
+    },
+    "children": [
+      {
+        "id": "node_1764847027393_3",
+        "type": "BaseMoveTo",
+        "params": {
+          "theta": 0,
+          "timeout": 60,
+          "location": "station_1"
+        },
+        "children": []
+      },
+      {
+        "id": "node_1764847032577_4",
+        "type": "BaseMoveTo",
+        "params": {
+          "theta": 0,
+          "timeout": 60,
+          "location": "station_7"
+        },
+        "children": []
+      },
+      {
+        "id": "node_1764847068072_5",
+        "type": "Wait",
+        "params": {
+          "duration": 5
+        },
+        "children": []
+      }
+    ]
+  },
+  "created_at": "2025-12-04T19:18:10.313460",
+  "updated_at": "2025-12-04T19:18:10.313460"
+}
