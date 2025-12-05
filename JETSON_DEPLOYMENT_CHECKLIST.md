@@ -19,13 +19,18 @@
    - 发布: `/left_arm/joint_command`, `/right_arm/joint_command` (JointState)
 
 3. **VR接口** (`qyh_vr_calibration`)
+   - **VR Clutch 节点** (`vr_clutch_node`) - 离合器控制
+     - 订阅: `/vr/*/pose`, `/vr/*/joy`
+     - Grip > 0.8: 接合离合器，跟踪 VR 增量
+     - Grip < 0.2: 释放离合器，保持位置
+     - 发布: `/sim/left_target_pose`, `/sim/right_target_pose`
+     - 发布: `/vr/left_clutch_engaged`, `/vr/right_clutch_engaged`
    - VR姿态接收和处理
    - TF2坐标变换
    - 移动平均滤波（位置5窗口，姿态3窗口）
    - 死区过滤（2mm位置，0.57°姿态）
-   - 按键控制
    - VR模拟器（测试用）
-   - 发布: `/vr/left_target_pose`, `/vr/right_target_pose`
+   - 仿真机械臂控制器 (`sim_arm_controller`)
 
 4. **JAKA桥接** (`qyh_jaka_control`)
    - 平滑伺服桥接类（`SmoothServoBridge`）
@@ -141,16 +146,24 @@ ros2 topic list | grep move_group
 ros2 service list | grep compute_ik
 ```
 
-**阶段2: 测试VR模拟器+接口**
+**阶段2: 测试VR模拟器+接口+Clutch**
 ```bash
-# 启动VR模拟器和接口
+# 启动VR模拟器、接口和Clutch节点
 ros2 launch qyh_vr_calibration test_vr_interface.launch.py \
     motion_type:=circle \
     amplitude:=0.05
 
-# 检查输出
+# 检查VR输入
 ros2 topic hz /vr/left_target_pose  # 应该~90Hz
 ros2 topic echo /vr/left_target_pose --once
+
+# 检查Clutch状态
+ros2 topic echo /vr/left_clutch_engaged  # Bool: data=True/False
+ros2 topic echo /vr/right_clutch_engaged
+
+# 检查仿真目标姿态
+ros2 topic hz /sim/left_target_pose      # Clutch接合时输出
+ros2 topic echo /sim/left_target_pose --once
 ```
 
 **阶段3: 测试遥操作控制器**
@@ -313,9 +326,15 @@ buffer_size: 20  # 增大缓冲
 VR手柄 (90Hz)
   ↓
 /vr/left_hand/pose, /vr/right_hand/pose
+/vr/left_hand/joy, /vr/right_hand/joy (含grip值)
   ↓ [vr_interface_node: 坐标变换+滤波]
   ↓
 /vr/left_target_pose, /vr/right_target_pose
+  ↓ [vr_clutch_node: 离合器控制]
+  ↓ grip > 0.8: 接合, grip < 0.2: 释放
+  ↓
+/sim/left_target_pose, /sim/right_target_pose (离合接合时)
+/vr/left_clutch_engaged, /vr/right_clutch_engaged (Bool状态)
   ↓ [teleoperation_node: 差分IK+平滑+安全]
   ↓
 /left_arm/joint_command, /right_arm/joint_command (JointState, 125Hz)
@@ -339,6 +358,7 @@ JAKA SDK edgServoJ (125Hz)
 4. 添加工作空间限制
 5. 记录和回放轨迹
 6. 实时性能分析工具
+7. 夹爪控制（Trigger按键）
 
 ## 联系信息
 

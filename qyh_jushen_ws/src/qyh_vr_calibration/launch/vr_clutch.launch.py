@@ -22,6 +22,11 @@ def generate_launch_description():
             default_value=config_file,
             description='Path to the clutch configuration file'
         ),
+        DeclareLaunchArgument(
+            'simulation_mode',
+            default_value='true',  # 默认为仿真模式
+            description='True for simulation, False for real robot'
+        ),
         
         # VR Clutch Node
         Node(
@@ -29,7 +34,10 @@ def generate_launch_description():
             executable='vr_clutch_node',
             name='vr_clutch_node',
             output='screen',
-            parameters=[LaunchConfiguration('config_file')],
+            parameters=[
+                LaunchConfiguration('config_file'),
+                {'simulation_mode': LaunchConfiguration('simulation_mode')}
+            ],
             remappings=[
                 # 可以在这里添加话题重映射
             ]

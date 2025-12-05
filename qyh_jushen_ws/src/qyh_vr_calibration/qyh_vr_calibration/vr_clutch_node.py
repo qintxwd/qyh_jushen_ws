@@ -35,6 +35,9 @@ class VRClutchNode(Node):
         # 声明参数
         self._declare_parameters()
         
+        # 仿真模式
+        self.simulation_mode = self.get_parameter('simulation_mode').value
+        
         # 加载配置
         self.config = self._load_config()
         
@@ -45,6 +48,12 @@ class VRClutchNode(Node):
         # 机器人当前状态
         self.robot_state: RobotState = None
         self.robot_state_received = False
+        
+        # 仿真模式的初始位姿（从参数加载）
+        self.sim_left_pose = Pose()
+        self.sim_right_pose = Pose()
+        if self.simulation_mode:
+            self._init_sim_poses()
         
         # VR当前状态
         self.left_vr_pose: PoseStamped = None
@@ -60,13 +69,16 @@ class VRClutchNode(Node):
         )
         
         # === 订阅者 ===
-        # 机器人状态
-        self.robot_state_sub = self.create_subscription(
-            RobotState,
-            '/jaka/robot_state',
-            self.robot_state_callback,
-            10
-        )
+        # 机器人状态（仅非仿真模式）
+        if not self.simulation_mode:
+            self.robot_state_sub = self.create_subscription(
+                RobotState,
+                '/jaka/robot_state',
+                self.robot_state_callback,
+                10
+            )
+        else:
+            self.robot_state_received = True  # 仿真模式直接设为已接收
         
         # VR手柄位姿
         self.left_pose_sub = self.create_subscription(
@@ -97,15 +109,24 @@ class VRClutchNode(Node):
         )
         
         # === 发布者 ===
-        # 机器人目标位姿（发送给teleoperation_controller）
+        # 机器人目标位姿
+        # 仿真模式: /sim/*_target_pose (给 sim_arm_controller)
+        # 真机模式: /vr/*_target_pose (给 teleoperation_controller)
+        if self.simulation_mode:
+            left_target_topic = '/sim/left_target_pose'
+            right_target_topic = '/sim/right_target_pose'
+        else:
+            left_target_topic = '/vr/left_target_pose'
+            right_target_topic = '/vr/right_target_pose'
+        
         self.left_target_pub = self.create_publisher(
             PoseStamped,
-            '/vr/left_target_pose',
+            left_target_topic,
             10
         )
         self.right_target_pub = self.create_publisher(
             PoseStamped,
-            '/vr/right_target_pose',
+            right_target_topic,
             10
         )
         
@@ -126,21 +147,35 @@ class VRClutchNode(Node):
         self.timer = self.create_timer(1.0 / control_rate, self.control_loop)
         
         self.get_logger().info('=== VR Clutch Node Initialized ===')
+        self.get_logger().info(f'  Mode: {"SIMULATION" if self.simulation_mode else "REAL ROBOT"}')
         self.get_logger().info(f'  Control rate: {control_rate} Hz')
         self.get_logger().info(f'  Engage threshold: {self.config.engage_threshold}')
         self.get_logger().info(f'  Release threshold: {self.config.release_threshold}')
         self.get_logger().info(f'  Position scale: {self.config.position_scale}')
         self.get_logger().info(f'  Rotation scale: {self.config.rotation_scale}')
-        self.get_logger().info('Waiting for VR data and robot state...')
+        self.get_logger().info(f'  VR->Robot rotation (RPY deg): {self.config.vr_to_robot_rotation}')
+        if self.simulation_mode:
+            self.get_logger().info(f'  Target topics: /sim/*_target_pose')
+            self.get_logger().info('Waiting for VR data...')
+        else:
+            self.get_logger().info(f'  Target topics: /vr/*_target_pose')
+            self.get_logger().info('Waiting for VR data and robot state...')
     
     def _declare_parameters(self):
         """声明ROS参数"""
+        # 模式选择
+        self.declare_parameter('simulation_mode', False)  # True=仿真, False=真机
+        
         # 控制频率
         self.declare_parameter('control_rate', 50.0)  # Hz
         
         # Clutch阈值
         self.declare_parameter('clutch.engage_threshold', 0.8)
         self.declare_parameter('clutch.release_threshold', 0.2)
+        
+        # 仿真模式初始位姿（米）
+        self.declare_parameter('sim.left_init_pose', [0.3, 0.2, 0.4, 0.0, 0.0, 0.0, 1.0])  # x,y,z,qx,qy,qz,qw
+        self.declare_parameter('sim.right_init_pose', [0.3, -0.2, 0.4, 0.0, 0.0, 0.0, 1.0])
         
         # 缩放
         self.declare_parameter('clutch.position_scale', 1.0)
@@ -154,11 +189,18 @@ class VRClutchNode(Node):
         # 默认: VR的XYZ直接对应机器人的XYZ
         self.declare_parameter('clutch.axis_mapping', [0, 1, 2])
         self.declare_parameter('clutch.axis_signs', [1, 1, 1])
+        
+        # VR到机器人的坐标系旋转变换（欧拉角，单位：度）
+        # 这个旋转将VR控制器的姿态变换到机器人末端的姿态
+        # PICO VR坐标系: Y-up, Z-forward (控制器指向方向)
+        # 默认值: [-90, 0, 0] 绕X轴旋转-90度，VR的Z-forward变成机器人的Z-down
+        self.declare_parameter('clutch.vr_to_robot_rotation', [-90.0, 0.0, 0.0])
     
     def _load_config(self) -> ClutchConfig:
         """加载Clutch配置"""
         axis_mapping = self.get_parameter('clutch.axis_mapping').value
         axis_signs = self.get_parameter('clutch.axis_signs').value
+        vr_rot = self.get_parameter('clutch.vr_to_robot_rotation').value
         
         return ClutchConfig(
             engage_threshold=self.get_parameter('clutch.engage_threshold').value,
@@ -168,13 +210,38 @@ class VRClutchNode(Node):
             max_position_delta=self.get_parameter('clutch.max_position_delta').value,
             max_rotation_delta=self.get_parameter('clutch.max_rotation_delta').value,
             axis_mapping=tuple(axis_mapping),
-            axis_signs=tuple(axis_signs)
+            axis_signs=tuple(axis_signs),
+            vr_to_robot_rotation=tuple(vr_rot)
         )
     
     # === 回调函数 ===
     
+    def _init_sim_poses(self):
+        """初始化仿真模式的机械臂位姿"""
+        left_pose = self.get_parameter('sim.left_init_pose').value
+        right_pose = self.get_parameter('sim.right_init_pose').value
+        
+        self.sim_left_pose.position.x = left_pose[0]
+        self.sim_left_pose.position.y = left_pose[1]
+        self.sim_left_pose.position.z = left_pose[2]
+        self.sim_left_pose.orientation.x = left_pose[3]
+        self.sim_left_pose.orientation.y = left_pose[4]
+        self.sim_left_pose.orientation.z = left_pose[5]
+        self.sim_left_pose.orientation.w = left_pose[6]
+        
+        self.sim_right_pose.position.x = right_pose[0]
+        self.sim_right_pose.position.y = right_pose[1]
+        self.sim_right_pose.position.z = right_pose[2]
+        self.sim_right_pose.orientation.x = right_pose[3]
+        self.sim_right_pose.orientation.y = right_pose[4]
+        self.sim_right_pose.orientation.z = right_pose[5]
+        self.sim_right_pose.orientation.w = right_pose[6]
+        
+        self.get_logger().info(f'  Left init pose: [{left_pose[0]:.2f}, {left_pose[1]:.2f}, {left_pose[2]:.2f}]')
+        self.get_logger().info(f'  Right init pose: [{right_pose[0]:.2f}, {right_pose[1]:.2f}, {right_pose[2]:.2f}]')
+    
     def robot_state_callback(self, msg: RobotState):
-        """机器人状态回调"""
+        """机器人状态回调（仅真机模式使用）"""
         self.robot_state = msg
         if not self.robot_state_received:
             self.robot_state_received = True
@@ -192,11 +259,20 @@ class VRClutchNode(Node):
         """左手按键回调"""
         if len(msg.axes) >= 4:
             self.left_grip_value = msg.axes[3]  # grip在axes[3]
+            # 调试: 按下grip时输出
+            if self.left_grip_value > 0.5:
+                self.get_logger().info(
+                    f'Left grip: {self.left_grip_value:.2f}',
+                    throttle_duration_sec=0.5)
     
     def right_joy_callback(self, msg: Joy):
         """右手按键回调"""
         if len(msg.axes) >= 4:
             self.right_grip_value = msg.axes[3]  # grip在axes[3]
+            if self.right_grip_value > 0.5:
+                self.get_logger().info(
+                    f'Right grip: {self.right_grip_value:.2f}',
+                    throttle_duration_sec=0.5)
     
     # === 控制循环 ===
     
@@ -208,6 +284,14 @@ class VRClutchNode(Node):
         
         now = self.get_clock().now()
         
+        # 获取当前机械臂位姿（仿真模式用初始位姿，真机模式用实际状态）
+        if self.simulation_mode:
+            left_robot_pose = self.sim_left_pose
+            right_robot_pose = self.sim_right_pose
+        else:
+            left_robot_pose = self.robot_state.left_cartesian_pose
+            right_robot_pose = self.robot_state.right_cartesian_pose
+        
         # 处理左手
         if self.left_vr_pose is not None:
             self._process_arm(
@@ -215,7 +299,7 @@ class VRClutchNode(Node):
                 self.left_controller,
                 self.left_vr_pose,
                 self.left_grip_value,
-                self.robot_state.left_cartesian_pose,
+                left_robot_pose,
                 self.left_target_pub,
                 self.left_clutch_status_pub,
                 now
@@ -228,7 +312,7 @@ class VRClutchNode(Node):
                 self.right_controller,
                 self.right_vr_pose,
                 self.right_grip_value,
-                self.robot_state.right_cartesian_pose,
+                right_robot_pose,
                 self.right_target_pub,
                 self.right_clutch_status_pub,
                 now

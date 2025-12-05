@@ -3,6 +3,11 @@
 
 vr_clutch_node:
   ros__parameters:
+    # 模式选择: true=仿真模式, false=真实机器人
+    # 仿真模式: 不依赖/jaka/robot_state, 发布到/sim/*话题
+    # 真机模式: 订阅/jaka/robot_state, 发布到/vr/*话题
+    simulation_mode: true
+    
     # 控制频率 (Hz)
     control_rate: 50.0
     
@@ -28,3 +33,9 @@ vr_clutch_node:
       # [1, 1, 1] 表示方向相同
       # [-1, 1, 1] 表示X轴反向
       axis_signs: [1, 1, 1]
+    
+    # 仿真模式初始位姿 [x, y, z, qx, qy, qz, qw]
+    # 这是机械臂的初始末端位姿 (米)
+    sim:
+      left_init_pose: [0.3, 0.2, 0.4, 0.0, 0.0, 0.0, 1.0]
+      right_init_pose: [0.3, -0.2, 0.4, 0.0, 0.0, 0.0, 1.0]

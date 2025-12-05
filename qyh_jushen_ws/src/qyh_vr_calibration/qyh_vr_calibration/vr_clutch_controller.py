@@ -47,6 +47,13 @@ class ClutchConfig:
     # 低通滤波系数 (0-1)，越小滤波越强，0=不更新，1=不滤波
     smoothing_factor: float = 0.5
     
+    # VR到机器人的坐标系变换（欧拉角，单位：度）
+    # 这个旋转将VR控制器的"前方向"对齐到机器人末端的期望方向
+    # PICO VR: Y-up, Z-forward (控制器指向方向)
+    # 机器人夹爪: 通常X-forward或Z-down
+    # 默认值: 绕X轴旋转-90度，将VR的Z-forward变成机器人的Z-down
+    vr_to_robot_rotation: Tuple[float, float, float] = (-90.0, 0.0, 0.0)  # roll, pitch, yaw (degrees)
+    
     # 坐标轴映射: VR轴 -> 机器人轴
     # 例如: [0, 2, 1] 表示 VR_X->Robot_X, VR_Y->Robot_Z, VR_Z->Robot_Y
     axis_mapping: Tuple[int, int, int] = (0, 1, 2)  # 默认直接对应
@@ -72,6 +79,11 @@ class VRClutchController:
         # 累积缓冲区（用于死区判断，解决慢速移动问题）
         self.accumulated_pos_delta: np.ndarray = np.zeros(3)
         self.accumulated_rot_delta: np.ndarray = np.zeros(3)  # rotvec
+        
+        # 预计算VR到机器人的旋转变换（用于增量旋转的坐标变换）
+        rpy_deg = self.config.vr_to_robot_rotation
+        rpy_rad = np.deg2rad(rpy_deg)
+        self.vr_to_robot_rot = Rotation.from_euler('xyz', rpy_rad)
 
     def update(
         self,
@@ -222,8 +234,15 @@ class VRClutchController:
         curr_rot = Rotation.from_quat(vr_ori)
         vr_delta_rot = curr_rot * prev_rot.inv()
         
+        # 将VR坐标系的增量旋转变换到机器人坐标系
+        # robot_delta = R_vr2robot * vr_delta * R_vr2robot.inv()
+        # 这样做的原因: 旋转增量需要在正确的坐标系中应用
+        robot_delta_rot = (self.vr_to_robot_rot 
+                          * vr_delta_rot 
+                          * self.vr_to_robot_rot.inv())
+        
         # 获取旋转向量并应用缩放
-        rotvec = vr_delta_rot.as_rotvec()
+        rotvec = robot_delta_rot.as_rotvec()
         rotvec *= self.config.rotation_scale * alpha
         
         # 累积到缓冲区
