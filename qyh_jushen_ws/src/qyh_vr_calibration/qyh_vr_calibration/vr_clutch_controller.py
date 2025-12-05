@@ -34,7 +34,8 @@ class ClutchConfig:
     engage_threshold: float = 0.8      # grip > 0.8 时接合clutch
     release_threshold: float = 0.2     # grip < 0.2 时释放clutch
     
-    position_scale: float = 1.0        # VR位移到机器人位移的缩放
+    # 位置缩放: 机械臂长度(1.2m) / 手臂长度(0.52m) ≈ 2.3
+    position_scale: float = 2.3        # VR位移到机器人位移的缩放
     rotation_scale: float = 1.0        # VR旋转到机器人旋转的缩放
     
     max_position_delta: float = 0.02   # 单帧最大位移 (m)，约50Hz时对应1m/s
@@ -49,15 +50,17 @@ class ClutchConfig:
     
     # VR到机器人的坐标系变换（欧拉角，单位：度）
     # 这个旋转将VR控制器的"前方向"对齐到机器人末端的期望方向
-    # PICO VR: Y-up, Z-forward (控制器指向方向)
+    # PICO VR: Y-up, -Z-forward (控制器指向方向是-Z)
     # 机器人夹爪: 通常X-forward或Z-down
-    # 默认值: 绕X轴旋转-90度，将VR的Z-forward变成机器人的Z-down
-    vr_to_robot_rotation: Tuple[float, float, float] = (-90.0, 0.0, 0.0)  # roll, pitch, yaw (degrees)
+    vr_to_robot_rotation: Tuple[float, float, float] = (-90.0, 0.0, 0.0)
     
     # 坐标轴映射: VR轴 -> 机器人轴
-    # 例如: [0, 2, 1] 表示 VR_X->Robot_X, VR_Y->Robot_Z, VR_Z->Robot_Y
-    axis_mapping: Tuple[int, int, int] = (0, 1, 2)  # 默认直接对应
-    axis_signs: Tuple[int, int, int] = (1, 1, 1)    # 轴方向符号
+    # VR坐标系: X右, Y上, -Z前
+    # 机器人坐标系(ROS): X前, Y左, Z上
+    # 映射: Robot_X = -VR_Z, Robot_Y = -VR_X, Robot_Z = VR_Y
+    # axis_mapping[i] = VR轴索引, 表示机器人第i轴来自VR哪个轴
+    axis_mapping: Tuple[int, int, int] = (2, 0, 1)   # Robot XYZ <- VR ZXY
+    axis_signs: Tuple[int, int, int] = (-1, -1, 1)   # Z和X需要反号
 
 
 class VRClutchController:
@@ -80,10 +83,29 @@ class VRClutchController:
         self.accumulated_pos_delta: np.ndarray = np.zeros(3)
         self.accumulated_rot_delta: np.ndarray = np.zeros(3)  # rotvec
         
-        # 预计算VR到机器人的旋转变换（用于增量旋转的坐标变换）
-        rpy_deg = self.config.vr_to_robot_rotation
-        rpy_rad = np.deg2rad(rpy_deg)
-        self.vr_to_robot_rot = Rotation.from_euler('xyz', rpy_rad)
+        # 构建VR到机器人的坐标变换矩阵
+        # 根据axis_mapping和axis_signs构建旋转矩阵
+        # axis_mapping = [2, 0, 1] 表示: Robot_X=VR_Z, Robot_Y=VR_X, Robot_Z=VR_Y
+        # axis_signs = [-1, -1, 1] 表示: Robot_X=-VR_Z, Robot_Y=-VR_X, Robot_Z=+VR_Y
+        self._build_coord_transform()
+
+    def _build_coord_transform(self):
+        """构建VR到机器人的坐标变换矩阵"""
+        # 构建3x3旋转矩阵，将VR坐标系的向量变换到机器人坐标系
+        # 矩阵的每一行表示机器人坐标系的一个轴在VR坐标系中的表示
+        transform = np.zeros((3, 3))
+        for robot_axis in range(3):
+            vr_axis = self.config.axis_mapping[robot_axis]
+            sign = self.config.axis_signs[robot_axis]
+            transform[robot_axis, vr_axis] = sign
+        
+        # 验证是否为正交矩阵（行列式应为±1）
+        det = np.linalg.det(transform)
+        if abs(abs(det) - 1.0) > 0.01:
+            raise ValueError(f"Invalid axis mapping: det={det}")
+        
+        # 转换为Rotation对象
+        self.vr_to_robot_rot = Rotation.from_matrix(transform)
 
     def update(
         self,

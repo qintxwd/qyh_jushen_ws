@@ -60,7 +60,8 @@ cd ~/qyh_jushen_ws
 # 或使用 Windows 路径: cd /mnt/d/work/yc/qyh_jushen_ws/qyh_jushen_ws
 
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install
+# 只编译相关包，节省时间
+colcon build --symlink-install --packages-up-to qyh_vr_bridge qyh_vr_calibration qyh_dual_arms_moveit_config
 source install/setup.bash
 ```
 
@@ -101,7 +102,22 @@ ros2 run qyh_vr_bridge vr_bridge_node
 
 ---
 
-### WSL 终端 3：启动 VR Clutch (离合器控制)
+### WSL 终端 3：启动仿真机械臂控制器 (必须在 VR Clutch 之前!)
+
+```bash
+cd ~/qyh_jushen_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run qyh_vr_calibration sim_arm_controller
+```
+
+**作用**: 
+- 接收目标位姿，使用 MoveIt 规划并执行机械臂运动
+- **发布当前末端位姿** `/sim/left_current_pose`, `/sim/right_current_pose`
+
+---
+
+### WSL 终端 4：启动 VR Clutch (离合器控制)
 
 ```bash
 cd ~/qyh_jushen_ws
@@ -112,22 +128,14 @@ ros2 launch qyh_vr_calibration vr_clutch.launch.py
 
 **作用**: 实现 Clutch 离合器逻辑
 - 订阅 `/vr/left_hand/pose`, `/vr/left_hand/joy`
+- **订阅当前末端位姿** `/sim/*_current_pose` (确保按下 Grip 时从真实位置开始)
 - 按住 Grip (>0.8) 时跟踪 VR 增量
 - 松开 Grip (<0.2) 时保持位置
 - 发布目标位姿到 `/sim/left_target_pose`, `/sim/right_target_pose`
 
 ---
 
-### WSL 终端 4：启动仿真机械臂控制器
-
-```bash
-cd ~/qyh_jushen_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run qyh_vr_calibration sim_arm_controller
-```
-
-**作用**: 接收目标位姿，使用 MoveIt 规划并执行机械臂运动
+> **重要**: 启动顺序**作用**: 接收目标位姿，使用 MoveIt 规划并执行机械臂运动
 
 ---
 

@@ -15,7 +15,7 @@ from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
-from moveit_msgs.srv import GetPositionIK
+from moveit_msgs.srv import GetPositionIK, GetPositionFK
 
 
 class SimArmController(Node):
@@ -84,6 +84,20 @@ class SimArmController(Node):
         # === 发布者 ===
         self.fake_joint_pub = self.create_publisher(
             JointState, '/move_group/fake_controller_joint_states', 10)
+        
+        # 发布当前末端位姿（供vr_clutch_node使用）
+        self.left_ee_pose_pub = self.create_publisher(
+            PoseStamped, '/sim/left_current_pose', 10)
+        self.right_ee_pose_pub = self.create_publisher(
+            PoseStamped, '/sim/right_current_pose', 10)
+        
+        # FK服务客户端
+        self.fk_client = self.create_client(
+            GetPositionFK, '/compute_fk',
+            callback_group=self.cb_group)
+        
+        # FK定时器（发布末端位姿）
+        self.fk_timer = self.create_timer(0.1, self.publish_ee_poses)  # 10Hz
         
         # 控制定时器
         self.timer = self.create_timer(
@@ -209,6 +223,48 @@ class SimArmController(Node):
                     f'IK failed for {arm}: code={response.error_code.val}')
         except Exception as e:
             self.get_logger().error(f'IK callback error: {e}')
+
+
+    def publish_ee_poses(self):
+        """发布当前末端位姿"""
+        if self.current_joint_state is None:
+            return
+        
+        # 发布左臂末端位姿
+        self._request_fk('left', self.left_group, 'left_tool0', self.left_ee_pose_pub)
+        # 发布右臂末端位姿
+        self._request_fk('right', self.right_group, 'right_tool0', self.right_ee_pose_pub)
+    
+    def _request_fk(self, arm: str, group_name: str, ee_link: str, pub):
+        """请求FK计算并发布末端位姿"""
+        if not self.fk_client.service_is_ready():
+            return
+        
+        request = GetPositionFK.Request()
+        request.header.frame_id = 'base_link'
+        request.header.stamp = self.get_clock().now().to_msg()
+        request.fk_link_names = [ee_link]
+        request.robot_state.joint_state = self.current_joint_state
+        
+        # 同步调用FK（速度快，可以同步）
+        try:
+            future = self.fk_client.call_async(request)
+            # 不等待结果，使用回调
+            future.add_done_callback(
+                lambda f: self._fk_callback(f, arm, pub))
+        except Exception as e:
+            self.get_logger().error(f'FK request error: {e}')
+    
+    def _fk_callback(self, future, arm: str, pub):
+        """FK响应回调"""
+        try:
+            response = future.result()
+            if response.error_code.val == 1 and len(response.pose_stamped) > 0:
+                pose_msg = response.pose_stamped[0]
+                pose_msg.header.stamp = self.get_clock().now().to_msg()
+                pub.publish(pose_msg)
+        except Exception as e:
+            pass  # FK失败静默处理
 
 
 def main(args=None):

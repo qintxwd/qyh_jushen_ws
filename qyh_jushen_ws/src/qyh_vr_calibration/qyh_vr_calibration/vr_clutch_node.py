@@ -49,11 +49,10 @@ class VRClutchNode(Node):
         self.robot_state: RobotState = None
         self.robot_state_received = False
         
-        # 仿真模式的初始位姿（从参数加载）
+        # 仿真模式的当前末端位姿（从 sim_arm_controller 订阅获取）
         self.sim_left_pose = Pose()
         self.sim_right_pose = Pose()
-        if self.simulation_mode:
-            self._init_sim_poses()
+        self.sim_poses_received = False  # 是否已收到仿真末端位姿
         
         # VR当前状态
         self.left_vr_pose: PoseStamped = None
@@ -79,6 +78,19 @@ class VRClutchNode(Node):
             )
         else:
             self.robot_state_received = True  # 仿真模式直接设为已接收
+            # 订阅仿真末端位姿（从 sim_arm_controller 发布）
+            self.sim_left_pose_sub = self.create_subscription(
+                PoseStamped,
+                '/sim/left_current_pose',
+                self.sim_left_pose_callback,
+                10
+            )
+            self.sim_right_pose_sub = self.create_subscription(
+                PoseStamped,
+                '/sim/right_current_pose',
+                self.sim_right_pose_callback,
+                10
+            )
         
         # VR手柄位姿
         self.left_pose_sub = self.create_subscription(
@@ -177,8 +189,8 @@ class VRClutchNode(Node):
         self.declare_parameter('sim.left_init_pose', [0.3, 0.2, 0.4, 0.0, 0.0, 0.0, 1.0])  # x,y,z,qx,qy,qz,qw
         self.declare_parameter('sim.right_init_pose', [0.3, -0.2, 0.4, 0.0, 0.0, 0.0, 1.0])
         
-        # 缩放
-        self.declare_parameter('clutch.position_scale', 1.0)
+        # 缩放: 机械臂长度(1.2m) / 手臂长度(0.52m) ≈ 2.3
+        self.declare_parameter('clutch.position_scale', 2.3)
         self.declare_parameter('clutch.rotation_scale', 1.0)
         
         # 增量限制
@@ -186,9 +198,11 @@ class VRClutchNode(Node):
         self.declare_parameter('clutch.max_rotation_delta', 0.1)   # rad
         
         # 坐标轴映射 (VR -> Robot)
-        # 默认: VR的XYZ直接对应机器人的XYZ
-        self.declare_parameter('clutch.axis_mapping', [0, 1, 2])
-        self.declare_parameter('clutch.axis_signs', [1, 1, 1])
+        # VR坐标系: X右, Y上, -Z前 (左右手相同)
+        # 机器人坐标系(ROS): X前, Y左, Z上
+        # 映射: Robot_X = -VR_Z, Robot_Y = -VR_X, Robot_Z = VR_Y
+        self.declare_parameter('clutch.axis_mapping', [2, 0, 1])
+        self.declare_parameter('clutch.axis_signs', [-1, -1, 1])
         
         # VR到机器人的坐标系旋转变换（欧拉角，单位：度）
         # 这个旋转将VR控制器的姿态变换到机器人末端的姿态
@@ -216,36 +230,26 @@ class VRClutchNode(Node):
     
     # === 回调函数 ===
     
-    def _init_sim_poses(self):
-        """初始化仿真模式的机械臂位姿"""
-        left_pose = self.get_parameter('sim.left_init_pose').value
-        right_pose = self.get_parameter('sim.right_init_pose').value
-        
-        self.sim_left_pose.position.x = left_pose[0]
-        self.sim_left_pose.position.y = left_pose[1]
-        self.sim_left_pose.position.z = left_pose[2]
-        self.sim_left_pose.orientation.x = left_pose[3]
-        self.sim_left_pose.orientation.y = left_pose[4]
-        self.sim_left_pose.orientation.z = left_pose[5]
-        self.sim_left_pose.orientation.w = left_pose[6]
-        
-        self.sim_right_pose.position.x = right_pose[0]
-        self.sim_right_pose.position.y = right_pose[1]
-        self.sim_right_pose.position.z = right_pose[2]
-        self.sim_right_pose.orientation.x = right_pose[3]
-        self.sim_right_pose.orientation.y = right_pose[4]
-        self.sim_right_pose.orientation.z = right_pose[5]
-        self.sim_right_pose.orientation.w = right_pose[6]
-        
-        self.get_logger().info(f'  Left init pose: [{left_pose[0]:.2f}, {left_pose[1]:.2f}, {left_pose[2]:.2f}]')
-        self.get_logger().info(f'  Right init pose: [{right_pose[0]:.2f}, {right_pose[1]:.2f}, {right_pose[2]:.2f}]')
-    
     def robot_state_callback(self, msg: RobotState):
         """机器人状态回调（仅真机模式使用）"""
         self.robot_state = msg
         if not self.robot_state_received:
             self.robot_state_received = True
             self.get_logger().info('✓ Robot state received')
+    
+    def sim_left_pose_callback(self, msg: PoseStamped):
+        """仿真模式: 左臂末端位姿回调"""
+        self.sim_left_pose = msg.pose
+        if not self.sim_poses_received:
+            self.sim_poses_received = True
+            self.get_logger().info(
+                f'✓ Sim end-effector poses received: '
+                f'left=[{msg.pose.position.x:.3f}, '
+                f'{msg.pose.position.y:.3f}, {msg.pose.position.z:.3f}]')
+    
+    def sim_right_pose_callback(self, msg: PoseStamped):
+        """仿真模式: 右臂末端位姿回调"""
+        self.sim_right_pose = msg.pose
     
     def left_pose_callback(self, msg: PoseStamped):
         """左手VR位姿回调"""
@@ -282,9 +286,13 @@ class VRClutchNode(Node):
         if not self.robot_state_received:
             return
         
+        # 仿真模式需要等待sim_arm_controller发布末端位姿
+        if self.simulation_mode and not self.sim_poses_received:
+            return
+        
         now = self.get_clock().now()
         
-        # 获取当前机械臂位姿（仿真模式用初始位姿，真机模式用实际状态）
+        # 获取当前机械臂位姿（仿真模式从FK获取，真机模式用实际状态）
         if self.simulation_mode:
             left_robot_pose = self.sim_left_pose
             right_robot_pose = self.sim_right_pose
