@@ -32,7 +32,7 @@ from datetime import datetime
 # I = uint32 (4 bytes) - touches_bitmask
 # Total: 8 + 12 + 16 + 1 + 12 + 16 + 8 + 4 + 4 + 1 + 12 + 16 + 8 + 4 + 4 + 4 + 4 = 134 bytes
 
-PACKET_FORMAT = '<q3f4fB3f4f2ffB3f4f2ffII'  # < = little-endian
+PACKET_FORMAT = '<q3f4fB3f4f2fffB3f4f2fffII'  # < = little-endian
 PACKET_SIZE = struct.calcsize(PACKET_FORMAT)
 UDP_PORT = 9999
 
