@@ -41,8 +41,12 @@ class GripperControlNode(SkillNode):
     
     def setup(self) -> bool:
         """初始化夹爪服务客户端"""
+        self.log_info("="*40)
+        self.log_info(f"[GripperControl] Setup - ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         if not self.ros_node:
-            self.log_warn("No ROS node available, running in mock mode")
+            self.log_warn("  No ROS node, running in MOCK mode")
             return True
         
         try:
@@ -52,9 +56,11 @@ class GripperControlNode(SkillNode):
             self._gripper_client = self.ros_node.create_client(
                 GripperCommand, service_name
             )
+            self.log_info(f"  Gripper client created: {service_name}")
+            self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_error(f"Failed to create gripper client: {e}")
+            self.log_error(f"  Failed to create gripper client: {e}")
             return False
     
     def execute(self) -> SkillResult:
@@ -65,16 +71,18 @@ class GripperControlNode(SkillNode):
         # 解析动作/位置
         action, position = self._resolve_action()
         if action is None and position is None:
+            self.log_error("Missing action or position")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message="Missing action or position"
             )
         
-        self.log_info(f"Gripper {side}: action={action}, position={position}")
+        self.log_info(f"[Gripper] {side}: action={action}, pos={position}")
         
         # Mock 模式
         if not self._gripper_client:
             time.sleep(0.3)
+            self.log_info(f"[Gripper] {action} completed (mock)")
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 message=f"Gripper {action} completed (mock mode)"
@@ -85,6 +93,7 @@ class GripperControlNode(SkillNode):
             from qyh_gripper_msgs.srv import GripperCommand
             
             if not self._gripper_client.wait_for_service(timeout_sec=1.0):
+                self.log_error("Gripper service not available")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message="Gripper service not available"
@@ -95,6 +104,7 @@ class GripperControlNode(SkillNode):
             if force is not None:
                 request.force = force
             
+            self.log_info(f"   Sending gripper command: {action}")
             self._future = self._gripper_client.call_async(request)
             self._is_executing = True
             return SkillResult(status=SkillStatus.RUNNING, message=f"Executing gripper {action}...")
@@ -103,16 +113,19 @@ class GripperControlNode(SkillNode):
             try:
                 response = self._future.result()
                 if response.success:
+                    self.log_info(f"[Gripper] Completed: {response.message}")
                     return SkillResult(
                         status=SkillStatus.SUCCESS,
                         message=response.message
                     )
                 else:
+                    self.log_error(f"[Gripper] Failed: {response.message}")
                     return SkillResult(
                         status=SkillStatus.FAILURE,
                         message=response.message
                     )
             except Exception as e:
+                self.log_error(f"[Gripper] Exception: {e}")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message=f"Gripper control failed: {e}"

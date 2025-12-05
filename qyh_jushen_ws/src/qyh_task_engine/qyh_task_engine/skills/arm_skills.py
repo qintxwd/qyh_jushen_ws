@@ -46,8 +46,12 @@ class ArmMoveJNode(SkillNode):
     
     def setup(self) -> bool:
         """初始化 MoveJ 服务客户端"""
+        self.log_info("="*40)
+        self.log_info(f"[ArmMoveJ] Setup - ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         if not self.ros_node:
-            self.log_warn("No ROS node available, running in mock mode")
+            self.log_warn("  No ROS node, running in MOCK mode")
             return True
         
         try:
@@ -55,9 +59,11 @@ class ArmMoveJNode(SkillNode):
             self._move_j_client = self.ros_node.create_client(
                 MoveJ, '/jaka/move_j'
             )
+            self.log_info("  MoveJ client created")
+            self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_error(f"Failed to create MoveJ client: {e}")
+            self.log_error(f"  Failed to create MoveJ client: {e}")
             return False
     
     def execute(self) -> SkillResult:
@@ -70,6 +76,7 @@ class ArmMoveJNode(SkillNode):
         # 解析关节位置
         joint_positions = self._resolve_joint_positions()
         if joint_positions is None:
+            self.log_error(f"Cannot resolve joint positions")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message="Invalid joint positions or pose_name"
@@ -78,11 +85,14 @@ class ArmMoveJNode(SkillNode):
         # 确定 robot_id
         robot_id = self._get_robot_id(side)
         
-        self.log_info(f"Moving {side} arm to positions: {joint_positions[:3]}... (v={velocity})")
+        # 显示前3个关节角度
+        joints_preview = [f"{j:.2f}" for j in joint_positions[:3]]
+        self.log_info(f"[MoveJ] {side} arm -> [{', '.join(joints_preview)}...] v={velocity}")
         
         # Mock 模式
         if not self._move_j_client:
-            time.sleep(0.5)  # 模拟执行时间
+            time.sleep(0.5)
+            self.log_info(f"[MoveJ] Completed (mock)")
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 message=f"MoveJ completed (mock mode)",
@@ -91,10 +101,10 @@ class ArmMoveJNode(SkillNode):
         
         # 真实执行
         if not self._is_executing:
-            # 发送请求
             from qyh_jaka_control_msgs.srv import MoveJ
             
             if not self._move_j_client.wait_for_service(timeout_sec=1.0):
+                self.log_error("MoveJ service not available")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message="MoveJ service not available"
@@ -107,6 +117,7 @@ class ArmMoveJNode(SkillNode):
             request.acceleration = acceleration
             request.is_block = is_block
             
+            self.log_info(f"   Sending MoveJ request (robot_id={robot_id})")
             self._future = self._move_j_client.call_async(request)
             self._is_executing = True
             return SkillResult(status=SkillStatus.RUNNING, message="Executing MoveJ...")
@@ -116,16 +127,19 @@ class ArmMoveJNode(SkillNode):
             try:
                 response = self._future.result()
                 if response.success:
+                    self.log_info(f"[MoveJ] Completed: {response.message}")
                     return SkillResult(
                         status=SkillStatus.SUCCESS,
                         message=response.message
                     )
                 else:
+                    self.log_error(f"[MoveJ] Failed: {response.message}")
                     return SkillResult(
                         status=SkillStatus.FAILURE,
                         message=response.message
                     )
             except Exception as e:
+                self.log_error(f"[MoveJ] Exception: {e}")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message=f"MoveJ failed: {e}"

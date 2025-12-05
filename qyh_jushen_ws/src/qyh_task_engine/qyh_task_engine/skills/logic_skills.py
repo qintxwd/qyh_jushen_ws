@@ -28,6 +28,7 @@ class WaitNode(SkillNode):
         self._wait_start = None
     
     def setup(self) -> bool:
+        self.log_info(f"[Wait] Setup - ID: {self.node_id}, duration={self.params.get('duration')}s")
         return True
     
     def execute(self) -> SkillResult:
@@ -35,11 +36,12 @@ class WaitNode(SkillNode):
         
         if self._wait_start is None:
             self._wait_start = time.time()
-            self.log_info(f"Waiting for {duration}s")
+            self.log_info(f"[Wait] Waiting for {duration}s...")
         
         elapsed = time.time() - self._wait_start
         
         if elapsed >= duration:
+            self.log_info(f"[Wait] Completed ({duration}s)")
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 message=f"Wait completed ({duration}s)"
@@ -69,25 +71,31 @@ class CheckConditionNode(SkillNode):
     }
     
     def setup(self) -> bool:
+        self.log_info(f"[CheckCondition] Setup - condition: {self.params.get('condition')}")
         return True
     
     def execute(self) -> SkillResult:
         condition = self.params.get('condition', '')
         
+        self.log_info(f"[CheckCondition] Evaluating: {condition}")
+        
         try:
             result = self._evaluate_condition(condition)
             
             if result:
+                self.log_info(f"[CheckCondition] Result: TRUE")
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
                     message=f"Condition '{condition}' is True"
                 )
             else:
+                self.log_info(f"[CheckCondition] Result: FALSE")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message=f"Condition '{condition}' is False"
                 )
         except Exception as e:
+            self.log_error(f"[CheckCondition] Error: {e}")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Failed to evaluate condition: {e}"
@@ -192,11 +200,15 @@ class SubTaskNode(SkillNode):
     
     def setup(self) -> bool:
         """加载子任务树"""
+        self.log_info("="*40)
+        self.log_info(f"[SubTask] Setup - ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         task_id = self.params.get('task_id')
         task_name = self.params.get('task_name')  # 兼容旧格式
         
         if not task_id and not task_name:
-            self.log_error("Missing task_id or task_name")
+            self.log_error("  Missing task_id or task_name")
             return False
         
         task_tree = None
@@ -204,24 +216,28 @@ class SubTaskNode(SkillNode):
         
         # 1. 首先尝试从已保存任务文件加载
         if task_id:
+            self.log_info(f"  Loading from task file: {task_id}")
             task_tree = self._load_from_task_file(task_id)
         
         # 2. 如果没找到，尝试从预设模板加载
         if task_tree is None:
+            self.log_info(f"  Loading from preset template...")
             task_template = preset_loader.get_task_template(task_name or task_id)
             if task_template:
                 task_tree = task_template.get('task_tree') or task_template.get('root')
         
         if task_tree is None:
-            self.log_error(f"Task not found: {task_label}")
+            self.log_error(f"  Task not found: {task_label}")
             return False
         
         # 应用参数覆盖
         override_params = self.params.get('params', {})
         if override_params:
+            self.log_info(f"  Applying param overrides: {override_params}")
             task_tree = self._apply_params(task_tree, override_params)
         
-        self.log_info(f"Loaded sub-task: {task_label}")
+        self.log_info(f"  Sub-task loaded: {task_label}")
+        self.log_info("="*40)
         
         # 保存任务树，稍后在 execute 中解析
         self._task_tree_data = task_tree

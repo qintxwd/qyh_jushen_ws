@@ -40,8 +40,13 @@ class BaseMoveToNode(SkillNode):
     
     def setup(self) -> bool:
         """初始化导航服务客户端"""
+        self.log_info("="*40)
+        self.log_info("[BaseMoveTo] Setting up navigation node")
+        self.log_info(f"  Node ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         if not self.ros_node:
-            self.log_warn("No ROS node available, running in mock mode")
+            self.log_warn("  No ROS node available, running in MOCK mode")
             return True
         
         try:
@@ -51,10 +56,13 @@ class BaseMoveToNode(SkillNode):
                 GoNavigateToSite,
                 'go_navigate_to_site_simple'
             )
-            self.log_info("Created chassis navigation client")
+            self.log_info("  Created chassis navigation client")
+            self.log_info("  Service: go_navigate_to_site_simple")
+            self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_warn(f"Failed to create navigation client: {e}")
+            self.log_warn(f"  Failed to create client: {e}")
+            self.log_info("="*40)
             return True
     
     def execute(self) -> SkillResult:
@@ -64,6 +72,7 @@ class BaseMoveToNode(SkillNode):
         # 解析站点ID
         station_id = self._resolve_station_id()
         if station_id is None:
+            self.log_error(f"Cannot resolve station ID: {self.params}")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message="Invalid target: cannot resolve station ID"
@@ -75,10 +84,11 @@ class BaseMoveToNode(SkillNode):
         if not self._nav_site_client:
             if self._start_time is None:
                 self._start_time = time.time()
-                self.log_info(f"Navigating to station {station_id} (mock mode)")
+                self.log_info(f"[MOCK] Nav to station {station_id}")
             
             elapsed = time.time() - self._start_time
             if elapsed > 2.0:
+                self.log_info(f"[MOCK] Arrived station {station_id} ({elapsed:.1f}s)")
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
                     message=f"Arrived at station {station_id} (mock mode)"
@@ -91,18 +101,24 @@ class BaseMoveToNode(SkillNode):
         
         # 真实执行
         if not self._is_navigating:
+            self.log_info(f"[NAV] Start nav to station {station_id}")
+            self.log_info("   Waiting for service...")
+            
             if not self._nav_site_client.wait_for_service(timeout_sec=5.0):
+                self.log_error("Navigation service not available")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message="Navigation service not available"
                 )
+            
+            self.log_info("   Service available")
             
             from qyh_standard_robot_msgs.srv import GoNavigateToSite
             
             request = GoNavigateToSite.Request()
             request.site_id = station_id
             
-            self.log_info(f"Sending navigation request to station {station_id}")
+            self.log_info(f"   Sending request: site_id={station_id}")
             self._future = self._nav_site_client.call_async(request)
             self._is_navigating = True
             self._start_time = time.time()
@@ -115,6 +131,7 @@ class BaseMoveToNode(SkillNode):
         # 检查超时
         elapsed = time.time() - self._start_time
         if elapsed > timeout:
+            self.log_error(f"Navigation timeout after {timeout}s")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Navigation timeout ({timeout}s)"
@@ -124,21 +141,34 @@ class BaseMoveToNode(SkillNode):
         if hasattr(self, '_future') and self._future.done():
             try:
                 result = self._future.result()
+                msg = f"success={result.success}, msg={result.message}"
+                self.log_info(f"   Response: {msg}")
                 if result.success:
+                    self.log_info(f"Arrived station {station_id} ({elapsed:.1f}s)")
                     return SkillResult(
                         status=SkillStatus.SUCCESS,
                         message=f"Arrived at station {station_id}"
                     )
                 else:
+                    self.log_error(f"Nav failed: {result.message}")
                     return SkillResult(
                         status=SkillStatus.FAILURE,
                         message=f"Navigation failed: {result.message}"
                     )
             except Exception as e:
+                self.log_error(f"Navigation error: {e}")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message=f"Navigation error: {e}"
                 )
+        
+        # 每5秒打印一次进度
+        if int(elapsed) % 5 == 0 and int(elapsed) > 0:
+            if not hasattr(self, '_last_progress_log'):
+                self._last_progress_log = -1
+            if self._last_progress_log != int(elapsed):
+                self._last_progress_log = int(elapsed)
+                self.log_info(f"   Still navigating to {station_id}... {elapsed:.0f}s")
         
         return SkillResult(
             status=SkillStatus.RUNNING,
@@ -147,45 +177,56 @@ class BaseMoveToNode(SkillNode):
     
     def _resolve_station_id(self) -> Optional[int]:
         """解析站点ID"""
+        self.log_info("   Resolving station ID from params...")
+        
         # 优先使用预设点位
         if 'location' in self.params:
             location_name = self.params['location']
+            self.log_info(f"   Location param: '{location_name}'")
             
             # 从预设加载
             loc_preset = preset_loader.get_location(location_name)
             if loc_preset:
+                self.log_info(f"   Found preset: {loc_preset}")
                 # 获取原始站点ID
                 station_id = loc_preset.get('station_id')
                 if station_id is not None:
+                    self.log_info(f"   >> Resolved station_id: {station_id}")
                     return int(station_id)
                 
                 # 尝试从 id 字段解析 (格式: station_X)
                 preset_id = loc_preset.get('id', '')
                 if preset_id.startswith('station_'):
                     try:
-                        return int(preset_id.replace('station_', ''))
+                        station_id = int(preset_id.replace('station_', ''))
+                        self.log_info(f"   >> Resolved from preset id: {station_id}")
+                        return station_id
                     except ValueError:
                         pass
+            else:
+                self.log_warn(f"   No preset found: {location_name}")
             
             # 尝试直接从 location 参数解析 (格式: station_X)
             if location_name.startswith('station_'):
                 try:
-                    return int(location_name.replace('station_', ''))
+                    station_id = int(location_name.replace('station_', ''))
+                    self.log_info(f"   >> Resolved from location name: {station_id}")
+                    return station_id
                 except ValueError:
                     pass
             
-            self.log_error(f"Cannot resolve station ID from location: {location_name}")
+            self.log_error(f"   Cannot resolve station: {location_name}")
             return None
         
         # 如果没有 location 参数，不支持坐标导航（底盘只支持站点）
-        self.log_error("No location parameter provided")
+        self.log_error(f"   No location param in: {self.params}")
         return None
     
     def halt(self):
         """中断导航"""
         super().halt()
         self._is_navigating = False
-        self.log_info("Navigation halted")
+        self.log_info(f"Navigation halted (station {self._station_id})")
 
 
 class BaseVelocityNode(SkillNode):

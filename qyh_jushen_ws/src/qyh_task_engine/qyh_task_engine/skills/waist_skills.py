@@ -63,8 +63,12 @@ class WaistMoveToNode(SkillNode):
     
     def setup(self) -> bool:
         """初始化腰部控制客户端"""
+        self.log_info("="*40)
+        self.log_info(f"[WaistMoveTo] Setup - ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         if not self.ros_node:
-            self.log_warn("No ROS node available, running in mock mode")
+            self.log_warn("  No ROS node, running in MOCK mode")
             return True
         
         try:
@@ -72,9 +76,11 @@ class WaistMoveToNode(SkillNode):
             self._waist_client = self.ros_node.create_client(
                 WaistControl, '/waist/control'
             )
+            self.log_info("  Waist client created")
+            self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_warn(f"Failed to create waist client: {e}")
+            self.log_warn(f"  Failed to create waist client: {e}")
             return True
     
     def execute(self) -> SkillResult:
@@ -84,6 +90,7 @@ class WaistMoveToNode(SkillNode):
         # 解析目标角度
         target_angle = self._resolve_angle()
         if target_angle is None:
+            self.log_error("Cannot resolve target angle")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message="Invalid angle: missing angle or angle_name"
@@ -92,7 +99,7 @@ class WaistMoveToNode(SkillNode):
         # 限制角度范围
         target_angle = max(0.0, min(target_angle, MAX_ANGLE))
         
-        self.log_info(f"Moving waist to {target_angle:.1f}°")
+        self.log_info(f"[Waist] Moving to {target_angle:.1f} deg")
         
         # Mock 模式
         if not self._waist_client:
@@ -101,9 +108,10 @@ class WaistMoveToNode(SkillNode):
             
             elapsed = time.time() - self._start_time
             if elapsed > 1.0:
+                self.log_info(f"[Waist] At {target_angle:.1f} deg (mock)")
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
-                    message=f"Waist at {target_angle:.1f}° (mock mode)"
+                    message=f"Waist at {target_angle:.1f} deg (mock mode)"
                 )
             
             return SkillResult(
@@ -114,6 +122,7 @@ class WaistMoveToNode(SkillNode):
         # 真实执行
         if not self._is_moving:
             if not self._waist_client.wait_for_service(timeout_sec=2.0):
+                self.log_error("Waist service not available")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message="Waist service not available"
@@ -135,6 +144,7 @@ class WaistMoveToNode(SkillNode):
             request.value = float(target_angle)
             request.hold = False
             
+            self.log_info(f"   Sending waist cmd: {target_angle:.1f} deg, speed={speed}")
             self._future = self._waist_client.call_async(request)
             self._is_moving = True
             self._start_time = time.time()

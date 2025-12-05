@@ -28,19 +28,34 @@ class CompositeNode:
         node_id: str,
         children: List[SkillNode] = None,
         node_name: str = None,
-        blackboard: Dict[str, Any] = None
+        blackboard: Dict[str, Any] = None,
+        ros_node = None
     ):
         self.node_id = node_id
         self.node_type = self.__class__.NODE_TYPE
         self.node_name = node_name or self.node_type
         self.children = children or []
         self.blackboard = blackboard if blackboard is not None else {}
+        self.ros_node = ros_node
         
         self.status = SkillStatus.IDLE
         self._current_child_index = 0
         self._halt_requested = False
         self._start_time: Optional[float] = None
         self._end_time: Optional[float] = None
+    
+    def log_info(self, msg: str):
+        """日志输出"""
+        if self.ros_node:
+            self.ros_node.get_logger().info(f"[{self.node_name}] {msg}")
+        else:
+            print(f"[{self.node_name}] {msg}")
+    
+    def log_warn(self, msg: str):
+        if self.ros_node:
+            self.ros_node.get_logger().warn(f"[{self.node_name}] {msg}")
+        else:
+            print(f"[WARN][{self.node_name}] {msg}")
     
     def add_child(self, child: SkillNode):
         """添加子节点"""
@@ -121,6 +136,7 @@ class SequenceNode(CompositeNode):
         if self.status == SkillStatus.IDLE:
             self._start_time = time.time()
             self.status = SkillStatus.RUNNING
+            self.log_info(f"Starting sequence ({len(self.children)} steps)")
         
         # 从当前子节点开始执行
         while self._current_child_index < len(self.children):
@@ -133,6 +149,8 @@ class SequenceNode(CompositeNode):
             if child_status == SkillStatus.FAILURE:
                 self.status = SkillStatus.FAILURE
                 self._end_time = time.time()
+                child_name = getattr(child, 'node_name', child.node_id)
+                self.log_info(f"Sequence FAILED at step {self._current_child_index+1}/{len(self.children)}: {child_name}")
                 return self.status
             
             if child_status == SkillStatus.HALTED:
@@ -141,11 +159,15 @@ class SequenceNode(CompositeNode):
                 return self.status
             
             # SUCCESS -> 继续下一个
+            child_name = getattr(child, 'node_name', child.node_id)
+            self.log_info(f"Step {self._current_child_index+1}/{len(self.children)} done: {child_name}")
             self._current_child_index += 1
         
         # 所有子节点都成功
         self.status = SkillStatus.SUCCESS
         self._end_time = time.time()
+        elapsed = self._end_time - self._start_time
+        self.log_info(f"Sequence completed ({elapsed:.1f}s)")
         return self.status
 
 
@@ -166,10 +188,11 @@ class ParallelNode(CompositeNode):
         children: List[SkillNode] = None,
         node_name: str = None,
         blackboard: Dict[str, Any] = None,
+        ros_node = None,
         success_threshold: int = None,
         failure_threshold: int = 1
     ):
-        super().__init__(node_id, children, node_name, blackboard)
+        super().__init__(node_id, children, node_name, blackboard, ros_node)
         self.success_threshold = success_threshold  # None 表示需要全部成功
         self.failure_threshold = failure_threshold
     
@@ -306,10 +329,11 @@ class LoopNode(CompositeNode):
         children: List[SkillNode] = None,
         node_name: str = None,
         blackboard: Dict[str, Any] = None,
+        ros_node = None,
         count: int = 1,
         break_on_failure: bool = True
     ):
-        super().__init__(node_id, children, node_name, blackboard)
+        super().__init__(node_id, children, node_name, blackboard, ros_node)
         self.count = count  # 0 表示无限循环
         self.break_on_failure = break_on_failure
         self._current_iteration = 0
@@ -325,11 +349,15 @@ class LoopNode(CompositeNode):
             self.status = SkillStatus.RUNNING
             self._current_iteration = 0
             self._current_child_index = 0
+            loop_desc = f"{self.count} times" if self.count > 0 else "infinite"
+            self.log_info(f"Starting loop ({loop_desc})")
         
         # 检查是否完成所有循环（count=0 时永不完成）
         if self.count > 0 and self._current_iteration >= self.count:
             self.status = SkillStatus.SUCCESS
             self._end_time = time.time()
+            elapsed = self._end_time - self._start_time
+            self.log_info(f"Loop completed ({self.count} iterations, {elapsed:.1f}s)")
             return self.status
         
         # 执行当前子节点
@@ -344,6 +372,8 @@ class LoopNode(CompositeNode):
                 if self.break_on_failure:
                     self.status = SkillStatus.FAILURE
                     self._end_time = time.time()
+                    child_name = getattr(child, 'node_name', child.node_id)
+                    self.log_info(f"Loop FAILED at iteration {self._current_iteration+1}: {child_name}")
                     return self.status
                 # 不中断，继续下一个子节点
             
@@ -359,6 +389,9 @@ class LoopNode(CompositeNode):
         self._current_iteration += 1
         self._current_child_index = 0
         
+        loop_desc = f"{self.count}" if self.count > 0 else "inf"
+        self.log_info(f"Loop iteration {self._current_iteration}/{loop_desc} completed")
+        
         # 重置所有子节点
         for child in self.children:
             child.reset()
@@ -367,6 +400,8 @@ class LoopNode(CompositeNode):
         if self.count > 0 and self._current_iteration >= self.count:
             self.status = SkillStatus.SUCCESS
             self._end_time = time.time()
+            elapsed = self._end_time - self._start_time
+            self.log_info(f"Loop completed ({self.count} iterations, {elapsed:.1f}s)")
             return self.status
         
         # 继续循环

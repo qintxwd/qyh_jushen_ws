@@ -177,6 +177,7 @@ class TaskParser:
             node_id=node_id,
             node_name=node_name,
             blackboard=self.blackboard,
+            ros_node=self.ros_node,
             **extra_params
         )
         

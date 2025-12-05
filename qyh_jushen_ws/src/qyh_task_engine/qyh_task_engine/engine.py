@@ -220,7 +220,14 @@ class BehaviorTreeEngine:
     
     def _execution_loop(self):
         """执行循环（在独立线程中运行）"""
-        self._log_info("Execution loop started")
+        self._log_info("="*50)
+        self._log_info(f"Execution loop started for task: {self._task_name}")
+        self._log_info(f"Task ID: {self._task_id}")
+        self._log_info(f"Tick rate: {self.tick_rate} Hz")
+        self._log_info("="*50)
+        
+        tick_count = 0
+        last_status_log_time = 0
         
         try:
             while self._running and not self._cancel_requested:
@@ -231,10 +238,18 @@ class BehaviorTreeEngine:
                 
                 # Tick
                 tick_start = time.time()
+                tick_count += 1
                 
                 with self._lock:
                     if self._root_node:
                         status = self._root_node.tick()
+                        
+                        # 每秒打印一次状态摘要
+                        current_time = time.time()
+                        if current_time - last_status_log_time >= 1.0:
+                            elapsed = current_time - self._start_time if self._start_time else 0
+                            self._log_info(f"[Tick #{tick_count}] Status: {status.value} | Elapsed: {elapsed:.1f}s")
+                            last_status_log_time = current_time
                         
                         # 发送状态更新
                         if self.on_status_update:
@@ -244,19 +259,31 @@ class BehaviorTreeEngine:
                         if status == SkillStatus.SUCCESS:
                             self._task_state = TaskState.SUCCESS
                             self._running = False
-                            self._log_info("Task completed successfully")
+                            elapsed = time.time() - self._start_time if self._start_time else 0
+                            self._log_info("="*50)
+                            self._log_info(f"✅ Task completed successfully!")
+                            self._log_info(f"   Total ticks: {tick_count}")
+                            self._log_info(f"   Total time: {elapsed:.2f}s")
+                            self._log_info("="*50)
                             break
                         
                         elif status == SkillStatus.FAILURE:
                             self._task_state = TaskState.FAILURE
                             self._running = False
-                            self._log_info("Task failed")
+                            elapsed = time.time() - self._start_time if self._start_time else 0
+                            self._log_info("="*50)
+                            self._log_error(f"❌ Task failed!")
+                            self._log_error(f"   Total ticks: {tick_count}")
+                            self._log_error(f"   Total time: {elapsed:.2f}s")
+                            self._log_info("="*50)
                             break
                         
                         elif status == SkillStatus.HALTED:
                             self._task_state = TaskState.CANCELLED
                             self._running = False
-                            self._log_info("Task halted")
+                            self._log_info("="*50)
+                            self._log_info(f"⏹️ Task halted by user")
+                            self._log_info("="*50)
                             break
                 
                 # 控制 Tick 频率

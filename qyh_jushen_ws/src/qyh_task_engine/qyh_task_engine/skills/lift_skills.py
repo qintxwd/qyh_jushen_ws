@@ -38,8 +38,12 @@ class LiftMoveToNode(SkillNode):
     
     def setup(self) -> bool:
         """初始化升降控制客户端"""
+        self.log_info("="*40)
+        self.log_info(f"[LiftMoveTo] Setup - ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         if not self.ros_node:
-            self.log_warn("No ROS node available, running in mock mode")
+            self.log_warn("  No ROS node, running in MOCK mode")
             return True
         
         try:
@@ -47,9 +51,11 @@ class LiftMoveToNode(SkillNode):
             self._lift_client = self.ros_node.create_client(
                 LiftControl, '/lift/control'
             )
+            self.log_info("  Lift client created")
+            self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_warn(f"Failed to create lift client: {e}")
+            self.log_warn(f"  Failed to create lift client: {e}")
             return True
     
     def execute(self) -> SkillResult:
@@ -59,12 +65,13 @@ class LiftMoveToNode(SkillNode):
         # 解析目标高度
         target_height = self._resolve_height()
         if target_height is None:
+            self.log_error("Cannot resolve target height")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message="Invalid height: missing height or height_name"
             )
         
-        self.log_info(f"Moving lift to {target_height}mm")
+        self.log_info(f"[Lift] Moving to {target_height}mm")
         
         # Mock 模式
         if not self._lift_client:
@@ -73,6 +80,7 @@ class LiftMoveToNode(SkillNode):
             
             elapsed = time.time() - self._start_time
             if elapsed > 1.0:
+                self.log_info(f"[Lift] At {target_height}mm (mock)")
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
                     message=f"Lift at {target_height}mm (mock mode)"
@@ -86,6 +94,7 @@ class LiftMoveToNode(SkillNode):
         # 真实执行
         if not self._is_moving:
             if not self._lift_client.wait_for_service(timeout_sec=2.0):
+                self.log_error("Lift service not available")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message="Lift service not available"
@@ -97,6 +106,7 @@ class LiftMoveToNode(SkillNode):
             request.value = float(target_height)
             request.hold = True
             
+            self.log_info(f"   Sending lift command: {target_height}mm")
             self._future = self._lift_client.call_async(request)
             self._is_moving = True
             self._start_time = time.time()
@@ -109,6 +119,7 @@ class LiftMoveToNode(SkillNode):
         # 检查超时
         elapsed = time.time() - self._start_time
         if elapsed > timeout:
+            self.log_error(f"Lift timeout ({timeout}s)")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Lift timeout ({timeout}s)"
@@ -119,16 +130,19 @@ class LiftMoveToNode(SkillNode):
             try:
                 response = self._future.result()
                 if response.success:
+                    self.log_info(f"[Lift] At {target_height}mm ({elapsed:.1f}s)")
                     return SkillResult(
                         status=SkillStatus.SUCCESS,
                         message=f"Lift at {target_height}mm"
                     )
                 else:
+                    self.log_error(f"[Lift] Failed: {response.message}")
                     return SkillResult(
                         status=SkillStatus.FAILURE,
                         message=response.message
                     )
             except Exception as e:
+                self.log_error(f"[Lift] Exception: {e}")
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message=f"Lift failed: {e}"

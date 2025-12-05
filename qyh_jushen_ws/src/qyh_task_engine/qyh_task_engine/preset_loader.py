@@ -77,24 +77,32 @@ class PresetLoader:
     
     def _load_map_stations(self):
         """从地图数据加载站点到 location 预设"""
+        print(f"[PresetLoader] Loading map stations...")
+        print(f"   Maps dir: {self.maps_dir}")
+        
         if not self.maps_dir.exists():
-            print("⚠️  地图目录不存在，跳过站点加载")
+            print(f"   ⚠️  Map dir not found, skip station loading")
             return
         
         # 读取当前地图名
         current_map_file = self.maps_dir / "current_map.txt"
         if not current_map_file.exists():
-            print("⚠️  未找到当前地图信息，跳过站点加载")
+            print(f"   ⚠️  No current_map.txt, skip station loading")
             return
         
         current_map = current_map_file.read_text(encoding='utf-8').strip()
         if not current_map:
+            print(f"   ⚠️  current_map.txt is empty")
             return
+        
+        print(f"   Current map: {current_map}")
         
         # 读取地图JSON数据
         map_json_file = self.maps_dir / current_map / f"{current_map}.json"
+        print(f"   Map JSON: {map_json_file}")
+        
         if not map_json_file.exists():
-            print(f"⚠️  地图数据文件不存在: {current_map}")
+            print(f"   ⚠️  Map JSON file not found: {map_json_file}")
             return
         
         try:
@@ -122,11 +130,15 @@ class PresetLoader:
                 # 用 id 和 name 都作为索引
                 self._cache["location"][f"station_{station_id}"] = loc_data
                 self._cache["location"][station_name] = loc_data
+                print(f"      + station_{station_id}: {station_name}")
                 count += 1
             
-            print(f"✓ 从地图 [{current_map}] 加载了 {count} 个站点")
+            print(f"   ✓ Loaded {count} stations from map [{current_map}]")
+            
+            # 打印所有可用的 location 预设
+            print(f"   Available locations: {list(self._cache.get('location', {}).keys())}")
         except Exception as e:
-            print(f"⚠️  加载地图站点失败: {e}")
+            print(f"   ⚠️  Load map stations failed: {e}")
     
     def _add_builtin_presets(self):
         """添加内置预设（只在文件中没有时才添加）"""

@@ -40,8 +40,12 @@ class HeadLookAtNode(SkillNode):
     
     def setup(self) -> bool:
         """初始化头部控制发布器"""
+        self.log_info("="*40)
+        self.log_info(f"[HeadLookAt] Setup - ID: {self.node_id}")
+        self.log_info(f"  Params: {self.params}")
+        
         if not self.ros_node:
-            self.log_warn("No ROS node available, running in mock mode")
+            self.log_warn("  No ROS node, running in MOCK mode")
             return True
         
         try:
@@ -52,9 +56,11 @@ class HeadLookAtNode(SkillNode):
             self._tilt_pub = self.ros_node.create_publisher(
                 Float64, '/head/tilt_normalized', 10
             )
+            self.log_info("  Head publishers created")
+            self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_error(f"Failed to create head publishers: {e}")
+            self.log_error(f"  Failed to create head publishers: {e}")
             return False
     
     def execute(self) -> SkillResult:
@@ -62,6 +68,7 @@ class HeadLookAtNode(SkillNode):
         # 解析目标位置
         target = self._resolve_target()
         if target is None:
+            self.log_error("Invalid head target")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message="Invalid head target: missing pitch/yaw or position_name"
@@ -70,11 +77,12 @@ class HeadLookAtNode(SkillNode):
         pitch, yaw = target
         wait_stable = self.params.get('wait_stable', True)
         
-        self.log_info(f"Looking at pitch={pitch:.2f}, yaw={yaw:.2f}")
+        self.log_info(f"[Head] Looking at pitch={pitch:.2f}, yaw={yaw:.2f}")
         
         # Mock 模式
         if not self._pan_pub:
             time.sleep(0.3)
+            self.log_info(f"[Head] Position reached (mock)")
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 message="Head moved (mock mode)"
@@ -92,17 +100,20 @@ class HeadLookAtNode(SkillNode):
             tilt_msg.data = pitch
             self._tilt_pub.publish(tilt_msg)
             
+            self.log_info(f"   Head command sent: pan={yaw:.2f}, tilt={pitch:.2f}")
             self._command_sent = True
             self._wait_start = time.time()
             
             if not wait_stable:
+                self.log_info(f"[Head] Command sent (no wait)")
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
                     message="Head command sent"
                 )
         
-        # 等待稳定（简单延时）
+        # 等待稳定
         if time.time() - self._wait_start > 0.5:
+            self.log_info(f"[Head] Position reached")
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 message="Head position reached"
