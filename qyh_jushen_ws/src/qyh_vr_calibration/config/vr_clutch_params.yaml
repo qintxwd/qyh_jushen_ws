@@ -1,11 +1,13 @@
 # VR Clutch Node 配置
 # Clutch模式: 按住grip跟踪VR，松开保持位置
+#
+# 重要说明:
+# vr_bridge_node 输出的数据已经是标准 ROS 坐标系 (X前 Y左 Z上)
+# 后续节点只需要做 scale 等通用操作，不需要了解 VR 设备细节
 
 vr_clutch_node:
   ros__parameters:
     # 模式选择: true=仿真模式, false=真实机器人
-    # 仿真模式: 不依赖/jaka/robot_state, 发布到/sim/*话题
-    # 真机模式: 订阅/jaka/robot_state, 发布到/vr/*话题
     simulation_mode: true
     
     # 控制频率 (Hz)
@@ -17,25 +19,23 @@ vr_clutch_node:
       release_threshold: 0.2   # grip < 0.2 时释放clutch
       
       # 缩放因子
-      position_scale: 1.0      # VR位移到机器人位移的缩放 (1.0 = 1:1)
-      rotation_scale: 1.0      # VR旋转到机器人旋转的缩放
+      # 机械臂工作范围(~1.2m) / 人臂长度(~0.6m) ≈ 2.0
+      position_scale: 2.0      # VR位移到机器人位移的缩放
+      rotation_scale: 1.0      # VR旋转到机器人旋转的缩放 (1:1)
       
       # 单步增量限制 (安全保护)
       max_position_delta: 0.05  # 单步最大位移 (m), 50mm
       max_rotation_delta: 0.1   # 单步最大旋转 (rad), ~5.7度
-      
-      # 坐标轴映射: VR轴索引 -> 机器人轴
-      # [0, 1, 2] 表示: VR_X->Robot_X, VR_Y->Robot_Y, VR_Z->Robot_Z
-      # 如果VR和机器人坐标系不同，可以调整这里
-      axis_mapping: [0, 1, 2]
-      
-      # 坐标轴方向符号
-      # [1, 1, 1] 表示方向相同
-      # [-1, 1, 1] 表示X轴反向
-      axis_signs: [1, 1, 1]
     
     # 仿真模式初始位姿 [x, y, z, qx, qy, qz, qw]
-    # 这是机械臂的初始末端位姿 (米)
     sim:
       left_init_pose: [0.3, 0.2, 0.4, 0.0, 0.0, 0.0, 1.0]
       right_init_pose: [0.3, -0.2, 0.4, 0.0, 0.0, 0.0, 1.0]
+
+# vr_bridge_node 配置 (C++ 节点)
+# 输出数据格式: 标准 ROS 坐标系 (X前 Y左 Z上)
+vr_bridge_node:
+  ros__parameters:
+    udp_port: 9999
+    frame_id: "vr_origin"      # 将来可对齐到机器人 base_link
+    grip_offset_deg: 35.0      # 手柄握持补偿角度 (虎口朝上时约35°)

@@ -92,16 +92,19 @@ class VRClutchNode(Node):
                 10
             )
         
-        # VR手柄位姿
+        # VR手柄位姿 - vr_bridge_node 输出的已经是 ROS 坐标系
+        left_pose_topic = '/vr/left_hand/pose'
+        right_pose_topic = '/vr/right_hand/pose'
+
         self.left_pose_sub = self.create_subscription(
             PoseStamped,
-            '/vr/left_hand/pose',
+            left_pose_topic,
             self.left_pose_callback,
             10
         )
         self.right_pose_sub = self.create_subscription(
             PoseStamped,
-            '/vr/right_hand/pose',
+            right_pose_topic,
             self.right_pose_callback,
             10
         )
@@ -159,18 +162,20 @@ class VRClutchNode(Node):
         self.timer = self.create_timer(1.0 / control_rate, self.control_loop)
         
         self.get_logger().info('=== VR Clutch Node Initialized ===')
-        self.get_logger().info(f'  Mode: {"SIMULATION" if self.simulation_mode else "REAL ROBOT"}')
+        mode_str = "SIMULATION" if self.simulation_mode else "REAL ROBOT"
+        self.get_logger().info(f'  Mode: {mode_str}')
         self.get_logger().info(f'  Control rate: {control_rate} Hz')
         self.get_logger().info(f'  Engage threshold: {self.config.engage_threshold}')
         self.get_logger().info(f'  Release threshold: {self.config.release_threshold}')
         self.get_logger().info(f'  Position scale: {self.config.position_scale}')
         self.get_logger().info(f'  Rotation scale: {self.config.rotation_scale}')
-        self.get_logger().info(f'  VR->Robot rotation (RPY deg): {self.config.vr_to_robot_rotation}')
+        self.get_logger().info(f'  VR pose topic: {left_pose_topic}')
+        self.get_logger().info('  Note: VR data is already in ROS coordinate')
         if self.simulation_mode:
-            self.get_logger().info(f'  Target topics: /sim/*_target_pose')
+            self.get_logger().info('  Target topics: /sim/*_target_pose')
             self.get_logger().info('Waiting for VR data...')
         else:
-            self.get_logger().info(f'  Target topics: /vr/*_target_pose')
+            self.get_logger().info('  Target topics: /vr/*_target_pose')
             self.get_logger().info('Waiting for VR data and robot state...')
     
     def _declare_parameters(self):
@@ -197,25 +202,19 @@ class VRClutchNode(Node):
         self.declare_parameter('clutch.max_position_delta', 0.05)  # m
         self.declare_parameter('clutch.max_rotation_delta', 0.1)   # rad
         
-        # 坐标轴映射 (VR -> Robot)
-        # VR坐标系: X右, Y上, -Z前 (左右手相同)
-        # 机器人坐标系(ROS): X前, Y左, Z上
-        # 映射: Robot_X = -VR_Z, Robot_Y = -VR_X, Robot_Z = VR_Y
+        # 坐标轴映射 (VR -> Robot base_link)
+        # [已废弃] 坐标变换现在在 vr_bridge_node (C++) 中完成
+        # vr_bridge_node 输出的数据已经是 ROS 坐标系 (X前 Y左 Z上)
+        # 这些参数仅用于向后兼容
         self.declare_parameter('clutch.axis_mapping', [2, 0, 1])
         self.declare_parameter('clutch.axis_signs', [-1, -1, 1])
-        
-        # VR到机器人的坐标系旋转变换（欧拉角，单位：度）
-        # 这个旋转将VR控制器的姿态变换到机器人末端的姿态
-        # PICO VR坐标系: Y-up, Z-forward (控制器指向方向)
-        # 默认值: [-90, 0, 0] 绕X轴旋转-90度，VR的Z-forward变成机器人的Z-down
-        self.declare_parameter('clutch.vr_to_robot_rotation', [-90.0, 0.0, 0.0])
+
+        # [已废弃] use_transformed_pose 不再需要
+        # vr_bridge_node 现在只输出 ROS 坐标系数据
+        self.declare_parameter('use_transformed_pose', True)
     
     def _load_config(self) -> ClutchConfig:
         """加载Clutch配置"""
-        axis_mapping = self.get_parameter('clutch.axis_mapping').value
-        axis_signs = self.get_parameter('clutch.axis_signs').value
-        vr_rot = self.get_parameter('clutch.vr_to_robot_rotation').value
-        
         return ClutchConfig(
             engage_threshold=self.get_parameter('clutch.engage_threshold').value,
             release_threshold=self.get_parameter('clutch.release_threshold').value,
@@ -223,9 +222,7 @@ class VRClutchNode(Node):
             rotation_scale=self.get_parameter('clutch.rotation_scale').value,
             max_position_delta=self.get_parameter('clutch.max_position_delta').value,
             max_rotation_delta=self.get_parameter('clutch.max_rotation_delta').value,
-            axis_mapping=tuple(axis_mapping),
-            axis_signs=tuple(axis_signs),
-            vr_to_robot_rotation=tuple(vr_rot)
+            use_transformed_pose=self.get_parameter('use_transformed_pose').value
         )
     
     # === 回调函数 ===
@@ -389,6 +386,15 @@ class VRClutchNode(Node):
             target_msg.pose.orientation.w = float(target_ori[3])
             
             target_pub.publish(target_msg)
+            
+            # 打印转换后的目标位姿 (xyz + rpy)
+            from scipy.spatial.transform import Rotation
+            rpy = Rotation.from_quat(target_ori).as_euler('xyz', degrees=True)
+            self.get_logger().info(
+                f'[{arm_name}] Target: '
+                f'xyz=[{target_pos[0]:.3f}, {target_pos[1]:.3f}, {target_pos[2]:.3f}] '
+                f'rpy=[{rpy[0]:.1f}, {rpy[1]:.1f}, {rpy[2]:.1f}]°',
+                throttle_duration_sec=0.2)
             
             # 状态变化时打印日志
             if state == ClutchState.ENGAGING:
