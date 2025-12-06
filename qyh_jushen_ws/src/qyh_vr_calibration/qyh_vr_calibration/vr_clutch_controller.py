@@ -7,10 +7,11 @@ VR Clutch Controller - 实现离合器模式的VR遥操作
 2. 每帧计算VR相对于上一帧的增量，累加到机器人目标
 3. 当grip按钮松开时(<threshold), 保持机器人最后位置
 
-架构改进 (v2.0 - TF坐标变换):
+架构 (v2.0):
 - VR→ROS坐标变换在 vr_bridge_node (C++) 中完成
+- 坐标变换: ros_x=-vr_z, ros_y=-vr_x, ros_z=vr_y
+- 握持补偿: 35° pitch (可调)
 - 此控制器接收的VR数据已经是ROS坐标系 (X前Y左Z上)
-- 不再需要 axis_mapping/axis_signs 参数
 - 位置增量在 base_link(世界)坐标系下
 - 旋转增量在末端(局部)坐标系下
 """
@@ -49,28 +50,15 @@ class ClutchConfig:
     
     # 低通滤波系数 (0-1)，越小滤波越强
     smoothing_factor: float = 0.5
-    
-    # [已废弃] 坐标轴映射在 vr_bridge_node 中处理
-    # axis_mapping 和 axis_signs 不再使用
-    
-    # VR头显到肩膀的偏移 (ROS坐标系, 单位: 米)
-    # 注: 在Clutch增量模式下不影响控制
-    vr_to_shoulder_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0)
-    
-    # 是否使用已变换的 ROS 坐标系数据
-    # True: 使用 /vr/xxx/pose_ros (C++已做变换)
-    # False: 使用 /vr/xxx/pose (原始VR数据，需要 Python 变换)
-    use_transformed_pose: bool = True
 
 
 class VRClutchController:
     """
     单臂的Clutch控制器 - 以base_link坐标系为基准的增量跟踪
     
-    重要: 
-    - 输入的VR数据应该已经是ROS坐标系 (通过 vr_bridge_node 变换)
-    - 位置增量在 base_link(世界)坐标系下
-    - 旋转增量在末端(局部)坐标系下
+    输入: VR数据已经是ROS坐标系 (通过 vr_bridge_node 变换)
+    位置增量: 在 base_link(世界)坐标系下
+    旋转增量: 在末端(局部)坐标系下
     """
     
     def __init__(self, config: Optional[ClutchConfig] = None, name: str = ""):

@@ -28,16 +28,32 @@
 
 using namespace std::chrono_literals;
 
-// 简化的 TF 树:
-//   vr_origin (ROS坐标系)
-//       ├── vr_head
-//       ├── vr_left_hand (含握持补偿)
-//       └── vr_right_hand (含握持补偿)
-//
-// VR坐标系 (PICO): X-右, Y-上, -Z-前
-// ROS坐标系: X-前, Y-左, Z-上
-// 位置映射: ros_x = -vr_z, ros_y = -vr_x, ros_z = vr_y
-// 四元数映射: ros_qx = -vr_qz, ros_qy = -vr_qx, ros_qz = vr_qy, ros_qw = vr_qw
+/**
+ * VR Bridge Node - PICO 4 VR 数据接收与坐标变换
+ * 
+ * TF 树:
+ *   vr_origin (ROS坐标系: X前 Y左 Z上)
+ *       ├── vr_head
+ *       ├── vr_left_hand (含握持补偿)
+ *       └── vr_right_hand (含握持补偿)
+ *
+ * 坐标变换:
+ *   VR坐标系 (PICO): X-右, Y-上, -Z-前
+ *   ROS坐标系: X-前, Y-左, Z-上
+ *   
+ *   位置映射: ros_x = -vr_z, ros_y = -vr_x, ros_z = vr_y
+ *   四元数映射: ros_qx = -vr_qz, ros_qy = -vr_qx, ros_qz = vr_qy, ros_qw = vr_qw
+ *
+ * 参数:
+ *   udp_port (int): UDP监听端口，默认9999
+ *   grip_offset_deg (double): 手柄握持补偿角度(pitch)，默认35.0
+ *
+ * 发布话题:
+ *   /vr/head/pose, /vr/left_hand/pose, /vr/right_hand/pose (PoseStamped)
+ *   /vr/left_hand/joy, /vr/right_hand/joy (Joy)
+ *   /vr/left_hand/active, /vr/right_hand/active (Bool)
+ *   TF: vr_origin -> vr_head/vr_left_hand/vr_right_hand
+ */
 
 #pragma pack(push, 1)
 struct ControllerDataPacket {
