@@ -263,6 +263,11 @@ class SimArmController(Node):
                 pose_msg = response.pose_stamped[0]
                 pose_msg.header.stamp = self.get_clock().now().to_msg()
                 pub.publish(pose_msg)
+                # 调试：打印 FK 结果
+                self.get_logger().info(
+                    f'FK result for {arm}: pos=[{pose_msg.pose.position.x:.3f}, '
+                    f'{pose_msg.pose.position.y:.3f}, {pose_msg.pose.position.z:.3f}]',
+                    throttle_duration_sec=2.0)
         except Exception as e:
             pass  # FK失败静默处理
 

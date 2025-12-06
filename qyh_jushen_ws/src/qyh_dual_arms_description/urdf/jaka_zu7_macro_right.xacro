@@ -251,8 +251,9 @@
     </link>
 
     <!-- Tool Joint -->
+    <!-- 旋转使 tool0 坐标系与 VR 手柄对齐: X前 Y左 Z上 -->
     <joint name="right_tool_joint" type="fixed">
-      <origin xyz="0 0 0.20277" rpy="0 0 0"/>
+      <origin xyz="0 0 0.20277" rpy="-1.5708 -1.5708 0"/>
       <parent link="right_link7"/>
       <child link="right_tool0"/>
     </joint>

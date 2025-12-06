@@ -221,8 +221,7 @@ class VRClutchNode(Node):
             position_scale=self.get_parameter('clutch.position_scale').value,
             rotation_scale=self.get_parameter('clutch.rotation_scale').value,
             max_position_delta=self.get_parameter('clutch.max_position_delta').value,
-            max_rotation_delta=self.get_parameter('clutch.max_rotation_delta').value,
-            use_transformed_pose=self.get_parameter('use_transformed_pose').value
+            max_rotation_delta=self.get_parameter('clutch.max_rotation_delta').value
         )
     
     # === 回调函数 ===

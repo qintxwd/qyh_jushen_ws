@@ -68,6 +68,100 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        left_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_link7:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_tool0:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link2:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link3:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_link7:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_tool0:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
       Mass Properties:
         Inertia: false
         Mass: false
@@ -81,13 +175,89 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        base_link:
+          Value: true
+        left_base_link:
+          Value: false
+        left_link1:
+          Value: false
+        left_link2:
+          Value: false
+        left_link3:
+          Value: false
+        left_link4:
+          Value: false
+        left_link5:
+          Value: false
+        left_link6:
+          Value: false
+        left_link7:
+          Value: false
+        left_tool0:
+          Value: true
+        right_base_link:
+          Value: false
+        right_link1:
+          Value: false
+        right_link2:
+          Value: false
+        right_link3:
+          Value: false
+        right_link4:
+          Value: false
+        right_link5:
+          Value: false
+        right_link6:
+          Value: false
+        right_link7:
+          Value: false
+        right_tool0:
+          Value: true
+        vr_head:
+          Value: true
+        vr_left_hand:
+          Value: true
+        vr_origin:
+          Value: true
+        vr_right_hand:
+          Value: true
+        world:
+          Value: false
       Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
-      Show Names: false
+      Show Names: true
       Tree:
-        {}
+        vr_origin:
+          vr_head:
+            {}
+          vr_left_hand:
+            {}
+          vr_right_hand:
+            {}
+        world:
+          base_link:
+            left_base_link:
+              left_link1:
+                left_link2:
+                  left_link3:
+                    left_link4:
+                      left_link5:
+                        left_link6:
+                          left_link7:
+                            left_tool0:
+                              {}
+            right_base_link:
+              right_link1:
+                right_link2:
+                  right_link3:
+                    right_link4:
+                      right_link5:
+                        right_link6:
+                          right_link7:
+                            right_tool0:
+                              {}
       Update Interval: 0
       Value: true
   Enabled: true
@@ -136,7 +306,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.4881864786148071
+      Distance: 2.4112188816070557
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -151,10 +321,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.0503978729248047
+      Pitch: 1.4247961044311523
       Target Frame: base_link
       Value: Orbit (rviz)
-      Yaw: 2.9503986835479736
+      Yaw: 3.1654016971588135
     Saved: ~
 Window Geometry:
   Displays:
@@ -172,5 +342,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1820
-  X: -22
-  Y: 23
+  X: 164
+  Y: 127

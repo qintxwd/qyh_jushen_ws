@@ -171,6 +171,11 @@ class VRClutchController:
         self.robot_target_ori = robot_ori.copy()
         self.accumulated_pos_delta = np.zeros(3)
         self.accumulated_rot_delta = np.zeros(3)
+        
+        # 调试：打印 engage 时的初始位置
+        print(f"[{self.name}] Clutch ENGAGE:")
+        print(f"  VR pos: [{vr_pos[0]:.3f}, {vr_pos[1]:.3f}, {vr_pos[2]:.3f}]")
+        print(f"  Robot pos (from FK): [{robot_pos[0]:.3f}, {robot_pos[1]:.3f}, {robot_pos[2]:.3f}]")
 
     def _accumulate_delta(
         self,
