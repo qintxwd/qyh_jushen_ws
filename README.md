@@ -4,12 +4,25 @@
 
 ### 1. ROS2 基础依赖
 ```bash
+# ROS2 核心运行时
+sudo apt-get install -y ros-humble-rclcpp \
+                        ros-humble-rclpy \
+                        ros-humble-rclcpp-components \
+                        ros-humble-ament-index-cpp
+
 # ROS2 消息和工具
 sudo apt-get install -y ros-humble-rosidl-typesupport-c \
                         ros-humble-rosidl-default-generators \
+                        ros-humble-rosidl-default-runtime \
                         ros-humble-rosidl-generator-py \
                         ros-humble-ament-cmake \
                         ros-humble-ament-cmake-python
+
+# 基础消息包
+sudo apt-get install -y ros-humble-std-msgs \
+                        ros-humble-std-srvs \
+                        ros-humble-builtin-interfaces \
+                        ros-humble-action-msgs
 
 # Python工具
 sudo apt-get install -y python3-pip \
@@ -33,16 +46,25 @@ sudo apt-get install -y libboost-all-dev
 ```bash
 # MoveIt2 核心
 sudo apt install -y ros-humble-moveit \
+                    ros-humble-moveit-core \
                     ros-humble-moveit-servo \
                     ros-humble-moveit-visual-tools \
+                    ros-humble-moveit-ros-planning \
                     ros-humble-moveit-ros-planning-interface \
-                    ros-humble-moveit-planners-ompl
+                    ros-humble-moveit-ros-move-group \
+                    ros-humble-moveit-ros-visualization \
+                    ros-humble-moveit-planners-ompl \
+                    ros-humble-moveit-kinematics \
+                    ros-humble-moveit-simple-controller-manager \
+                    ros-humble-moveit-configs-utils
 
 # 控制和平滑
 sudo apt install -y ros-humble-control-toolbox \
                     ros-humble-controller-manager \
                     ros-humble-ros2-control \
-                    ros-humble-ros2-controllers
+                    ros-humble-ros2-controllers \
+                    ros-humble-trajectory-msgs \
+                    ros-humble-control-msgs
 ```
 
 ### 4. 机器人描述和可视化
@@ -56,6 +78,7 @@ sudo apt install -y ros-humble-xacro \
 # RViz和可视化
 sudo apt install -y ros-humble-rviz2 \
                     ros-humble-rviz-visual-tools \
+                    ros-humble-rviz-default-plugins \
                     ros-humble-interactive-markers
 ```
 
@@ -65,7 +88,18 @@ sudo apt install -y ros-humble-rviz2 \
 sudo apt install -y ros-humble-cv-bridge \
                     ros-humble-image-transport \
                     ros-humble-image-transport-plugins \
-                    ros-humble-vision-opencv
+                    ros-humble-image-publisher \
+                    ros-humble-vision-opencv \
+                    ros-humble-camera-info-manager \
+                    ros-humble-camera-calibration-parsers
+
+# 视频流服务（Web 界面显示相机画面）
+sudo apt install -y ros-humble-web-video-server
+
+# 诊断工具
+sudo apt install -y ros-humble-diagnostic-msgs \
+                    ros-humble-diagnostic-updater \
+                    ros-humble-statistics-msgs
 
 # OpenCV
 sudo apt install -y libopencv-dev \
@@ -77,11 +111,14 @@ sudo apt install -y libopencv-dev \
 # TF2变换
 sudo apt install -y ros-humble-tf2 \
                     ros-humble-tf2-ros \
+                    ros-humble-tf2-msgs \
                     ros-humble-tf2-geometry-msgs \
+                    ros-humble-tf2-sensor-msgs \
                     ros-humble-tf2-eigen
 
 # 几何和数学库
 sudo apt install -y libeigen3-dev \
+                    ros-humble-eigen3-cmake-module \
                     ros-humble-geometry-msgs \
                     ros-humble-sensor-msgs
 ```
@@ -112,6 +149,13 @@ sudo apt install -y libwebsocketpp-dev \
 # ADB工具（如用于VR设备调试）
 sudo apt install -y android-tools-adb \
                     android-tools-fastboot
+
+# Orbbec 相机所需系统库
+sudo apt install -y libgflags-dev \
+                    libgoogle-glog-dev \
+                    libssl-dev \
+                    libyaml-cpp-dev \
+                    ros-humble-backward-ros
 ```
 
 ### 9. Python依赖
@@ -150,14 +194,23 @@ set -e
 
 echo "=== 安装ROS2 Humble依赖 ==="
 
-# 1. ROS2基础
+# 1. ROS2核心和基础
 sudo apt-get update
 sudo apt-get install -y \
+    ros-humble-rclcpp \
+    ros-humble-rclpy \
+    ros-humble-rclcpp-components \
+    ros-humble-ament-index-cpp \
     ros-humble-rosidl-typesupport-c \
     ros-humble-rosidl-default-generators \
+    ros-humble-rosidl-default-runtime \
     ros-humble-rosidl-generator-py \
     ros-humble-ament-cmake \
     ros-humble-ament-cmake-python \
+    ros-humble-std-msgs \
+    ros-humble-std-srvs \
+    ros-humble-builtin-interfaces \
+    ros-humble-action-msgs \
     python3-pip \
     python3-ament-package \
     python3-colcon-common-extensions \
@@ -170,19 +223,28 @@ sudo apt-get install -y \
     ros-humble-serial-driver \
     libboost-all-dev
 
-# 3. MoveIt2
+# 3. MoveIt2 完整安装
 sudo apt install -y \
     ros-humble-moveit \
+    ros-humble-moveit-core \
     ros-humble-moveit-servo \
     ros-humble-moveit-visual-tools \
+    ros-humble-moveit-ros-planning \
     ros-humble-moveit-ros-planning-interface \
+    ros-humble-moveit-ros-move-group \
+    ros-humble-moveit-ros-visualization \
     ros-humble-moveit-planners-ompl \
+    ros-humble-moveit-kinematics \
+    ros-humble-moveit-simple-controller-manager \
+    ros-humble-moveit-configs-utils \
     ros-humble-control-toolbox \
     ros-humble-controller-manager \
     ros-humble-ros2-control \
-    ros-humble-ros2-controllers
+    ros-humble-ros2-controllers \
+    ros-humble-trajectory-msgs \
+    ros-humble-control-msgs
 
-# 4. 机器人描述
+# 4. 机器人描述和可视化
 sudo apt install -y \
     ros-humble-xacro \
     ros-humble-robot-state-publisher \
@@ -190,26 +252,37 @@ sudo apt install -y \
     ros-humble-joint-state-publisher-gui \
     ros-humble-rviz2 \
     ros-humble-rviz-visual-tools \
+    ros-humble-rviz-default-plugins \
     ros-humble-interactive-markers
 
-# 5. 传感器
+# 5. 传感器和相机
 sudo apt install -y \
     ros-humble-cv-bridge \
     ros-humble-image-transport \
     ros-humble-image-transport-plugins \
+    ros-humble-image-publisher \
     ros-humble-vision-opencv \
+    ros-humble-camera-info-manager \
+    ros-humble-camera-calibration-parsers \
+    ros-humble-web-video-server \
+    ros-humble-diagnostic-msgs \
+    ros-humble-diagnostic-updater \
+    ros-humble-statistics-msgs \
     libopencv-dev \
     python3-opencv
 
-# 6. VR和TF
+# 6. TF2 和几何
 sudo apt install -y \
     ros-humble-tf2 \
     ros-humble-tf2-ros \
+    ros-humble-tf2-msgs \
     ros-humble-tf2-geometry-msgs \
+    ros-humble-tf2-sensor-msgs \
     ros-humble-tf2-eigen \
-    libeigen3-dev \
+    ros-humble-eigen3-cmake-module \
     ros-humble-geometry-msgs \
-    ros-humble-sensor-msgs
+    ros-humble-sensor-msgs \
+    libeigen3-dev
 
 # 7. 开发工具
 sudo apt install -y \
@@ -218,12 +291,21 @@ sudo apt install -y \
     git \
     ros-humble-rqt \
     ros-humble-rqt-common-plugins \
-    ros-humble-plotjuggler-ros
+    ros-humble-plotjuggler-ros \
+    ros-humble-ros2trace \
+    ros-humble-tracetools
 
-# 8. 网络通信
+# 8. 网络通信和系统库
 sudo apt install -y \
     libwebsocketpp-dev \
-    nlohmann-json3-dev
+    nlohmann-json3-dev \
+    libgflags-dev \
+    libgoogle-glog-dev \
+    libssl-dev \
+    libyaml-cpp-dev \
+    ros-humble-backward-ros \
+    android-tools-adb \
+    android-tools-fastboot
 
 # 9. Python依赖
 # 配置国内镜像源（推荐）
