@@ -17,11 +17,13 @@ differential_ik:
   dt: 0.008  # 1/125 Hz
 
 # Trajectory smoothing parameters
+# Note: Main smoothing is done in vr_clutch (Cartesian space)
+# Here we only do safety limiting, minimal filtering
 trajectory_smoothing:
-  max_velocity: 1.0  # rad/s (conservative for safety)
-  max_acceleration: 0.5  # rad/s²
-  max_jerk: 5.0  # rad/s³
-  low_pass_cutoff: 10.0  # Hz
+  max_velocity: 2.0  # rad/s (increased, clutch already smooths)
+  max_acceleration: 2.0  # rad/s² (increased)
+  max_jerk: 20.0  # rad/s³ (increased)
+  low_pass_cutoff: 50.0  # Hz (was 10Hz, too aggressive)
 
 # Safety parameters
 safety:

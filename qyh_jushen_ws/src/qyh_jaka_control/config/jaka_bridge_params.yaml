@@ -8,6 +8,8 @@ jaka_bridge_node:
     servo_frequency_hz: 125.0  # Target output frequency
     
     # Smooth servo bridge
-    buffer_size: 10  # Trajectory buffer size
-    interpolation_weight: 0.5  # 0.0-1.0, higher=faster response, lower=smoother
-    enable_interpolation: true  # Use interpolation between commands
+    # Note: Main smoothing is done in vr_clutch (Cartesian space)
+    # Disable interpolation here to reduce latency
+    buffer_size: 5  # Reduced buffer size for lower latency
+    interpolation_weight: 1.0  # 1.0 = no interpolation (direct passthrough)
+    enable_interpolation: false  # Disabled - clutch already smooths
