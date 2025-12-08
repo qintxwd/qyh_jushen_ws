@@ -18,12 +18,18 @@ differential_ik:
 
 # Trajectory smoothing parameters
 # Note: Main smoothing is done in vr_clutch (Cartesian space)
-# Here we only do safety limiting, minimal filtering
+# Here we only do safety limiting based on JAKA ZU7 real limits
+#
+# JAKA ZU7 速度限制 (取最小值 J1/J2 = 90°/s = 1.571 rad/s):
+#   J1-J2: 90°/s = 1.571 rad/s
+#   J3-J4: 120°/s = 2.094 rad/s  
+#   J5-J7: 150°/s = 2.618 rad/s
+# 这里使用 80% 作为安全限制
 trajectory_smoothing:
-  max_velocity: 2.0  # rad/s (increased, clutch already smooths)
-  max_acceleration: 2.0  # rad/s² (increased)
-  max_jerk: 20.0  # rad/s³ (increased)
-  low_pass_cutoff: 50.0  # Hz (was 10Hz, too aggressive)
+  max_velocity: 1.257  # rad/s (80% of slowest joint 90°/s)
+  max_acceleration: 1.5  # rad/s² (conservative)
+  max_jerk: 15.0  # rad/s³
+  low_pass_cutoff: 50.0  # Hz (minimal filtering, clutch already smooths)
 
 # Safety parameters
 safety:

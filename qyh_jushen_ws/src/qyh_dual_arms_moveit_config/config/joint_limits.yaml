@@ -1,73 +1,86 @@
-# Joint limits for dual arms
-# Based on qyh_dual_arms_description joint limits with conservative velocity and acceleration
+# Joint limits for dual arms (MoveIt)
+# 基于 JAKA ZU7 真实参数，使用 80% 速度作为安全限制
+#
+# 真机参数 (度):
+#   J1: ±360°, 90°/s   → MoveIt: 72°/s (1.257 rad/s)
+#   J2: ±105°, 90°/s   → MoveIt: 72°/s (1.257 rad/s)
+#   J3: ±360°, 120°/s  → MoveIt: 96°/s (1.676 rad/s)
+#   J4: +30°/-145°, 120°/s → MoveIt: 96°/s (1.676 rad/s) [非对称!]
+#   J5: ±360°, 150°/s  → MoveIt: 120°/s (2.094 rad/s)
+#   J6: ±105°, 150°/s  → MoveIt: 120°/s (2.094 rad/s)
+#   J7: ±360°, 150°/s  → MoveIt: 120°/s (2.094 rad/s)
+
 joint_limits:
+  # ==================== 左臂 ====================
   left_joint1:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.257  # 80% of 90°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   left_joint2:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.257  # 80% of 90°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   left_joint3:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.676  # 80% of 120°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   left_joint4:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.676  # 80% of 120°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   left_joint5:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.094  # 80% of 150°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   left_joint6:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.094  # 80% of 150°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   left_joint7:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.094  # 80% of 150°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
+
+  # ==================== 右臂 ====================
   right_joint1:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.257  # 80% of 90°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   right_joint2:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.257  # 80% of 90°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   right_joint3:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.676  # 80% of 120°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   right_joint4:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 1.676  # 80% of 120°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   right_joint5:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.094  # 80% of 150°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   right_joint6:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.094  # 80% of 150°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5
   right_joint7:
     has_velocity_limits: true
-    max_velocity: 1.0
+    max_velocity: 2.094  # 80% of 150°/s
     has_acceleration_limits: true
-    max_acceleration: 0.5
+    max_acceleration: 1.5

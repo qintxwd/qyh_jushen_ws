@@ -40,12 +40,13 @@
     </link>
 
     <!-- Joint 1: 从底座顶部向上，添加第一个关节 -->
+    <!-- J1: ±360°, 90°/s -->
     <joint name="left_joint1" type="revolute">
       <origin xyz="0 0 0.217" rpy="0 0 0"/>
       <parent link="left_base_link"/>
       <child link="left_link1"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-6.2832" upper="6.2832" effort="0" velocity="0"/>
+      <limit lower="-6.2832" upper="6.2832" effort="100" velocity="1.571"/>
     </joint>
 
     <link name="left_link1">
@@ -71,13 +72,13 @@
       </inertial>
     </link>
 
-    <!-- Joint 2 -->
+    <!-- Joint 2: ±105°, 90°/s -->
     <joint name="left_joint2" type="revolute">
       <origin xyz="0 0 0.2075" rpy="${j2_rpy}"/>
       <parent link="left_link1"/>
       <child link="left_link2"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-1.8325" upper="1.8325" effort="0" velocity="0"/>
+      <limit lower="-1.8325" upper="1.8325" effort="100" velocity="1.571"/>
     </joint>
     
     <link name="left_link2">
@@ -101,13 +102,13 @@
         </inertial>
     </link>
 
-    <!-- Joint 3 -->
+    <!-- Joint 3: ±360°, 120°/s -->
     <joint name="left_joint3" type="revolute">
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <parent link="left_link2"/>
       <child link="left_link3"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-6.2832" upper="6.2832" effort="0" velocity="0"/>
+      <limit lower="-6.2832" upper="6.2832" effort="100" velocity="2.094"/>
     </joint>
 
     <link name="left_link3">
@@ -131,13 +132,13 @@
         </inertial>
     </link>
 
-    <!-- Joint 4 -->
+    <!-- Joint 4: +30°/-145° (非对称!), 120°/s -->
     <joint name="left_joint4" type="revolute">
       <origin xyz="-0.00040027 0 0.33028" rpy="-1.5708 0 0"/>
       <parent link="left_link3"/>
       <child link="left_link4"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-2.5307" upper="0.5235" effort="0" velocity="0"/>
+      <limit lower="-2.5307" upper="0.5235" effort="100" velocity="2.094"/>
     </joint>
 
     <link name="left_link4">
@@ -161,13 +162,13 @@
         </inertial>
     </link>
 
-    <!-- Joint 5 -->
+    <!-- Joint 5: ±360°, 150°/s -->
     <joint name="left_joint5" type="revolute">
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <parent link="left_link4"/>
       <child link="left_link5"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-6.2832" upper="6.2832" effort="0" velocity="0"/>
+      <limit lower="-6.2832" upper="6.2832" effort="100" velocity="2.618"/>
     </joint>
 
     <link name="left_link5">
@@ -191,13 +192,13 @@
         </inertial>
     </link>
 
-    <!-- Joint 6 -->
+    <!-- Joint 6: ±105°, 150°/s -->
     <joint name="left_joint6" type="revolute">
       <origin xyz="0 0 0.23494" rpy="${j6_rpy}"/>
       <parent link="left_link5"/>
       <child link="left_link6"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-1.8325" upper="1.8325" effort="0" velocity="0"/>
+      <limit lower="-1.8325" upper="1.8325" effort="100" velocity="2.618"/>
     </joint>
 
     <link name="left_link6">
@@ -221,13 +222,13 @@
         </inertial>
     </link>
 
-    <!-- Joint 7 -->
+    <!-- Joint 7: ±360°, 150°/s -->
     <joint name="left_joint7" type="revolute">
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <parent link="left_link6"/>
       <child link="left_link7"/>
       <axis xyz="0 0 1"/>
-      <limit lower="-6.2832" upper="6.2832" effort="0" velocity="0"/>
+      <limit lower="-6.2832" upper="6.2832" effort="100" velocity="2.618"/>
     </joint>
 
     <link name="left_link7">
