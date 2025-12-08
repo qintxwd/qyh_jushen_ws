@@ -21,6 +21,10 @@ from moveit_msgs.srv import GetPositionIK, GetPositionFK
 class SimArmController(Node):
     """仿真机械臂控制器 - 使用IK服务"""
     
+    # 默认的 ready 位置关节角度 (与 SRDF 中的 ready 状态一致)
+    # 这个姿态让双臂末端在前方工作区，适合 VR 遥操作
+    READY_JOINTS = [0.0, -0.5, 0.0, -1.5, 0.0, 1.0, 0.0]
+    
     def __init__(self):
         super().__init__('sim_arm_controller')
         
@@ -29,11 +33,13 @@ class SimArmController(Node):
         self.declare_parameter('right_group_name', 'right_arm')
         self.declare_parameter('left_ee_link', 'left_tool0')
         self.declare_parameter('right_ee_link', 'right_tool0')
+        self.declare_parameter('auto_ready', True)  # 启动时自动移到ready位置
         
         self.left_group = self.get_parameter('left_group_name').value
         self.right_group = self.get_parameter('right_group_name').value
         self.left_ee = self.get_parameter('left_ee_link').value
         self.right_ee = self.get_parameter('right_ee_link').value
+        self.auto_ready = self.get_parameter('auto_ready').value
         
         # 当前目标
         self.left_target: PoseStamped = None
@@ -47,6 +53,9 @@ class SimArmController(Node):
         
         # 当前关节状态
         self.current_joint_state: JointState = None
+        
+        # 是否已初始化到ready位置
+        self.ready_initialized = False
         
         # 左右臂的关节名称
         self.left_joints = [f'left_joint{i}' for i in range(1, 8)]
@@ -135,8 +144,39 @@ class SimArmController(Node):
                 idx = self.right_joints.index(name)
                 self.right_positions[idx] = msg.position[i]
     
+    def _move_to_ready(self):
+        """将双臂移动到ready位置"""
+        self.get_logger().info('Moving arms to READY position...')
+        
+        # 发布左臂ready关节状态
+        left_msg = JointState()
+        left_msg.header.stamp = self.get_clock().now().to_msg()
+        left_msg.name = self.left_joints
+        left_msg.position = self.READY_JOINTS.copy()
+        self.fake_joint_pub.publish(left_msg)
+        
+        # 发布右臂ready关节状态
+        right_msg = JointState()
+        right_msg.header.stamp = self.get_clock().now().to_msg()
+        right_msg.name = self.right_joints
+        right_msg.position = self.READY_JOINTS.copy()
+        self.fake_joint_pub.publish(right_msg)
+        
+        # 更新本地状态
+        self.left_positions = self.READY_JOINTS.copy()
+        self.right_positions = self.READY_JOINTS.copy()
+        
+        self.get_logger().info('Arms moved to READY position')
+    
     def control_loop(self):
         """控制循环"""
+        # 首次运行时自动移到ready位置
+        if self.auto_ready and not self.ready_initialized:
+            if self.current_joint_state is not None:
+                self._move_to_ready()
+                self.ready_initialized = True
+                return
+        
         # 处理左臂
         if self.left_target_new and not self.left_ik_pending:
             self.left_target_new = False

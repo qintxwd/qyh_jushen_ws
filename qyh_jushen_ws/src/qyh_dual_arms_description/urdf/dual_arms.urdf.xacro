@@ -7,12 +7,12 @@
   <!-- 虚拟基座 (胸腔安装点) -->
   <link name="base_link"/>
 
-  <!-- 左臂 - 基座中心间距40cm (y=0.2) -->
+  <!-- 左臂 -->
   <xacro:jaka_zu7_arm_left  parent="base_link">
     <origin xyz="-0.06 -0.06 0" rpy="1.5708 0 2.356194"/>
   </xacro:jaka_zu7_arm_left>
 
-  <!-- 右臂 - 基座中心间距40cm (y=-0.2) -->
+  <!-- 右臂 -->
   <xacro:jaka_zu7_arm_right parent="base_link">
     <origin xyz="-0.06 0.06 0" rpy="1.5708 0 0.785398"/>
   </xacro:jaka_zu7_arm_right>
