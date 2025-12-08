@@ -117,22 +117,7 @@ ros2 run qyh_vr_bridge vr_bridge_node --ros-args -p grip_offset_deg:=35.0
 
 ---
 
-### WSL 终端 3：启动仿真机械臂控制器 (必须在 VR Clutch 之前!)
-
-```bash
-cd ~/qyh_jushen_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run qyh_vr_calibration sim_arm_controller
-```
-
-**作用**: 
-- 接收目标位姿，使用 MoveIt 规划并执行机械臂运动
-- **发布当前末端位姿** `/sim/left_current_pose`, `/sim/right_current_pose`
-
----
-
-### WSL 终端 4：启动 VR Clutch (离合器控制)
+### WSL 终端 3：启动 VR Clutch (离合器控制)
 
 ```bash
 cd ~/qyh_jushen_ws
@@ -143,37 +128,46 @@ ros2 launch qyh_vr_calibration vr_clutch.launch.py
 
 **作用**: 实现 Clutch 离合器逻辑
 - 订阅 `/vr/left_hand/pose`, `/vr/left_hand/joy`
-- **订阅当前末端位姿** `/sim/*_current_pose` (确保按下 Grip 时从真实位置开始)
 - 按住 Grip (>0.8) 时跟踪 VR 增量
 - 松开 Grip (<0.2) 时保持位置
 - 发布目标位姿到 `/sim/left_target_pose`, `/sim/right_target_pose`
+- 发布离合器状态 `/vr/left_clutch_engaged`, `/vr/right_clutch_engaged`
 
 ---
 
-> **重要**: 启动顺序**作用**: 接收目标位姿，使用 MoveIt 规划并执行机械臂运动
-
----
-
-## 快速启动脚本 (可选)
-
-创建一键启动脚本 `start_vr_sim.sh`:
+### WSL 终端 4：启动仿真机械臂控制器
 
 ```bash
-#!/bin/bash
-# 保存到 ~/qyh_jushen_ws/start_vr_sim.sh
-
 cd ~/qyh_jushen_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
+ros2 run qyh_vr_calibration sim_arm_controller
+```
 
-# 在不同终端标签页中启动各节点
-gnome-terminal --tab --title="MoveIt" -- bash -c "ros2 launch qyh_dual_arms_moveit_config demo.launch.py; exec bash"
-sleep 3
-gnome-terminal --tab --title="VR Bridge" -- bash -c "ros2 run qyh_vr_bridge vr_bridge_node; exec bash"
-gnome-terminal --tab --title="VR Clutch" -- bash -c "ros2 launch qyh_vr_calibration vr_clutch.launch.py; exec bash"
-gnome-terminal --tab --title="Sim Arm" -- bash -c "ros2 run qyh_vr_calibration sim_arm_controller; exec bash"
+**作用**: 
+- 订阅目标位姿 `/sim/left_target_pose`, `/sim/right_target_pose`
+- 使用 MoveIt `/compute_ik` 服务求解关节角度
+- 发布 `/joint_states` 驱动 RViz 中的机械臂模型
+- 启动时自动移动到 ready 位置（避免 IK 失败）
 
-echo "所有节点已启动!"
+---
+
+> **重要启动顺序**: MoveIt → VR Bridge → VR Clutch → Sim Arm Controller
+
+---
+
+## 快速启动脚本
+
+使用一键启动脚本:
+
+```bash
+cd ~/qyh_jushen_ws
+./src/start_vr_simulation.sh
+```
+
+或者在 Windows WSL 中:
+```powershell
+wsl -d Ubuntu -e bash -c "cd ~/qyh_jushen_ws && ./src/start_vr_simulation.sh"
 ```
 
 ## 第四步：WSL 网络配置 (重要!)
