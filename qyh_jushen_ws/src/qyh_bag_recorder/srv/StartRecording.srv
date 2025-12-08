@@ -1,0 +1,11 @@
+# 开始录制服务
+# 输入: 动作名称, 用户名, 版本号, 要录制的话题列表
+string action_name
+string user_name
+string version
+string[] topics
+---
+# 输出: 是否成功, 消息, 生成的包路径
+bool success
+string message
+string bag_path
