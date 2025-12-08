@@ -46,6 +46,32 @@ VR设备(90Hz) → VR接口 → 校准 → 遥操作控制器 → JAKA桥接 →
                              (IK求解+可视化)
 ```
 
+## 🧩 仿真与真机数据流对比
+
+```mermaid
+flowchart TD
+  subgraph 仿真链路
+    VR[VR设备 90Hz] --> VRBridge[vr_bridge_node]
+    VRBridge --> Clutch[vr_clutch_node]
+    Clutch --> SimArm[sim_arm_controller MoveIt IK]
+    SimArm --> JointStates[/joint_states/]
+    JointStates --> RViz[RViz 可视化]
+  end
+
+  subgraph 真机链路
+    VR2[VR设备 90Hz] --> VRBridge2[vr_bridge_node]
+    VRBridge2 --> Clutch2[vr_clutch_node]
+    Clutch2 --> Teleop[qyh_teleoperation_controller\n差分IK+平滑+安全]
+    Teleop --> JakaBridge[jaka_bridge_node 125Hz]
+    JakaBridge --> JAKASDK[JAKA SDK]
+    JAKASDK --> Robot[双臂机器人]
+    Teleop --> VirtualArm[虚拟臂可视化 RViz]
+  end
+```
+
+- **仿真链路**：sim_arm_controller 直接调用 MoveIt IK，结果用于 RViz 可视化。
+- **真机链路**：teleoperation_controller 实时差分IK+轨迹平滑，输出到 JAKA EtherCAT 伺服，支持虚拟臂同步可视化。
+
 ## 💡 主要特性
 
 - ✅ **高频伺服控制**: 125Hz EtherCAT实时伺服
