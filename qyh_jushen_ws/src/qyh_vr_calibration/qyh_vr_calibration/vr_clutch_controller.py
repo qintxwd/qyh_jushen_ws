@@ -2,18 +2,21 @@
 """
 VR Clutch Controller - 实现离合器模式的VR遥操作
 
-工作原理:
-1. 当grip按钮按下时(>threshold), 记录VR当前位姿和机器人目标位姿
-2. 每帧计算VR相对于上一帧的增量，累加到机器人目标
+工作原理 (v3.0 - 基于原点偏移):
+1. 当grip按钮按下时(>threshold), 记录VR原点位姿和机器人原点位姿
+2. 每帧计算VR相对于原点的偏移（不是帧间增量），直接映射到机器人目标
 3. 当grip按钮松开时(<threshold), 保持机器人最后位置
 
-架构 (v2.0):
+优点:
+- 无累积误差：始终基于原点计算偏移
+- 更稳定：抖动不会累积
+- 直观：VR手柄从原点移动多少，机器人就移动多少(乘以缩放)
+
+架构:
 - VR→ROS坐标变换在 vr_bridge_node (C++) 中完成
-- 坐标变换: ros_x=-vr_z, ros_y=-vr_x, ros_z=vr_y
-- 握持补偿: 35° pitch (可调)
 - 此控制器接收的VR数据已经是ROS坐标系 (X前Y左Z上)
-- 位置增量在 base_link(世界)坐标系下
-- 旋转增量在末端(局部)坐标系下
+- 位置偏移在 base_link(世界)坐标系下
+- 旋转偏移相对于grip按下时的姿态
 """
 
 import numpy as np
@@ -41,24 +44,23 @@ class ClutchConfig:
     position_scale: float = 2.0        # VR位移到机器人位移的缩放
     rotation_scale: float = 1.0        # VR旋转到机器人旋转的缩放
     
-    max_position_delta: float = 0.02   # 单帧最大位移 (m)
-    max_rotation_delta: float = 0.05   # 单帧最大旋转 (rad)
-    
-    # 死区：过滤手部抖动（小于此值的增量被忽略）
-    position_deadzone: float = 0.002   # 位置死区 2mm
-    rotation_deadzone: float = 0.01    # 旋转死区 ~0.5度
+    max_position_delta: float = 0.05   # 单帧最大位移变化 (m) - 用于平滑
+    max_rotation_delta: float = 0.1    # 单帧最大旋转变化 (rad) - 用于平滑
     
     # 低通滤波系数 (0-1)，越小滤波越强
-    smoothing_factor: float = 0.5
+    smoothing_factor: float = 0.3
 
 
 class VRClutchController:
     """
-    单臂的Clutch控制器 - 以base_link坐标系为基准的增量跟踪
+    单臂的Clutch控制器 - 基于原点偏移的VR遥操作
+    
+    原理:
+    - 按下grip时，记录VR原点位姿和机器人原点位姿
+    - 跟踪时，计算VR当前位姿相对于VR原点的偏移
+    - 将偏移（乘以缩放）加到机器人原点，得到机器人目标位姿
     
     输入: VR数据已经是ROS坐标系 (通过 vr_bridge_node 变换)
-    位置增量: 在 base_link(世界)坐标系下
-    旋转增量: 在末端(局部)坐标系下
     """
     
     def __init__(self, config: Optional[ClutchConfig] = None, name: str = ""):
@@ -66,17 +68,17 @@ class VRClutchController:
         self.name = name
         self.state = ClutchState.IDLE
         
-        # 上一帧VR位姿（ROS坐标系）
-        self.prev_vr_pos: Optional[np.ndarray] = None
-        self.prev_vr_ori: Optional[Rotation] = None
+        # Grip按下时的VR原点位姿（ROS坐标系）
+        self.vr_origin_pos: Optional[np.ndarray] = None
+        self.vr_origin_ori: Optional[Rotation] = None
         
-        # 当前机器人目标（在base_link坐标系下）
+        # Grip按下时的机器人原点位姿（base_link坐标系）
+        self.robot_origin_pos: Optional[np.ndarray] = None
+        self.robot_origin_ori: Optional[Rotation] = None
+        
+        # 当前机器人目标（用于平滑输出）
         self.robot_target_pos: Optional[np.ndarray] = None
         self.robot_target_ori: Optional[np.ndarray] = None
-        
-        # 累积缓冲区（用于死区判断）
-        self.accumulated_pos_delta: np.ndarray = np.zeros(3)
-        self.accumulated_rot_delta: np.ndarray = np.zeros(3)
 
     def update(
         self,
@@ -105,8 +107,7 @@ class VRClutchController:
         robot_current_ori = np.asarray(robot_current_ori, dtype=np.float64)
 
         # 输入数据已经是 ROS 坐标系 (由 vr_bridge_node 变换)
-        vr_pos_ros = vr_pos
-        vr_rot_ros = Rotation.from_quat(vr_ori)
+        vr_rot = Rotation.from_quat(vr_ori)
 
         clutch_pressed = grip_value > self.config.engage_threshold
         clutch_released = grip_value < self.config.release_threshold
@@ -115,7 +116,7 @@ class VRClutchController:
         if self.state == ClutchState.IDLE:
             if clutch_pressed:
                 self._engage_clutch(
-                    vr_pos_ros, vr_rot_ros,
+                    vr_pos, vr_rot,
                     robot_current_pos, robot_current_ori
                 )
                 self.state = ClutchState.ENGAGING
@@ -134,11 +135,8 @@ class VRClutchController:
                             self.robot_target_ori.copy(), self.state)
                 return None, None, self.state
 
-            # 在base_link坐标系下计算增量
-            self._accumulate_delta(vr_pos_ros, vr_rot_ros)
-
-            self.prev_vr_pos = vr_pos_ros.copy()
-            self.prev_vr_ori = vr_rot_ros
+            # 基于原点偏移计算目标位姿
+            self._compute_target_from_offset(vr_pos, vr_rot)
 
             return (self.robot_target_pos.copy(),
                     self.robot_target_ori.copy(), self.state)
@@ -146,7 +144,7 @@ class VRClutchController:
         elif self.state == ClutchState.RELEASING:
             if clutch_pressed:
                 self._engage_clutch(
-                    vr_pos_ros, vr_rot_ros,
+                    vr_pos, vr_rot,
                     robot_current_pos, robot_current_ori
                 )
                 self.state = ClutchState.TRACKING
@@ -164,94 +162,106 @@ class VRClutchController:
         robot_pos: np.ndarray,
         robot_ori: np.ndarray
     ):
-        """初始化Clutch跟踪"""
-        self.prev_vr_pos = vr_pos.copy()
-        self.prev_vr_ori = vr_rot
+        """
+        初始化Clutch跟踪 - 记录VR和机器人的原点位姿
+        
+        按下grip的瞬间:
+        - 记录VR原点位姿
+        - 记录机器人原点位姿
+        - 之后所有目标都基于这两个原点计算
+        """
+        # 记录VR原点
+        self.vr_origin_pos = vr_pos.copy()
+        self.vr_origin_ori = vr_rot
+        
+        # 记录机器人原点
+        self.robot_origin_pos = robot_pos.copy()
+        self.robot_origin_ori = Rotation.from_quat(robot_ori)
+        
+        # 初始化目标为当前机器人位置
         self.robot_target_pos = robot_pos.copy()
         self.robot_target_ori = robot_ori.copy()
-        self.accumulated_pos_delta = np.zeros(3)
-        self.accumulated_rot_delta = np.zeros(3)
         
-        # 调试：打印 engage 时的初始位置
-        print(f"[{self.name}] Clutch ENGAGE:")
-        print(f"  VR pos: [{vr_pos[0]:.3f}, {vr_pos[1]:.3f}, {vr_pos[2]:.3f}]")
-        print(f"  Robot pos (from FK): [{robot_pos[0]:.3f}, {robot_pos[1]:.3f}, {robot_pos[2]:.3f}]")
+        # 调试输出
+        print(f"[{self.name}] Clutch ENGAGE (origin-based):")
+        print(f"  VR origin: [{vr_pos[0]:.3f}, {vr_pos[1]:.3f}, {vr_pos[2]:.3f}]")
+        print(f"  Robot origin: [{robot_pos[0]:.3f}, {robot_pos[1]:.3f}, "
+              f"{robot_pos[2]:.3f}]")
 
-    def _accumulate_delta(
+    def _compute_target_from_offset(
         self,
         vr_pos: np.ndarray,
         vr_rot: Rotation
     ):
         """
-        计算VR帧间增量
-
-        位置增量：在 base_link 坐标系下（世界坐标）
-        - 用户向前推手 → 机器人向 X+ 移动，与末端姿态无关
-
-        姿态增量：相对于末端当前姿态（局部坐标）
-        - 用户旋转手腕 → 末端跟着旋转，符合操作直觉
+        基于原点偏移计算机器人目标位姿
+        
+        公式:
+        - 位置: robot_target = robot_origin + (vr_current - vr_origin) * scale
+        - 姿态: robot_target = robot_origin * (vr_origin.inv() * vr_current) * scale
+        
+        这样不会累积误差，VR回到原点位置时机器人也回到原点
         """
-        if self.prev_vr_pos is None:
-            return
-
         alpha = self.config.smoothing_factor
-
-        # === 位置增量（在 base_link 坐标系下）===
-        # 位置以世界坐标为基准，与末端姿态无关
-        delta_pos = vr_pos - self.prev_vr_pos
-        robot_delta_pos = delta_pos * self.config.position_scale * alpha
-
-        self.accumulated_pos_delta += robot_delta_pos
-
-        accum_norm = np.linalg.norm(self.accumulated_pos_delta)
-        if accum_norm >= self.config.position_deadzone:
-            if accum_norm > self.config.max_position_delta:
-                apply_delta = (self.accumulated_pos_delta / accum_norm
-                               * self.config.max_position_delta)
-                self.accumulated_pos_delta -= apply_delta
-            else:
-                apply_delta = self.accumulated_pos_delta
-                self.accumulated_pos_delta = np.zeros(3)
-
-            # 直接在 base_link 坐标系下相加
-            self.robot_target_pos += apply_delta
-
-        # === 姿态增量（相对于末端坐标系）===
-        # VR 手柄的旋转增量（已在 ROS 坐标系下）
-        delta_rot = vr_rot * self.prev_vr_ori.inv()
-        rotvec = delta_rot.as_rotvec()
-        rotvec *= self.config.rotation_scale * alpha
-
-        self.accumulated_rot_delta += rotvec
-
-        accum_angle = np.linalg.norm(self.accumulated_rot_delta)
-        if accum_angle >= self.config.rotation_deadzone:
-            if accum_angle > self.config.max_rotation_delta:
-                apply_rotvec = (self.accumulated_rot_delta / accum_angle
-                                * self.config.max_rotation_delta)
-                self.accumulated_rot_delta -= apply_rotvec
-            else:
-                apply_rotvec = self.accumulated_rot_delta
-                self.accumulated_rot_delta = np.zeros(3)
-
-            # *** 关键：在末端坐标系下应用旋转 ***
-            # target_new = target_old * delta_rot
-            # 这样旋转是相对于末端当前姿态的
-            apply_rot = Rotation.from_rotvec(apply_rotvec)
-            target_rot = Rotation.from_quat(self.robot_target_ori)
-            # 右乘：在末端局部坐标系下旋转
-            new_target_rot = target_rot * apply_rot
-            self.robot_target_ori = new_target_rot.as_quat()
+        
+        # === 位置：计算VR相对于原点的偏移 ===
+        vr_offset_pos = vr_pos - self.vr_origin_pos
+        
+        # 缩放后加到机器人原点
+        robot_offset_pos = vr_offset_pos * self.config.position_scale
+        raw_target_pos = self.robot_origin_pos + robot_offset_pos
+        
+        # 平滑：限制单帧变化量
+        if self.robot_target_pos is not None:
+            delta_pos = raw_target_pos - self.robot_target_pos
+            delta_norm = np.linalg.norm(delta_pos)
+            if delta_norm > self.config.max_position_delta:
+                delta_pos = delta_pos / delta_norm * self.config.max_position_delta
+            self.robot_target_pos = self.robot_target_pos + delta_pos * alpha
+        else:
+            self.robot_target_pos = raw_target_pos
+        
+        # === 姿态：计算VR相对于原点的旋转偏移 ===
+        # vr_offset_rot = vr_origin.inv() * vr_current
+        # 表示从VR原点姿态到当前姿态的旋转
+        vr_offset_rot = self.vr_origin_ori.inv() * vr_rot
+        
+        # 缩放旋转（将旋转向量缩放）
+        offset_rotvec = vr_offset_rot.as_rotvec() * self.config.rotation_scale
+        scaled_offset_rot = Rotation.from_rotvec(offset_rotvec)
+        
+        # 应用到机器人原点姿态（右乘：在末端局部坐标系下旋转）
+        raw_target_rot = self.robot_origin_ori * scaled_offset_rot
+        raw_target_ori = raw_target_rot.as_quat()
+        
+        # 平滑：限制单帧旋转变化
+        if self.robot_target_ori is not None:
+            current_rot = Rotation.from_quat(self.robot_target_ori)
+            delta_rot = current_rot.inv() * raw_target_rot
+            delta_angle = np.linalg.norm(delta_rot.as_rotvec())
+            
+            if delta_angle > self.config.max_rotation_delta:
+                limited_rotvec = (delta_rot.as_rotvec() / delta_angle 
+                                  * self.config.max_rotation_delta)
+                delta_rot = Rotation.from_rotvec(limited_rotvec)
+            
+            # 应用平滑后的增量
+            smoothed_rotvec = delta_rot.as_rotvec() * alpha
+            smoothed_rot = Rotation.from_rotvec(smoothed_rotvec)
+            new_rot = current_rot * smoothed_rot
+            self.robot_target_ori = new_rot.as_quat()
+        else:
+            self.robot_target_ori = raw_target_ori
 
     def reset(self):
         """重置控制器状态"""
         self.state = ClutchState.IDLE
-        self.prev_vr_pos = None
-        self.prev_vr_ori = None
+        self.vr_origin_pos = None
+        self.vr_origin_ori = None
+        self.robot_origin_pos = None
+        self.robot_origin_ori = None
         self.robot_target_pos = None
         self.robot_target_ori = None
-        self.accumulated_pos_delta = np.zeros(3)
-        self.accumulated_rot_delta = np.zeros(3)
 
     def is_engaged(self) -> bool:
         """检查clutch是否接合"""
