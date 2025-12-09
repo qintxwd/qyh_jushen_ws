@@ -36,6 +36,7 @@ struct ModbusAddress
   static constexpr int COIL_GO_STOP = 6;          // 绝对位置GO_STOP
   static constexpr int COIL_GO_POSITION = 10;     // 绝对位置GO
   static constexpr int COIL_POSITION_REACHED = 20; // 绝对位置到达 (PLC通知)
+  static constexpr int COIL_SHUTDOWN = 30;         // 关机信号 (双向：写1请求关机，读1表示硬件按钮请求关机)
 
   // 寄存器地址 (Holding Registers) - 基地址 1000
   static constexpr int REG_BASE = 1000;
@@ -81,6 +82,8 @@ private:
   bool manual_move(bool up, bool hold);
   bool reset_alarm();
   bool stop_move();
+  bool request_shutdown();      // 请求系统关机
+  void execute_system_shutdown(); // 执行系统关机命令
 
   // 服务回调
   void handle_control(
@@ -100,6 +103,8 @@ private:
   // 状态
   qyh_lift_msgs::msg::LiftState current_state_;
   bool is_enabled_;
+  bool shutdown_requested_;     // 是否收到关机请求（硬件按钮或软件命令）
+  bool shutdown_in_progress_;   // 关机是否正在进行中
 
   // ROS2 接口
   rclcpp::Publisher<qyh_lift_msgs::msg::LiftState>::SharedPtr state_pub_;
