@@ -234,6 +234,11 @@ private:
     {
         auto now = this->now();
         std::vector<geometry_msgs::msg::TransformStamped> transforms;
+        
+        // 调试输出计数
+        static int debug_count = 0;
+        debug_count++;
+        bool should_log = (debug_count % 5 == 0);  // 每50帧输出一次
 
         // === Head ===
         {
@@ -277,8 +282,21 @@ private:
             t.header.frame_id = "vr_origin";
             t.child_frame_id = "vr_left_hand";
             
-            map_position(packet.left_position[0], packet.left_position[1], packet.left_position[2],
+            // 原始VR数据 (PICO坐标系)
+            float vr_x = packet.left_position[0];
+            float vr_y = packet.left_position[1];
+            float vr_z = packet.left_position[2];
+            
+            map_position(vr_x, vr_y, vr_z,
                         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
+            
+            // 调试输出
+            if (should_log) {
+                RCLCPP_INFO(this->get_logger(), 
+                    "[LEFT] VR raw: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
+                    vr_x, vr_y, vr_z,
+                    t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
+            }
             
             tf2::Quaternion q = map_quaternion(
                 packet.left_orientation[0], packet.left_orientation[1],
@@ -329,8 +347,21 @@ private:
             t.header.frame_id = "vr_origin";
             t.child_frame_id = "vr_right_hand";
             
-            map_position(packet.right_position[0], packet.right_position[1], packet.right_position[2],
+            // 原始VR数据 (PICO坐标系)
+            float vr_x = packet.right_position[0];
+            float vr_y = packet.right_position[1];
+            float vr_z = packet.right_position[2];
+            
+            map_position(vr_x, vr_y, vr_z,
                         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
+            
+            // 调试输出
+            if (should_log) {
+                RCLCPP_INFO(this->get_logger(), 
+                    "[RIGHT] VR raw: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
+                    vr_x, vr_y, vr_z,
+                    t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
+            }
             
             tf2::Quaternion q = map_quaternion(
                 packet.right_orientation[0], packet.right_orientation[1],

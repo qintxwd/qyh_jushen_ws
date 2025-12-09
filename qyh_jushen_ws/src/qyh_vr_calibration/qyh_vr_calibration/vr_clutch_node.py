@@ -41,9 +41,11 @@ class VRClutchNode(Node):
         # 加载配置
         self.config = self._load_config()
         
-        # 创建左右手的Clutch控制器
-        self.left_controller = VRClutchController(self.config, name="left")
-        self.right_controller = VRClutchController(self.config, name="right")
+        # 创建左右手的Clutch控制器，传入logger
+        self.left_controller = VRClutchController(
+            self.config, name="left", logger=self.get_logger())
+        self.right_controller = VRClutchController(
+            self.config, name="right", logger=self.get_logger())
         
         # 机器人当前状态
         self.robot_state: RobotState = None
@@ -357,12 +359,27 @@ class VRClutchNode(Node):
             robot_pose.orientation.w
         ])
         
+        # ★★★ 调试：打印VR ROS位置 和 机械臂末端位置 ★★★
+        if grip_value > 0.5:
+            self.get_logger().info(
+                f'[{arm_name}] VR_ROS=[{vr_pos[0]:.3f},{vr_pos[1]:.3f},{vr_pos[2]:.3f}] '
+                f'EE=[{robot_pos[0]:.3f},{robot_pos[1]:.3f},{robot_pos[2]:.3f}]',
+                throttle_duration_sec=0.5)
+        
         # 更新Clutch控制器
         target_pos, target_ori, state = controller.update(
             vr_pos, vr_ori,
             robot_pos, robot_ori,
             grip_value
         )
+        
+        # ★★★ 调试输出：VR位置偏移 ★★★
+        if controller.is_engaged() and controller.vr_origin_pos is not None:
+            vr_offset = vr_pos - controller.vr_origin_pos
+            self.get_logger().info(
+                f'[{arm_name}] VR offset: '
+                f'x={vr_offset[0]:+.4f}, y={vr_offset[1]:+.4f}, z={vr_offset[2]:+.4f}',
+                throttle_duration_sec=0.5)
         
         # 发布Clutch状态
         clutch_msg = Bool()

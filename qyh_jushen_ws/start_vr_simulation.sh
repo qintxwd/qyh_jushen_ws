@@ -21,9 +21,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 获取脚本所在目录的父目录作为工作空间
+# 获取脚本所在目录作为工作空间
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WS_DIR="$(dirname "$SCRIPT_DIR")"
+WS_DIR="$SCRIPT_DIR"
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}   VR 遥操作仿真系统启动脚本${NC}"

@@ -65,10 +65,15 @@ class VRClutchController:
     输入: VR数据已经是ROS坐标系 (通过 vr_bridge_node 变换)
     """
     
-    def __init__(self, config: Optional[ClutchConfig] = None, name: str = ""):
+    def __init__(self, config: Optional[ClutchConfig] = None, name: str = "",
+                 logger=None):
         self.config = config or ClutchConfig()
         self.name = name
         self.state = ClutchState.IDLE
+        self.logger = logger  # ROS logger
+        
+        # 调试输出计数器
+        self._debug_count = 0
         
         # Grip按下时的VR原点位姿（ROS坐标系）
         self.vr_origin_pos: Optional[np.ndarray] = None
@@ -197,14 +202,12 @@ class VRClutchController:
         self.robot_target_ori = robot_ori.copy()
         
         # 调试输出
-        print(f"[{self.name}] Clutch ENGAGE (with alignment):")
-        print(f"  VR origin: pos=[{vr_pos[0]:.3f}, {vr_pos[1]:.3f}, "
-              f"{vr_pos[2]:.3f}]")
-        print(f"  Robot origin: pos=[{robot_pos[0]:.3f}, {robot_pos[1]:.3f}, "
-              f"{robot_pos[2]:.3f}]")
         calib_euler = self.calibration_rot.as_euler('xyz', degrees=True)
-        print(f"  Calibration (rpy): [{calib_euler[0]:.1f}, "
-              f"{calib_euler[1]:.1f}, {calib_euler[2]:.1f}]°")
+        if self.logger:
+            self.logger.info(
+                f'[{self.name}] ENGAGE: VR=[{vr_pos[0]:.3f},{vr_pos[1]:.3f},{vr_pos[2]:.3f}] '
+                f'Robot=[{robot_pos[0]:.3f},{robot_pos[1]:.3f},{robot_pos[2]:.3f}] '
+                f'Calib=[{calib_euler[0]:.1f},{calib_euler[1]:.1f},{calib_euler[2]:.1f}]°')
 
     def _compute_target_from_offset(
         self,
@@ -225,15 +228,41 @@ class VRClutchController:
         """
         alpha = self.config.smoothing_factor
         
+        # 调试输出降频
+        self._debug_count += 1
+        should_log = (self._debug_count % 5 == 0)  # 每25帧输出一次
+        
         # === 位置：计算VR相对于原点的偏移 ===
         vr_offset_pos = vr_pos - self.vr_origin_pos
         
-        # 通过校准旋转将VR偏移映射到机器人坐标系
-        # 这样人向前推手，机器人也向前移动（相对于机器人自己的"前"）
-        robot_offset_pos = self.calibration_rot.apply(vr_offset_pos)
+        # ★★★ 调试输出：VR偏移 (ROS坐标系) ★★★
+        if should_log and self.logger:
+            self.logger.info(
+                f'[{self.name}] VR_offset: x={vr_offset_pos[0]:+.4f} '
+                f'y={vr_offset_pos[1]:+.4f} z={vr_offset_pos[2]:+.4f}')
+        
+        # ★★★ 修复：位置偏移直接使用，不经过 calibration_rot 变换 ★★★
+        # VR 数据已经是 ROS 坐标系 (X前 Y左 Z上)
+        # base_link 也是 ROS 标准坐标系
+        # 所以 VR 的位置增量可以直接加到机器人位置上
+        # calibration_rot 只用于姿态变换，不用于位置变换
+        robot_offset_pos = vr_offset_pos.copy()
+        
+        # ★★★ 调试输出：机器人偏移 (不再经过校准旋转) ★★★
+        if should_log and self.logger:
+            self.logger.info(
+                f'[{self.name}] Robot_offset: x={robot_offset_pos[0]:+.4f} '
+                f'y={robot_offset_pos[1]:+.4f} z={robot_offset_pos[2]:+.4f}')
+        
         robot_offset_pos *= self.config.position_scale
         
         raw_target_pos = self.robot_origin_pos + robot_offset_pos
+        
+        # ★★★ 调试输出：原始目标位置 ★★★
+        if should_log and self.logger:
+            self.logger.info(
+                f'[{self.name}] Raw_target: x={raw_target_pos[0]:.3f} '
+                f'y={raw_target_pos[1]:.3f} z={raw_target_pos[2]:.3f}')
         
         # 平滑：限制单帧变化量
         if self.robot_target_pos is not None:
