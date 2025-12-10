@@ -152,32 +152,49 @@ class ArmMoveJNode(SkillNode):
         解析关节位置（从参数或预设资产）
         
         支持的参数形式:
-        1. joint_positions: 直接指定7个关节角度
+        1. joint_positions: 直接指定关节角度（7个或14个）
         2. pose_name: 预设姿态名称（从持久化存储读取）
         3. left_joints / right_joints: 分别指定左右臂
+        
+        返回:
+        - side='left' 或 'right': 返回 7 个关节
+        - side='both': 返回 14 个关节 [left_7, right_7]
         """
         side = self.params.get('side', 'left')
         
         # 直接指定关节位置
         if 'joint_positions' in self.params:
-            return list(self.params['joint_positions'])
+            positions = list(self.params['joint_positions'])
+            # 如果是 both 模式且只给了 7 个关节，需要报错
+            if side == 'both' and len(positions) == 7:
+                self.log_error("side='both' requires 14 joint positions, got 7")
+                return None
+            return positions
         
         # 从预设姿态读取
         if 'pose_name' in self.params:
             pose_name = self.params['pose_name']
             
-            # 优先从持久化预设加载
+            # 从持久化预设加载
             pose_preset = preset_loader.get_arm_pose(pose_name)
             if pose_preset:
-                if side == 'left' and pose_preset.get('left_joints'):
-                    return list(pose_preset['left_joints'])
-                elif side == 'right' and pose_preset.get('right_joints'):
-                    return list(pose_preset['right_joints'])
+                left_joints = pose_preset.get('left_joints')
+                right_joints = pose_preset.get('right_joints')
+                
+                if side == 'left':
+                    if left_joints:
+                        return list(left_joints)
+                    self.log_warn(f"Pose '{pose_name}' has no left_joints")
+                elif side == 'right':
+                    if right_joints:
+                        return list(right_joints)
+                    self.log_warn(f"Pose '{pose_name}' has no right_joints")
                 elif side == 'both':
-                    # both 模式下返回左臂的，右臂会单独处理
-                    if pose_preset.get('left_joints'):
-                        return list(pose_preset['left_joints'])
-                self.log_warn(f"Pose '{pose_name}' found but no joints for side '{side}'")
+                    # both 模式需要拼接 14 个关节
+                    if left_joints and right_joints:
+                        return list(left_joints) + list(right_joints)
+                    self.log_warn(f"Pose '{pose_name}' missing joints for both arms")
+                    return None
             
             # 从黑板读取预设姿态（兼容旧格式）
             poses = self.read_from_blackboard('assets.poses', {})
@@ -192,6 +209,13 @@ class ArmMoveJNode(SkillNode):
             return list(self.params['left_joints'])
         if side == 'right' and 'right_joints' in self.params:
             return list(self.params['right_joints'])
+        if side == 'both':
+            left = self.params.get('left_joints')
+            right = self.params.get('right_joints')
+            if left and right:
+                return list(left) + list(right)
+            self.log_error("side='both' requires both left_joints and right_joints")
+            return None
         
         self.log_error("Missing joint_positions or pose_name")
         return None
