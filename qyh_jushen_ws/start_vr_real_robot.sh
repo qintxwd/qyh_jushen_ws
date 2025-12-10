@@ -173,9 +173,9 @@ ros2 launch qyh_teleoperation_controller teleoperation_controller.launch.py &
 TELEOP_PID=$!
 sleep 2
 
-# 5. 启动 JAKA Bridge
-echo -e "${GREEN}[5/5] 启动 JAKA Bridge...${NC}"
-ros2 launch qyh_jaka_control jaka_bridge.launch.py robot_ip:=$ROBOT_IP &
+# 5. 启动 JAKA Bridge (使用 unified control node)
+echo -e "${GREEN}[5/5] 启动 JAKA Control Node...${NC}"
+ros2 launch qyh_jaka_control jaka_control.launch.py robot_ip:=$ROBOT_IP &
 JAKA_PID=$!
 sleep 3
 
@@ -189,7 +189,7 @@ echo -e "  - MoveIt:            PID ${MOVEIT_PID}"
 echo -e "  - VR Bridge:         PID ${VR_BRIDGE_PID}"
 echo -e "  - VR Clutch:         PID ${VR_CLUTCH_PID}"
 echo -e "  - Teleoperation:     PID ${TELEOP_PID}"
-echo -e "  - JAKA Bridge:       PID ${JAKA_PID}"
+echo -e "  - JAKA Control:      PID ${JAKA_PID}"
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${YELLOW}操作前请确认:${NC}"

@@ -132,16 +132,21 @@ class SkillNode(ABC):
         Returns:
             当前节点状态
         """
+        self.log_info(f"[DEBUG] SkillNode.tick() called, current status: {self.status}")
+        
         # 检查中断请求
         if self._halt_requested:
+            self.log_info(f"[DEBUG] Halt requested")
             self.status = SkillStatus.HALTED
             self._end_time = time.time()
             return self.status
         
         # 如果还没开始，先执行 setup
         if self.status == SkillStatus.IDLE:
+            self.log_info(f"[DEBUG] Status is IDLE, calling setup()...")
             self._start_time = time.time()
             if not self.setup():
+                self.log_info(f"[DEBUG] setup() returned False")
                 self.status = SkillStatus.FAILURE
                 self._result = SkillResult(
                     status=SkillStatus.FAILURE,
@@ -149,17 +154,23 @@ class SkillNode(ABC):
                 )
                 self._end_time = time.time()
                 return self.status
+            self.log_info(f"[DEBUG] setup() returned True, status -> RUNNING")
             self.status = SkillStatus.RUNNING
         
         # 如果正在运行，继续执行
         if self.status == SkillStatus.RUNNING:
+            self.log_info(f"[DEBUG] Status is RUNNING, calling execute()...")
             try:
                 result = self.execute()
+                self.log_info(f"[DEBUG] execute() returned: {result.status}")
                 self._result = result
                 self.status = result.status
                 if self.status != SkillStatus.RUNNING:
                     self._end_time = time.time()
             except Exception as e:
+                self.log_info(f"[DEBUG] execute() raised exception: {e}")
+                import traceback
+                self.log_info(f"[DEBUG] Traceback: {traceback.format_exc()}")
                 self.status = SkillStatus.FAILURE
                 self._result = SkillResult(
                     status=SkillStatus.FAILURE,
@@ -167,6 +178,7 @@ class SkillNode(ABC):
                 )
                 self._end_time = time.time()
         
+        self.log_info(f"[DEBUG] SkillNode.tick() returning: {self.status}")
         return self.status
     
     def halt(self):

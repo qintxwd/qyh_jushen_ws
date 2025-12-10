@@ -493,16 +493,27 @@ private:
         if (filter_type == "joint_lpf") jaka_interface_.setFilterJointLPF(cutoff);
         else if (filter_type == "none") jaka_interface_.setFilterNone();
         
-        if (jaka_interface_.servoMoveEnable(true)) {
+        // 显式启用双臂伺服 (0:左臂, 1:右臂)
+        bool success = true;
+        success &= jaka_interface_.servoMoveEnable(true, 0);
+        success &= jaka_interface_.servoMoveEnable(true, 1);
+        
+        if (success) {
             servo_running_ = true;
             return true;
         }
+        // 如果失败，尝试回滚
+        jaka_interface_.servoMoveEnable(false, 0);
+        jaka_interface_.servoMoveEnable(false, 1);
         return false;
     }
     
     bool stopServoInternal() {
         servo_running_ = false;
-        return jaka_interface_.servoMoveEnable(false);
+        bool success = true;
+        success &= jaka_interface_.servoMoveEnable(false, 0);
+        success &= jaka_interface_.servoMoveEnable(false, 1);
+        return success;
     }
     
     JointValue convertToJointValue(const std::vector<double>& joints) {

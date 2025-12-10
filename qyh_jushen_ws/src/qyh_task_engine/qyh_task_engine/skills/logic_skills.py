@@ -51,6 +51,11 @@ class WaitNode(SkillNode):
             status=SkillStatus.RUNNING,
             message=f"Waiting... {elapsed:.1f}/{duration}s"
         )
+    
+    def reset(self):
+        """重置节点状态，确保下次执行时重新计时"""
+        super().reset()
+        self._wait_start = None
 
 
 class CheckConditionNode(SkillNode):

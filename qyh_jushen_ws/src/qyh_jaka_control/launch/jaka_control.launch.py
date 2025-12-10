@@ -15,6 +15,11 @@ def generate_launch_description():
     return LaunchDescription([
         # 声明参数
         DeclareLaunchArgument(
+            'robot_ip',
+            default_value='192.168.2.200',
+            description='JAKA robot IP address'
+        ),
+        DeclareLaunchArgument(
             'config_file',
             default_value=config_file,
             description='Path to robot configuration YAML file'
@@ -49,11 +54,12 @@ def generate_launch_description():
             parameters=[
                 LaunchConfiguration('config_file'),
                 {
+                    'robot_ip': LaunchConfiguration('robot_ip'),
                     'auto_initialize': LaunchConfiguration('auto_initialize'),
                     'cycle_time_ms': LaunchConfiguration('cycle_time_ms'),
                     'buffer_size': LaunchConfiguration('buffer_size'),
-                    'interpolation_weight': LaunchConfiguration('interpolation_weight'),
+                    'interpolation_weight': LaunchConfiguration('interpolation_weight')
                 }
-            ],
-        ),
+            ]
+        )
     ])

@@ -339,12 +339,16 @@ class LoopNode(CompositeNode):
         self._current_iteration = 0
     
     def tick(self) -> SkillStatus:
+        print(f"DEBUG [LoopNode.tick] ENTER - node_id={self.node_id}, halt_requested={self._halt_requested}, status={self.status}")
+        
         if self._halt_requested:
+            print(f"DEBUG [LoopNode.tick] HALT requested, returning HALTED")
             self.status = SkillStatus.HALTED
             self._end_time = time.time()
             return self.status
         
         if self.status == SkillStatus.IDLE:
+            print(f"DEBUG [LoopNode.tick] Status is IDLE, initializing loop")
             self._start_time = time.time()
             self.status = SkillStatus.RUNNING
             self._current_iteration = 0
@@ -352,8 +356,11 @@ class LoopNode(CompositeNode):
             loop_desc = f"{self.count} times" if self.count > 0 else "infinite"
             self.log_info(f"Starting loop ({loop_desc})")
         
+        print(f"DEBUG [LoopNode.tick] iteration={self._current_iteration}, count={self.count}, child_index={self._current_child_index}, num_children={len(self.children)}")
+        
         # 检查是否完成所有循环（count=0 时永不完成）
         if self.count > 0 and self._current_iteration >= self.count:
+            print(f"DEBUG [LoopNode.tick] All iterations done, returning SUCCESS")
             self.status = SkillStatus.SUCCESS
             self._end_time = time.time()
             elapsed = self._end_time - self._start_time
@@ -363,29 +370,39 @@ class LoopNode(CompositeNode):
         # 执行当前子节点
         while self._current_child_index < len(self.children):
             child = self.children[self._current_child_index]
+            child_name = getattr(child, 'node_name', child.node_id)
+            print(f"DEBUG [LoopNode.tick] Ticking child[{self._current_child_index}]: {child_name}, child.status={child.status}")
+            
             child_status = child.tick()
             
+            print(f"DEBUG [LoopNode.tick] Child {child_name} returned: {child_status}")
+            
             if child_status == SkillStatus.RUNNING:
+                print(f"DEBUG [LoopNode.tick] Child RUNNING, returning RUNNING")
                 return SkillStatus.RUNNING
             
             if child_status == SkillStatus.FAILURE:
                 if self.break_on_failure:
+                    print(f"DEBUG [LoopNode.tick] Child FAILURE with break_on_failure=True, returning FAILURE")
                     self.status = SkillStatus.FAILURE
                     self._end_time = time.time()
-                    child_name = getattr(child, 'node_name', child.node_id)
                     self.log_info(f"Loop FAILED at iteration {self._current_iteration+1}: {child_name}")
                     return self.status
+                print(f"DEBUG [LoopNode.tick] Child FAILURE with break_on_failure=False, continuing")
                 # 不中断，继续下一个子节点
             
             if child_status == SkillStatus.HALTED:
+                print(f"DEBUG [LoopNode.tick] Child HALTED, returning HALTED")
                 self.status = SkillStatus.HALTED
                 self._end_time = time.time()
                 return self.status
             
             # 继续下一个子节点
+            print(f"DEBUG [LoopNode.tick] Child SUCCESS, moving to next child")
             self._current_child_index += 1
         
         # 一轮完成，重置并开始下一轮
+        print(f"DEBUG [LoopNode.tick] Iteration {self._current_iteration} complete, preparing next iteration")
         self._current_iteration += 1
         self._current_child_index = 0
         
@@ -393,11 +410,15 @@ class LoopNode(CompositeNode):
         self.log_info(f"Loop iteration {self._current_iteration}/{loop_desc} completed")
         
         # 重置所有子节点
-        for child in self.children:
+        print(f"DEBUG [LoopNode.tick] Resetting all children")
+        for i, child in enumerate(self.children):
+            child_name = getattr(child, 'node_name', child.node_id)
+            print(f"DEBUG [LoopNode.tick] Resetting child[{i}]: {child_name}")
             child.reset()
         
         # 检查是否还需要继续
         if self.count > 0 and self._current_iteration >= self.count:
+            print(f"DEBUG [LoopNode.tick] All iterations complete after increment, returning SUCCESS")
             self.status = SkillStatus.SUCCESS
             self._end_time = time.time()
             elapsed = self._end_time - self._start_time
@@ -405,6 +426,7 @@ class LoopNode(CompositeNode):
             return self.status
         
         # 继续循环
+        print(f"DEBUG [LoopNode.tick] More iterations needed, returning RUNNING")
         return SkillStatus.RUNNING
     
     def reset(self):

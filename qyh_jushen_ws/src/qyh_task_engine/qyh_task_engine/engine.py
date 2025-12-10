@@ -69,7 +69,9 @@ class BehaviorTreeEngine:
         self._paused = False
         self._cancel_requested = False
         self._exec_thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()
+        # 使用 RLock（可重入锁）避免同一线程内的死锁
+        # 因为 on_status_update 回调中会调用 get_status()，而 get_status() 也需要获取锁
+        self._lock = threading.RLock()
     
     def load_task(self, task_json: Union[str, dict]) -> tuple:
         """
@@ -199,12 +201,13 @@ class BehaviorTreeEngine:
             total = len(node_states)
             progress = completed / total if total > 0 else 0.0
             
-            # 当前节点
+            # 当前节点 - 找最深层（最后一个）running 的节点
+            # 这样会返回实际正在执行的叶子节点，而不是其父容器节点
             current_node_id = None
             for state in node_states:
                 if state['status'] == 'running':
                     current_node_id = state['node_id']
-                    break
+                    # 不 break，继续找更深层的 running 节点
             
             return {
                 'task_id': self._task_id,
@@ -230,9 +233,13 @@ class BehaviorTreeEngine:
         last_status_log_time = 0
         
         try:
+            self._log_info("[DEBUG] Entering main while loop")
             while self._running and not self._cancel_requested:
+                self._log_info(f"[DEBUG] Loop iteration, running={self._running}, cancel={self._cancel_requested}")
+                
                 # 暂停检查
                 if self._paused:
+                    self._log_info("[DEBUG] Task is paused, sleeping...")
                     time.sleep(0.1)
                     continue
                 
@@ -240,16 +247,21 @@ class BehaviorTreeEngine:
                 tick_start = time.time()
                 tick_count += 1
                 
+                self._log_info(f"[DEBUG] ===== TICK #{tick_count} START =====")
+                self._log_info(f"[DEBUG] Acquiring lock...")
+                
                 with self._lock:
+                    self._log_info(f"[DEBUG] Lock acquired")
                     if self._root_node:
+                        self._log_info(f"[DEBUG] Calling root_node.tick()...")
                         status = self._root_node.tick()
+                        self._log_info(f"[DEBUG] root_node.tick() returned: {status}")
                         
-                        # 每秒打印一次状态摘要
+                        # 每次都打印状态
                         current_time = time.time()
-                        if current_time - last_status_log_time >= 1.0:
-                            elapsed = current_time - self._start_time if self._start_time else 0
-                            self._log_info(f"[Tick #{tick_count}] Status: {status.value} | Elapsed: {elapsed:.1f}s")
-                            last_status_log_time = current_time
+                        elapsed = current_time - self._start_time if self._start_time else 0
+                        self._log_info(f"[Tick #{tick_count}] Status: {status.value} | Elapsed: {elapsed:.1f}s")
+                        last_status_log_time = current_time
                         
                         # 发送状态更新
                         if self.on_status_update:
@@ -286,14 +298,21 @@ class BehaviorTreeEngine:
                             self._log_info("="*50)
                             break
                 
+                self._log_info(f"[DEBUG] Lock released")
+                
                 # 控制 Tick 频率
                 tick_duration = time.time() - tick_start
                 sleep_time = self.tick_period - tick_duration
+                self._log_info(f"[DEBUG] Tick duration: {tick_duration*1000:.1f}ms, sleeping: {sleep_time*1000:.1f}ms")
                 if sleep_time > 0:
                     time.sleep(sleep_time)
+                
+                self._log_info(f"[DEBUG] ===== TICK #{tick_count} END =====")
         
         except Exception as e:
+            import traceback
             self._log_error(f"Execution error: {e}")
+            self._log_error(f"Traceback: {traceback.format_exc()}")
             with self._lock:
                 self._task_state = TaskState.FAILURE
                 self._running = False

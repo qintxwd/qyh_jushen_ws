@@ -85,7 +85,7 @@ class TaskEngineNode(Node):
         
         # 状态发布器
         self.status_pub = self.create_publisher(
-            TaskStatus, '/task_engine/task_status', 10
+            TaskStatus, '/task_engine/status', 10
         )
         
         self.node_status_pub = self.create_publisher(
