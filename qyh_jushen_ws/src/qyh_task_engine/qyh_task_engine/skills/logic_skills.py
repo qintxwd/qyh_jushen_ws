@@ -322,7 +322,11 @@ class SubTaskNode(SkillNode):
     def _tick_tree(self, node) -> SkillResult:
         """递归执行节点树"""
         if hasattr(node, 'tick'):
-            return node.tick()
+            status = node.tick()
+            # tick() 返回 SkillStatus，需要转换成 SkillResult
+            if isinstance(status, SkillStatus):
+                return SkillResult(status=status, message=str(status))
+            return status
         elif hasattr(node, 'execute'):
             return node.execute()
         return SkillResult(status=SkillStatus.FAILURE, message="Invalid node")

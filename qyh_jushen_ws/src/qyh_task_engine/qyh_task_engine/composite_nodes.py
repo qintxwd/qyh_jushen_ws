@@ -240,7 +240,10 @@ class ParallelNode(CompositeNode):
             return self.status
         
         # 检查成功阈值
-        threshold = self.success_threshold or len(self.children)
+        # success_threshold: None 或 -1 或 0 表示需要全部子节点成功
+        threshold = self.success_threshold
+        if threshold is None or threshold <= 0:
+            threshold = len(self.children)
         if success_count >= threshold:
             self.status = SkillStatus.SUCCESS
             self._end_time = time.time()

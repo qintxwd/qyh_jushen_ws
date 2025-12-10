@@ -16,18 +16,26 @@
         "type": "BaseMoveTo",
         "params": {
           "theta": 0,
-          "timeout": 60,
+          "timeout": 120,
           "location": "station_9"
         },
         "children": []
       },
       {
-        "id": "node_1764847032577_4",
+        "id": "node_1765355569888_3",
+        "type": "Wait",
+        "params": {
+          "duration": 5
+        },
+        "children": []
+      },
+      {
+        "id": "node_1765355612946_4",
         "type": "BaseMoveTo",
         "params": {
           "theta": 0,
-          "timeout": 60,
-          "location": "station_10"
+          "timeout": 120,
+          "location": "station_1"
         },
         "children": []
       },
@@ -42,5 +50,5 @@
     ]
   },
   "created_at": "2025-12-04T19:18:10.313460",
-  "updated_at": "2025-12-10T15:00:21.298752"
+  "updated_at": "2025-12-10T16:39:19.563363"
 }
