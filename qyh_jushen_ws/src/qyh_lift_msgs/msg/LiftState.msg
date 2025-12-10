@@ -12,3 +12,6 @@ bool position_reached     # 是否到达目标位置
 
 # === 通信状态 ===
 bool connected            # Modbus通信是否正常
+
+# === 系统关机状态 ===
+bool shutdown_requested   # 是否收到关机请求（硬件按钮或软件命令）
