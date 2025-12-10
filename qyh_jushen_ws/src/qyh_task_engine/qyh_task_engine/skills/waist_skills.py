@@ -54,12 +54,21 @@ class WaistMoveToNode(SkillNode):
         'timeout': {'type': 'float', 'default': 30.0},
     }
     
+    # 角度到达容差 (度)
+    ANGLE_TOLERANCE = 1.0
+    
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
         self._waist_client = None
-        self._future = None
+        self._status_sub = None
         self._is_moving = False
+        self._command_sent = False
         self._start_time: Optional[float] = None
+        self._target_angle: Optional[float] = None
+        # 腰部状态
+        self._current_angle = 0.0
+        self._position_reached = False
+        self._status_received = False
     
     def setup(self) -> bool:
         """初始化腰部控制客户端"""
@@ -73,15 +82,34 @@ class WaistMoveToNode(SkillNode):
         
         try:
             from qyh_waist_msgs.srv import WaistControl
+            from qyh_waist_msgs.msg import WaistState
+            
             self._waist_client = self.ros_node.create_client(
                 WaistControl, '/waist/control'
             )
             self.log_info("  Waist client created")
+            
+            # 订阅腰部状态
+            self._status_sub = self.ros_node.create_subscription(
+                WaistState,
+                '/waist/state',
+                self._status_callback,
+                10
+            )
+            self.log_info("  Subscribed to /waist/state")
             self.log_info("="*40)
             return True
         except Exception as e:
             self.log_warn(f"  Failed to create waist client: {e}")
             return True
+    
+    def _status_callback(self, msg):
+        """腰部状态回调"""
+        self._current_angle = msg.current_angle
+        self._position_reached = msg.position_reached
+        # 只有在命令发送后才标记状态已接收
+        if self._command_sent:
+            self._status_received = True
     
     def execute(self) -> SkillResult:
         """执行腰部移动"""
@@ -120,7 +148,7 @@ class WaistMoveToNode(SkillNode):
             )
         
         # 真实执行
-        if not self._is_moving:
+        if not self._command_sent:
             if not self._waist_client.wait_for_service(timeout_sec=2.0):
                 self.log_error("Waist service not available")
                 return SkillResult(
@@ -145,46 +173,57 @@ class WaistMoveToNode(SkillNode):
             request.hold = False
             
             self.log_info(f"   Sending waist cmd: {target_angle:.1f} deg, speed={speed}")
-            self._future = self._waist_client.call_async(request)
+            # Fire-and-forget，不等待响应
+            self._waist_client.call_async(request)
+            
+            self._command_sent = True
             self._is_moving = True
             self._start_time = time.time()
+            self._target_angle = target_angle
             
             return SkillResult(
                 status=SkillStatus.RUNNING,
-                message="Waist moving..."
+                message=f"Waist moving to {target_angle:.1f}°..."
             )
         
         # 检查超时
         elapsed = time.time() - self._start_time
         if elapsed > timeout:
+            self.log_error(f"Waist timeout ({timeout}s), current: {self._current_angle:.1f}°")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Waist timeout ({timeout}s)"
             )
         
-        # 检查是否完成
-        if self._future and self._future.done():
-            try:
-                response = self._future.result()
-                if response.success:
-                    return SkillResult(
-                        status=SkillStatus.SUCCESS,
-                        message=f"Waist at {target_angle:.1f}°"
-                    )
-                else:
-                    return SkillResult(
-                        status=SkillStatus.FAILURE,
-                        message=response.message
-                    )
-            except Exception as e:
-                return SkillResult(
-                    status=SkillStatus.FAILURE,
-                    message=f"Waist failed: {e}"
-                )
+        # 发送命令后等待至少 0.5 秒再检查状态
+        MIN_WAIT_TIME = 0.5
+        if elapsed < MIN_WAIT_TIME:
+            return SkillResult(
+                status=SkillStatus.RUNNING,
+                message=f"Waist command sent, waiting... {elapsed:.1f}s"
+            )
+        
+        # 检查是否到位（只通过角度差判断，position_reached 标志不可靠）
+        angle_diff = abs(self._current_angle - target_angle)
+        
+        if angle_diff < self.ANGLE_TOLERANCE:
+            self.log_info(f"[Waist] ✓ Reached {target_angle:.1f}° (current: {self._current_angle:.1f}°, diff: {angle_diff:.1f}°, {elapsed:.1f}s)")
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message=f"Waist at {target_angle:.1f}°"
+            )
+        
+        # 每 2 秒打印进度
+        if int(elapsed) % 2 == 0 and int(elapsed) > 0:
+            if not hasattr(self, '_last_progress_log'):
+                self._last_progress_log = -1
+            if self._last_progress_log != int(elapsed):
+                self._last_progress_log = int(elapsed)
+                self.log_info(f"   Waist moving... {self._current_angle:.1f}° -> {target_angle:.1f}° ({elapsed:.0f}s)")
         
         return SkillResult(
             status=SkillStatus.RUNNING,
-            message=f"Waist moving... {elapsed:.1f}s"
+            message=f"Moving to {target_angle:.1f}°... (current: {self._current_angle:.1f}°)"
         )
     
     def _resolve_angle(self) -> Optional[float]:
@@ -227,6 +266,18 @@ class WaistMoveToNode(SkillNode):
         super().halt()
         # TODO: 发送停止命令
         self.log_info("Waist halted")
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._is_moving = False
+        self._command_sent = False
+        self._start_time = None
+        self._target_angle = None
+        self._position_reached = False
+        self._status_received = False
+        if hasattr(self, '_last_progress_log'):
+            delattr(self, '_last_progress_log')
 
 
 class WaistStopNode(SkillNode):
@@ -293,12 +344,20 @@ class WaistUprightNode(SkillNode):
         'timeout': {'type': 'float', 'default': 30.0},
     }
     
+    # 角度到达容差 (度) - 竖直位置是 0 度
+    ANGLE_TOLERANCE = 1.0
+    
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
         self._waist_client = None
-        self._future = None
+        self._status_sub = None
         self._is_moving = False
+        self._command_sent = False
         self._start_time: Optional[float] = None
+        # 腰部状态
+        self._current_angle = 0.0
+        self._position_reached = False
+        self._status_received = False
     
     def setup(self) -> bool:
         if not self.ros_node:
@@ -307,23 +366,40 @@ class WaistUprightNode(SkillNode):
         
         try:
             from qyh_waist_msgs.srv import WaistControl
+            from qyh_waist_msgs.msg import WaistState
+            
             self._waist_client = self.ros_node.create_client(
                 WaistControl, '/waist/control'
+            )
+            
+            # 订阅腰部状态
+            self._status_sub = self.ros_node.create_subscription(
+                WaistState,
+                '/waist/state',
+                self._status_callback,
+                10
             )
             return True
         except Exception as e:
             self.log_warn(f"Failed to create waist client: {e}")
             return True
     
+    def _status_callback(self, msg):
+        """腰部状态回调"""
+        self._current_angle = msg.current_angle
+        self._position_reached = msg.position_reached
+        # 只有在命令发送后才标记状态已接收
+        if self._command_sent:
+            self._status_received = True
+    
     def execute(self) -> SkillResult:
         timeout = self.params.get('timeout', 30.0)
-        
-        self.log_info("Moving waist to upright position")
         
         # Mock 模式
         if not self._waist_client:
             if self._start_time is None:
                 self._start_time = time.time()
+                self.log_info("Moving waist to upright position (mock)")
             
             elapsed = time.time() - self._start_time
             if elapsed > 1.0:
@@ -337,13 +413,15 @@ class WaistUprightNode(SkillNode):
                 message=f"Moving... {elapsed:.1f}s"
             )
         
-        # 真实执行
-        if not self._is_moving:
+        # 真实执行 - 发送命令
+        if not self._command_sent:
             if not self._waist_client.wait_for_service(timeout_sec=2.0):
                 return SkillResult(
                     status=SkillStatus.FAILURE,
                     message="Waist service not available"
                 )
+            
+            self.log_info("[Waist] Moving to upright position (0°)")
             
             from qyh_waist_msgs.srv import WaistControl
             request = WaistControl.Request()
@@ -351,7 +429,9 @@ class WaistUprightNode(SkillNode):
             request.value = 0.0
             request.hold = False
             
-            self._future = self._waist_client.call_async(request)
+            # Fire-and-forget
+            self._waist_client.call_async(request)
+            self._command_sent = True
             self._is_moving = True
             self._start_time = time.time()
             
@@ -363,36 +443,52 @@ class WaistUprightNode(SkillNode):
         # 检查超时
         elapsed = time.time() - self._start_time
         if elapsed > timeout:
+            self.log_error(f"Waist timeout ({timeout}s), current: {self._current_angle:.1f}°")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Waist timeout ({timeout}s)"
             )
         
-        # 检查是否完成
-        if self._future and self._future.done():
-            try:
-                response = self._future.result()
-                if response.success:
-                    return SkillResult(
-                        status=SkillStatus.SUCCESS,
-                        message="Waist upright"
-                    )
-                else:
-                    return SkillResult(
-                        status=SkillStatus.FAILURE,
-                        message=response.message
-                    )
-            except Exception as e:
-                return SkillResult(
-                    status=SkillStatus.FAILURE,
-                    message=f"Waist failed: {e}"
-                )
+        # 发送命令后等待至少 0.5 秒再检查状态
+        MIN_WAIT_TIME = 0.5
+        if elapsed < MIN_WAIT_TIME:
+            return SkillResult(
+                status=SkillStatus.RUNNING,
+                message=f"Waist command sent, waiting... {elapsed:.1f}s"
+            )
+        
+        # 检查是否到位（竖直位置是 0 度，只通过角度差判断）
+        if abs(self._current_angle) < self.ANGLE_TOLERANCE:
+            self.log_info(f"[Waist] ✓ Upright reached (current: {self._current_angle:.1f}°, {elapsed:.1f}s)")
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message="Waist upright"
+            )
+        
+        # 每 2 秒打印进度
+        if int(elapsed) % 2 == 0 and int(elapsed) > 0:
+            if not hasattr(self, '_last_progress_log'):
+                self._last_progress_log = -1
+            if self._last_progress_log != int(elapsed):
+                self._last_progress_log = int(elapsed)
+                self.log_info(f"   Waist moving to upright... {self._current_angle:.1f}° -> 0° ({elapsed:.0f}s)")
         
         return SkillResult(
             status=SkillStatus.RUNNING,
-            message=f"Waist moving... {elapsed:.1f}s"
+            message=f"Moving to upright... (current: {self._current_angle:.1f}°)"
         )
     
     def halt(self):
         super().halt()
         self.log_info("Waist upright halted")
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._is_moving = False
+        self._command_sent = False
+        self._start_time = None
+        self._position_reached = False
+        self._status_received = False
+        if hasattr(self, '_last_progress_log'):
+            delattr(self, '_last_progress_log')

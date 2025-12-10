@@ -9,6 +9,10 @@ from ..base_node import SkillNode, SkillStatus, SkillResult
 from ..preset_loader import preset_loader
 
 
+# 位置到达的容差 (mm)
+POSITION_TOLERANCE = 5.0
+
+
 class LiftMoveToNode(SkillNode):
     """
     升降电机移动节点
@@ -32,9 +36,15 @@ class LiftMoveToNode(SkillNode):
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
         self._lift_client = None
-        self._future = None
+        self._status_sub = None
         self._is_moving = False
+        self._command_sent = False
         self._start_time: Optional[float] = None
+        self._target_height: Optional[float] = None
+        # 升降机状态
+        self._current_position = 0.0
+        self._position_reached = False
+        self._status_received = False  # 是否收到过状态更新
     
     def setup(self) -> bool:
         """初始化升降控制客户端"""
@@ -48,15 +58,34 @@ class LiftMoveToNode(SkillNode):
         
         try:
             from qyh_lift_msgs.srv import LiftControl
+            from qyh_lift_msgs.msg import LiftState
+            
             self._lift_client = self.ros_node.create_client(
                 LiftControl, '/lift/control'
             )
             self.log_info("  Lift client created")
+            
+            # 订阅升降机状态
+            self._status_sub = self.ros_node.create_subscription(
+                LiftState,
+                '/lift/state',
+                self._status_callback,
+                10
+            )
+            self.log_info("  Subscribed to /lift/state")
             self.log_info("="*40)
             return True
         except Exception as e:
             self.log_warn(f"  Failed to create lift client: {e}")
             return True
+    
+    def _status_callback(self, msg):
+        """升降机状态回调"""
+        self._current_position = msg.current_position
+        self._position_reached = msg.position_reached
+        # 只有在命令发送后才标记状态已接收
+        if self._command_sent:
+            self._status_received = True
     
     def execute(self) -> SkillResult:
         """执行升降移动"""
@@ -71,16 +100,17 @@ class LiftMoveToNode(SkillNode):
                 message="Invalid height: missing height or height_name"
             )
         
-        self.log_info(f"[Lift] Moving to {target_height}mm")
+        self._target_height = target_height
         
         # Mock 模式
         if not self._lift_client:
             if self._start_time is None:
                 self._start_time = time.time()
+                self.log_info(f"[Lift] Moving to {target_height}mm (mock)")
             
             elapsed = time.time() - self._start_time
-            if elapsed > 1.0:
-                self.log_info(f"[Lift] At {target_height}mm (mock)")
+            if elapsed > 2.0:  # Mock 模式等待 2 秒
+                self.log_info(f"[Lift] At {target_height}mm (mock, {elapsed:.1f}s)")
                 return SkillResult(
                     status=SkillStatus.SUCCESS,
                     message=f"Lift at {target_height}mm (mock mode)"
@@ -91,8 +121,10 @@ class LiftMoveToNode(SkillNode):
                 message=f"Moving... {elapsed:.1f}s"
             )
         
-        # 真实执行
-        if not self._is_moving:
+        # 真实执行 - 发送命令
+        if not self._command_sent:
+            self.log_info(f"[Lift] Moving to {target_height}mm")
+            
             if not self._lift_client.wait_for_service(timeout_sec=2.0):
                 self.log_error("Lift service not available")
                 return SkillResult(
@@ -102,55 +134,62 @@ class LiftMoveToNode(SkillNode):
             
             from qyh_lift_msgs.srv import LiftControl
             request = LiftControl.Request()
-            request.command = 2  # 位置模式
+            request.command = 4  # CMD_GO_POSITION: 去目标位置
             request.value = float(target_height)
-            request.hold = True
+            request.hold = False
             
             self.log_info(f"   Sending lift command: {target_height}mm")
-            self._future = self._lift_client.call_async(request)
+            # Fire-and-forget，不等待响应
+            self._lift_client.call_async(request)
+            
+            self._command_sent = True
             self._is_moving = True
             self._start_time = time.time()
             
             return SkillResult(
                 status=SkillStatus.RUNNING,
-                message="Lift moving..."
+                message=f"Lift moving to {target_height}mm..."
             )
         
         # 检查超时
         elapsed = time.time() - self._start_time
         if elapsed > timeout:
-            self.log_error(f"Lift timeout ({timeout}s)")
+            self.log_error(f"Lift timeout ({timeout}s), current: {self._current_position}mm")
             return SkillResult(
                 status=SkillStatus.FAILURE,
                 message=f"Lift timeout ({timeout}s)"
             )
         
-        # 检查是否完成
-        if self._future and self._future.done():
-            try:
-                response = self._future.result()
-                if response.success:
-                    self.log_info(f"[Lift] At {target_height}mm ({elapsed:.1f}s)")
-                    return SkillResult(
-                        status=SkillStatus.SUCCESS,
-                        message=f"Lift at {target_height}mm"
-                    )
-                else:
-                    self.log_error(f"[Lift] Failed: {response.message}")
-                    return SkillResult(
-                        status=SkillStatus.FAILURE,
-                        message=response.message
-                    )
-            except Exception as e:
-                self.log_error(f"[Lift] Exception: {e}")
-                return SkillResult(
-                    status=SkillStatus.FAILURE,
-                    message=f"Lift failed: {e}"
-                )
+        # 发送命令后等待至少 0.5 秒再检查状态
+        # 这样即使本来就在目标位置，也有最小执行时间
+        MIN_WAIT_TIME = 0.5
+        if elapsed < MIN_WAIT_TIME:
+            return SkillResult(
+                status=SkillStatus.RUNNING,
+                message=f"Lift command sent, waiting... {elapsed:.1f}s"
+            )
+        
+        # 检查是否到位（只通过位置差判断，position_reached 标志不可靠）
+        position_diff = abs(self._current_position - target_height)
+        
+        if position_diff < POSITION_TOLERANCE:
+            self.log_info(f"[Lift] ✓ Reached {target_height}mm (current: {self._current_position:.1f}mm, diff: {position_diff:.1f}mm, {elapsed:.1f}s)")
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message=f"Lift at {target_height}mm"
+            )
+        
+        # 每 2 秒打印进度
+        if int(elapsed) % 2 == 0 and int(elapsed) > 0:
+            if not hasattr(self, '_last_progress_log'):
+                self._last_progress_log = -1
+            if self._last_progress_log != int(elapsed):
+                self._last_progress_log = int(elapsed)
+                self.log_info(f"   Lift moving... {self._current_position:.1f}mm -> {target_height}mm ({elapsed:.0f}s)")
         
         return SkillResult(
             status=SkillStatus.RUNNING,
-            message=f"Lift moving... {elapsed:.1f}s"
+            message=f"Moving to {target_height}mm... (current: {self._current_position:.1f}mm)"
         )
     
     def _resolve_height(self) -> Optional[float]:
@@ -178,6 +217,18 @@ class LiftMoveToNode(SkillNode):
         super().halt()
         # TODO: 发送停止命令
         self.log_info("Lift halted")
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._is_moving = False
+        self._command_sent = False
+        self._start_time = None
+        self._target_height = None
+        self._position_reached = False
+        self._status_received = False  # 重置状态接收标志
+        if hasattr(self, '_last_progress_log'):
+            delattr(self, '_last_progress_log')
 
 
 class LiftStopNode(SkillNode):
@@ -214,7 +265,7 @@ class LiftStopNode(SkillNode):
                 )
             
             request = LiftControl.Request()
-            request.command = 0  # 停止
+            request.command = 8  # CMD_STOP: 停止运动
             request.value = 0.0
             request.hold = False
             

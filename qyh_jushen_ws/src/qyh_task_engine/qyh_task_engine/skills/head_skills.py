@@ -146,6 +146,12 @@ class HeadLookAtNode(SkillNode):
             )
         
         return None
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._command_sent = False
+        self._wait_start = None
 
 
 class HeadScanNode(SkillNode):
@@ -242,6 +248,13 @@ class HeadScanNode(SkillNode):
             status=SkillStatus.RUNNING,
             message=f"Scanning... step {self._scan_step + 1}/{len(steps)}, repeat {self._current_repeat + 1}/{repeat}"
         )
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._scan_step = 0
+        self._current_repeat = 0
+        self._step_start_time = None
     
     def _publish_head_position(self, pitch: float, yaw: float):
         """发布头部位置"""

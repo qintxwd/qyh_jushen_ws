@@ -1,0 +1,45 @@
+{
+  "id": "1a80afe8",
+  "name": "循环腰部",
+  "description": "",
+  "category": "default",
+  "root": {
+    "id": "node_1765353322220_1",
+    "type": "Loop",
+    "params": {
+      "count": 0,
+      "break_on_failure": true
+    },
+    "children": [
+      {
+        "id": "node_1765353335219_3",
+        "type": "WaistMoveTo",
+        "params": {
+          "speed": 3000,
+          "timeout": 30,
+          "angle": 25
+        },
+        "children": []
+      },
+      {
+        "id": "node_1765353337280_4",
+        "type": "WaistUpright",
+        "params": {
+          "speed": 3000,
+          "timeout": 30
+        },
+        "children": []
+      },
+      {
+        "id": "node_1765353330687_2",
+        "type": "Wait",
+        "params": {
+          "duration": 5
+        },
+        "children": []
+      }
+    ]
+  },
+  "created_at": "2025-12-10T15:56:42.621700",
+  "updated_at": "2025-12-10T15:58:11.691423"
+}

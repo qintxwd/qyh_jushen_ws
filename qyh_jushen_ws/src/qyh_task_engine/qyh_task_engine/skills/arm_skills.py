@@ -209,6 +209,12 @@ class ArmMoveJNode(SkillNode):
         """中断执行"""
         super().halt()
         # TODO: 发送急停命令
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._future = None
+        self._is_executing = False
 
 
 class ArmMoveLNode(SkillNode):
@@ -326,6 +332,12 @@ class ArmMoveLNode(SkillNode):
                 return SkillResult(status=SkillStatus.FAILURE, message=f"MoveL failed: {e}")
         
         return SkillResult(status=SkillStatus.RUNNING, message="Executing MoveL...")
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._future = None
+        self._is_executing = False
 
 
 class ArmStopNode(SkillNode):

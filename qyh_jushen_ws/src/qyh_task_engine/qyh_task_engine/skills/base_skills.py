@@ -402,3 +402,8 @@ class BaseVelocityNode(SkillNode):
         super().halt()
         self._publish_velocity(0.0, 0.0)
         self.log_info("Base stopped")
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._start_time = None

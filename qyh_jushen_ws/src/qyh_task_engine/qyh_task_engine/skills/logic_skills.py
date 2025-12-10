@@ -359,3 +359,10 @@ class SubTaskNode(SkillNode):
         if self._sub_tree and hasattr(self._sub_tree, 'halt'):
             self._sub_tree.halt()
         self.log_info("Sub-task halted")
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._sub_tree = None
+        self._sub_engine = None
+        self._is_started = False

@@ -20,6 +20,7 @@ class GripperControlNode(SkillNode):
         position_name: 预设位置名称（可选）
         force: 夹持力（可选），默认使用系统默认值
         wait_complete: 是否等待完成，默认 True
+        timeout: 超时时间 (秒)，默认 10
     """
     
     NODE_TYPE = "GripperControl"
@@ -31,13 +32,19 @@ class GripperControlNode(SkillNode):
         'position_name': {'type': 'string', 'required': False},
         'force': {'type': 'float', 'required': False},
         'wait_complete': {'type': 'bool', 'default': True},
+        'timeout': {'type': 'float', 'default': 10.0},
     }
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
         self._gripper_client = None
-        self._future = None
-        self._is_executing = False
+        self._status_sub = None
+        self._command_sent = False
+        self._start_time: Optional[float] = None
+        # 夹爪状态
+        self._is_moving = False
+        self._object_status = 0  # 0:moving, 1:inner, 2:outer(gripped), 3:arrived
+        self._status_received = False
     
     def setup(self) -> bool:
         """初始化夹爪服务客户端"""
@@ -50,23 +57,45 @@ class GripperControlNode(SkillNode):
             return True
         
         try:
-            from qyh_gripper_msgs.srv import GripperCommand
+            from qyh_gripper_msgs.srv import MoveGripper
+            from qyh_gripper_msgs.msg import GripperState
+            
             side = self.params.get('side', 'left')
-            service_name = f'/gripper/{side}/command'
+            service_name = f'/gripper/{side}/move'
             self._gripper_client = self.ros_node.create_client(
-                GripperCommand, service_name
+                MoveGripper, service_name
             )
             self.log_info(f"  Gripper client created: {service_name}")
+            
+            # 订阅夹爪状态
+            state_topic = f'/gripper/{side}/state'
+            self._status_sub = self.ros_node.create_subscription(
+                GripperState,
+                state_topic,
+                self._status_callback,
+                10
+            )
+            self.log_info(f"  Subscribed to {state_topic}")
             self.log_info("="*40)
             return True
         except Exception as e:
             self.log_error(f"  Failed to create gripper client: {e}")
             return False
     
+    def _status_callback(self, msg):
+        """夹爪状态回调"""
+        self._is_moving = msg.is_moving
+        self._object_status = msg.object_status
+        # 只有在命令发送后才标记状态已接收
+        if self._command_sent:
+            self._status_received = True
+    
     def execute(self) -> SkillResult:
         """执行夹爪控制"""
         side = self.params.get('side', 'left')
-        force = self.params.get('force')
+        force = self.params.get('force', 100)  # 默认力度
+        wait_complete = self.params.get('wait_complete', True)
+        timeout = self.params.get('timeout', 10.0)
         
         # 解析动作/位置
         action, position = self._resolve_action()
@@ -77,20 +106,27 @@ class GripperControlNode(SkillNode):
                 message="Missing action or position"
             )
         
-        self.log_info(f"[Gripper] {side}: action={action}, pos={position}")
-        
         # Mock 模式
         if not self._gripper_client:
-            time.sleep(0.3)
-            self.log_info(f"[Gripper] {action} completed (mock)")
+            if self._start_time is None:
+                self._start_time = time.time()
+                self.log_info(f"[Gripper] {side}: action={action}, pos={position} (mock)")
+            
+            elapsed = time.time() - self._start_time
+            if elapsed > 0.5:
+                self.log_info(f"[Gripper] {action} completed (mock)")
+                return SkillResult(
+                    status=SkillStatus.SUCCESS,
+                    message=f"Gripper {action} completed (mock mode)"
+                )
             return SkillResult(
-                status=SkillStatus.SUCCESS,
-                message=f"Gripper {action} completed (mock mode)"
+                status=SkillStatus.RUNNING,
+                message=f"Gripper {action}... {elapsed:.1f}s"
             )
         
-        # 真实执行
-        if not self._is_executing:
-            from qyh_gripper_msgs.srv import GripperCommand
+        # 真实执行 - 发送命令
+        if not self._command_sent:
+            self.log_info(f"[Gripper] {side}: action={action}, pos={position}")
             
             if not self._gripper_client.wait_for_service(timeout_sec=1.0):
                 self.log_error("Gripper service not available")
@@ -99,41 +135,64 @@ class GripperControlNode(SkillNode):
                     message="Gripper service not available"
                 )
             
-            request = GripperCommand.Request()
-            request.command = action
-            if force is not None:
-                request.force = force
+            from qyh_gripper_msgs.srv import MoveGripper
+            request = MoveGripper.Request()
+            # position: 0=open, 255=close
+            request.position = int(position * 255) if position is not None else (0 if action == 'open' else 255)
+            request.speed = 255  # 最大速度
+            request.force = int(force) if force is not None else 100
             
-            self.log_info(f"   Sending gripper command: {action}")
-            self._future = self._gripper_client.call_async(request)
-            self._is_executing = True
-            return SkillResult(status=SkillStatus.RUNNING, message=f"Executing gripper {action}...")
-        
-        if self._future.done():
-            try:
-                response = self._future.result()
-                if response.success:
-                    self.log_info(f"[Gripper] Completed: {response.message}")
-                    return SkillResult(
-                        status=SkillStatus.SUCCESS,
-                        message=response.message
-                    )
-                else:
-                    self.log_error(f"[Gripper] Failed: {response.message}")
-                    return SkillResult(
-                        status=SkillStatus.FAILURE,
-                        message=response.message
-                    )
-            except Exception as e:
-                self.log_error(f"[Gripper] Exception: {e}")
+            self.log_info(f"   Sending gripper command: pos={request.position}, force={request.force}")
+            # Fire-and-forget
+            self._gripper_client.call_async(request)
+            
+            self._command_sent = True
+            self._start_time = time.time()
+            
+            # 如果不等待完成，立即返回成功
+            if not wait_complete:
+                self.log_info(f"[Gripper] Command sent (no wait)")
                 return SkillResult(
-                    status=SkillStatus.FAILURE,
-                    message=f"Gripper control failed: {e}"
+                    status=SkillStatus.SUCCESS,
+                    message=f"Gripper {action} command sent"
                 )
+            
+            return SkillResult(
+                status=SkillStatus.RUNNING,
+                message=f"Gripper {action}..."
+            )
+        
+        # 检查超时
+        elapsed = time.time() - self._start_time
+        if elapsed > timeout:
+            self.log_error(f"Gripper timeout ({timeout}s)")
+            return SkillResult(
+                status=SkillStatus.FAILURE,
+                message=f"Gripper timeout ({timeout}s)"
+            )
+        
+        # 发送命令后等待至少 0.5 秒再检查状态（等待夹爪开始运动）
+        MIN_WAIT_TIME = 0.5
+        if elapsed < MIN_WAIT_TIME:
+            return SkillResult(
+                status=SkillStatus.RUNNING,
+                message=f"Command sent, waiting... {elapsed:.1f}s"
+            )
+        
+        # 检查是否完成: object_status != 0 (not moving) 或 is_moving == False
+        # object_status: 0=moving, 1=inner_detected, 2=outer_detected(gripped), 3=arrived
+        if not self._is_moving or self._object_status != 0:
+            status_names = {0: 'moving', 1: 'inner_detected', 2: 'gripped', 3: 'arrived'}
+            status_name = status_names.get(self._object_status, 'unknown')
+            self.log_info(f"[Gripper] ✓ {action} completed (status: {status_name}, {elapsed:.1f}s)")
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message=f"Gripper {action} completed ({status_name})"
+            )
         
         return SkillResult(
             status=SkillStatus.RUNNING, 
-            message="Executing gripper..."
+            message=f"Gripper {action}... {elapsed:.1f}s"
         )
 
     def _resolve_action(self) -> tuple:
@@ -176,3 +235,12 @@ class GripperControlNode(SkillNode):
             return (action, position)
         
         return (None, None)
+    
+    def reset(self):
+        """重置节点状态"""
+        super().reset()
+        self._command_sent = False
+        self._start_time = None
+        self._is_moving = False
+        self._object_status = 0
+        self._status_received = False
