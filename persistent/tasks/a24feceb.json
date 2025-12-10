@@ -1,0 +1,52 @@
+{
+  "id": "a24feceb",
+  "name": "夹爪开合",
+  "description": "",
+  "category": "default",
+  "root": {
+    "id": "node_1765363747993_1",
+    "type": "Loop",
+    "params": {
+      "count": 0,
+      "break_on_failure": true
+    },
+    "children": [
+      {
+        "id": "node_1765363754275_3",
+        "type": "GripperControl",
+        "params": {
+          "side": "left",
+          "action": "open"
+        },
+        "children": []
+      },
+      {
+        "id": "node_1765363757017_5",
+        "type": "Wait",
+        "params": {
+          "duration": 10
+        },
+        "children": []
+      },
+      {
+        "id": "node_1765363752517_2",
+        "type": "GripperControl",
+        "params": {
+          "side": "left",
+          "action": "close"
+        },
+        "children": []
+      },
+      {
+        "id": "node_1765363755864_4",
+        "type": "Wait",
+        "params": {
+          "duration": 10
+        },
+        "children": []
+      }
+    ]
+  },
+  "created_at": "2025-12-10T18:50:05.005595",
+  "updated_at": "2025-12-10T18:50:46.142177"
+}
