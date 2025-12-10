@@ -43,11 +43,11 @@ checkout_tag() {
     fi
     cd "$dir" || exit 1
     
-    # 检查是否有未提交的更改
-    if [ -n "$(git status --porcelain)" ]; then
+    # 检查是否有未提交的更改 (忽略子模块的变化)
+    if [ -n "$(git status --porcelain --ignore-submodules)" ]; then
         echo "❌ [错误] 目录 $dir 中有未提交的代码！"
         echo "   请先提交或暂存(stash)您的更改，然后重试。"
-        git status --short
+        git status --short --ignore-submodules
         exit 1
     fi
     
@@ -64,11 +64,11 @@ checkout_tag() {
     echo "----------------------------------------"
 }
 
-# 1.1 更新 Web 前端代码
-checkout_tag "$HOME/qyh_jushen_ws/qyh_jushen_web" "show"
-
-# 1.2 更新主工作空间代码
+# 1.1 更新主工作空间代码 (先更新主仓库)
 checkout_tag "$HOME/qyh_jushen_ws" "show"
+
+# 1.2 更新 Web 前端代码 (再更新子仓库，覆盖主仓库的预期)
+checkout_tag "$HOME/qyh_jushen_ws/qyh_jushen_web" "show"
 
 # 1.3 编译 ROS 工作空间
 BUILD_DIR="$HOME/qyh_jushen_ws/qyh_jushen_ws"
