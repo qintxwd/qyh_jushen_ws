@@ -28,15 +28,17 @@ def generate_launch_description():
         description='Path to bridge configuration file'
     )
     
-    # JAKA bridge node
+    # JAKA bridge node (Now using unified jaka_control_node)
     jaka_bridge_node = Node(
         package='qyh_jaka_control',
-        executable='jaka_bridge_node',
-        name='jaka_bridge_node',
+        executable='jaka_control_node',
+        name='jaka_control_node',
         output='screen',
         parameters=[
             LaunchConfiguration('config_file'),
-            {'robot_ip': LaunchConfiguration('robot_ip')}
+            {'robot_ip': LaunchConfiguration('robot_ip')},
+            {'cycle_time_ms': 8.0}, # Ensure 125Hz for VR
+            {'auto_connect': True}
         ]
     )
     

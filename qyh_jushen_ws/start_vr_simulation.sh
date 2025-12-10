@@ -97,6 +97,11 @@ echo -e "${BLUE}   启动节点 (按 Ctrl+C 停止所有)${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
+# 启动bringup 并将日志输出到文件
+export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
+
 # 启动 MoveIt + RViz
 echo -e "${GREEN}[1/4] Starting MoveIt + RViz...${NC}"
 ros2 launch qyh_dual_arms_moveit_config demo.launch.py &

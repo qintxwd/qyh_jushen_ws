@@ -1,48 +1,50 @@
 # Teleoperation Controller Configuration
 
-# Control parameters
-control_frequency: 125.0  # Hz
+teleoperation_node:
+  ros__parameters:
+    # Control parameters
+    control_frequency: 125.0  # Hz
 
-# Robot model
-robot_description: "robot_description"
-left_arm_group: "left_arm"
-right_arm_group: "right_arm"
+    # Robot model
+    robot_description: "robot_description"
+    left_arm_group: "left_arm"
+    right_arm_group: "right_arm"
 
-# Differential IK parameters
-differential_ik:
-  position_tolerance: 0.001  # m
-  orientation_tolerance: 0.01  # rad
-  damping_factor: 0.01
-  max_iterations: 50
-  dt: 0.008  # 1/125 Hz
+    # Differential IK parameters
+    differential_ik:
+      position_tolerance: 0.001  # m
+      orientation_tolerance: 0.01  # rad
+      damping_factor: 0.01
+      max_iterations: 50
+      dt: 0.008  # 1/125 Hz
 
-# Trajectory smoothing parameters
-# Note: Main smoothing is done in vr_clutch (Cartesian space)
-# Here we only do safety limiting based on JAKA ZU7 real limits
-#
-# JAKA ZU7 速度限制 (取最小值 J1/J2 = 90°/s = 1.571 rad/s):
-#   J1-J2: 90°/s = 1.571 rad/s
-#   J3-J4: 120°/s = 2.094 rad/s  
-#   J5-J7: 150°/s = 2.618 rad/s
-# 这里使用 80% 作为安全限制
-trajectory_smoothing:
-  max_velocity: 1.257  # rad/s (80% of slowest joint 90°/s)
-  max_acceleration: 1.5  # rad/s² (conservative)
-  max_jerk: 15.0  # rad/s³
-  low_pass_cutoff: 50.0  # Hz (minimal filtering, clutch already smooths)
+    # Trajectory smoothing parameters
+    # Note: Main smoothing is done in vr_clutch (Cartesian space)
+    # Here we only do safety limiting based on JAKA ZU7 real limits
+    #
+    # JAKA ZU7 速度限制 (取最小值 J1/J2 = 90°/s = 1.571 rad/s):
+    #   J1-J2: 90°/s = 1.571 rad/s
+    #   J3-J4: 120°/s = 2.094 rad/s  
+    #   J5-J7: 150°/s = 2.618 rad/s
+    # 这里使用 80% 作为安全限制
+    trajectory_smoothing:
+      max_velocity: 1.257  # rad/s (80% of slowest joint 90°/s)
+      max_acceleration: 1.5  # rad/s² (conservative)
+      max_jerk: 15.0  # rad/s³
+      low_pass_cutoff: 50.0  # Hz (minimal filtering, clutch already smooths)
 
-# Safety parameters
-safety:
-  joint_limit_margin: 0.05  # rad (stay 0.05 rad away from limits)
-  velocity_limit_scale: 0.8  # Use 80% of max velocity
-  collision_check_distance: 0.02  # m (2cm safety margin)
-  singularity_threshold: 0.05  # Manipulability threshold
+    # Safety parameters
+    safety:
+      joint_limit_margin: 0.05  # rad (stay 0.05 rad away from limits)
+      velocity_limit_scale: 0.8  # Use 80% of max velocity
+      collision_check_distance: 0.02  # m (2cm safety margin)
+      singularity_threshold: 0.05  # Manipulability threshold
 
-# VR tracking parameters
-vr_tracking:
-  position_smoothing_window: 5
-  orientation_smoothing_window: 3
-  position_deadzone: 0.002  # m (2mm)
-  orientation_deadzone: 0.01  # rad
-  position_scale: 1.0
-  orientation_scale: 1.0
+    # VR tracking parameters
+    vr_tracking:
+      position_smoothing_window: 5
+      orientation_smoothing_window: 3
+      position_deadzone: 0.002  # m (2mm)
+      orientation_deadzone: 0.01  # rad
+      position_scale: 1.0
+      orientation_scale: 1.0

@@ -26,6 +26,11 @@ echo "录制数据保存路径: $BASE_PATH"
 # 确保目录存在
 mkdir -p "$BASE_PATH"
 
+# 启动bringup 并将日志输出到文件
+export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
+
 # 启动节点
 ros2 launch qyh_bag_recorder bag_recorder.launch.py \
     base_path:="$BASE_PATH"

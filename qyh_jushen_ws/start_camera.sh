@@ -72,7 +72,10 @@ check_camera_connection() {
 # 启动头部相机 (Orbbec Gemini 335Le)
 start_head_camera() {
     echo -e "${BLUE}启动头部相机...${NC}"
-    
+    # 启动bringup 并将日志输出到文件
+    export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+    export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
     # Orbbec 相机启动参数
     ros2 launch orbbec_camera gemini_330_series.launch.py \
         camera_name:=head_camera \
@@ -99,6 +102,11 @@ start_web_video_server() {
     
     # 等待相机话题可用
     sleep 3
+
+    # 启动bringup 并将日志输出到文件
+    export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+    export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
     
     ros2 run web_video_server web_video_server \
         --ros-args \

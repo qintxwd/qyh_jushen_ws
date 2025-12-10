@@ -18,10 +18,12 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import PoseStamped, Pose
-from sensor_msgs.msg import Joy
+from sensor_msgs.msg import Joy, JointState
 from std_msgs.msg import Bool
 from qyh_jaka_control_msgs.msg import RobotState
 import numpy as np
+from tf2_ros import Buffer, TransformListener
+from tf2_ros import TransformException
 
 from .vr_clutch_controller import VRClutchController, ClutchConfig, ClutchState
 
@@ -51,6 +53,10 @@ class VRClutchNode(Node):
         self.robot_state: RobotState = None
         self.robot_state_received = False
         
+        # TF Buffer & Listener
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        
         # 仿真模式的当前末端位姿（从 sim_arm_controller 订阅获取）
         self.sim_left_pose = Pose()
         self.sim_right_pose = Pose()
@@ -72,10 +78,18 @@ class VRClutchNode(Node):
         # === 订阅者 ===
         # 机器人状态（仅非仿真模式）
         if not self.simulation_mode:
+            # 尝试订阅 RobotState (兼容旧版)
             self.robot_state_sub = self.create_subscription(
                 RobotState,
                 '/jaka/robot_state',
                 self.robot_state_callback,
+                10
+            )
+            # 同时订阅 JointState 以确保连接 (如果 RobotState 不可用)
+            self.joint_state_sub = self.create_subscription(
+                JointState,
+                '/joint_states',
+                self.joint_state_callback,
                 10
             )
         else:
@@ -234,6 +248,33 @@ class VRClutchNode(Node):
         if not self.robot_state_received:
             self.robot_state_received = True
             self.get_logger().info('✓ Robot state received')
+
+    def joint_state_callback(self, msg: JointState):
+        """关节状态回调 (用于确认连接)"""
+        if not self.robot_state_received:
+            self.robot_state_received = True
+            self.get_logger().info('✓ Robot connected (via JointState)')
+
+    def get_tf_pose(self, target_frame, source_frame) -> Pose:
+        """获取TF变换作为Pose (source_frame在target_frame下的位姿)"""
+        try:
+            # lookup_transform(target_frame, source_frame) 返回 source_frame 在 target_frame 下的变换
+            t = self.tf_buffer.lookup_transform(
+                target_frame,
+                source_frame,
+                rclpy.time.Time())
+            
+            p = Pose()
+            p.position.x = t.transform.translation.x
+            p.position.y = t.transform.translation.y
+            p.position.z = t.transform.translation.z
+            p.orientation = t.transform.rotation
+            return p
+        except TransformException as ex:
+            self.get_logger().warn(
+                f'Could not transform {source_frame} to {target_frame}: {ex}',
+                throttle_duration_sec=1.0)
+            return None
     
     def sim_left_pose_callback(self, msg: PoseStamped):
         """仿真模式: 左臂末端位姿回调"""
@@ -290,13 +331,25 @@ class VRClutchNode(Node):
         
         now = self.get_clock().now()
         
-        # 获取当前机械臂位姿（仿真模式从FK获取，真机模式用实际状态）
+        # 获取当前机械臂位姿
         if self.simulation_mode:
             left_robot_pose = self.sim_left_pose
             right_robot_pose = self.sim_right_pose
         else:
-            left_robot_pose = self.robot_state.left_cartesian_pose
-            right_robot_pose = self.robot_state.right_cartesian_pose
+            # 真机模式: 优先使用TF获取当前位姿
+            # 获取 left_tool0 在 base_link 下的位姿
+            left_robot_pose = self.get_tf_pose('base_link', 'left_tool0')
+            right_robot_pose = self.get_tf_pose('base_link', 'right_tool0')
+            
+            # 如果TF失败，尝试回退到RobotState (如果可用)
+            if left_robot_pose is None and self.robot_state:
+                left_robot_pose = self.robot_state.left_cartesian_pose
+            if right_robot_pose is None and self.robot_state:
+                right_robot_pose = self.robot_state.right_cartesian_pose
+                
+            # 如果仍然无法获取，跳过本次循环
+            if left_robot_pose is None or right_robot_pose is None:
+                return
         
         # 处理左手
         if self.left_vr_pose is not None:

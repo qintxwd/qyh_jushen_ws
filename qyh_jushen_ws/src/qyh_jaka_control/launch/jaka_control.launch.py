@@ -24,6 +24,21 @@ def generate_launch_description():
             default_value='false',
             description='Auto: power on, enable, init pose, start VR'
         ),
+        DeclareLaunchArgument(
+            'cycle_time_ms',
+            default_value='8.0',
+            description='Control cycle time in ms (8.0ms = 125Hz)'
+        ),
+        DeclareLaunchArgument(
+            'buffer_size',
+            default_value='10',
+            description='Smooth servo bridge buffer size'
+        ),
+        DeclareLaunchArgument(
+            'interpolation_weight',
+            default_value='0.5',
+            description='Smooth servo bridge interpolation weight'
+        ),
 
         # JAKA完整控制节点（基础+伺服+VR）
         Node(
@@ -35,6 +50,9 @@ def generate_launch_description():
                 LaunchConfiguration('config_file'),
                 {
                     'auto_initialize': LaunchConfiguration('auto_initialize'),
+                    'cycle_time_ms': LaunchConfiguration('cycle_time_ms'),
+                    'buffer_size': LaunchConfiguration('buffer_size'),
+                    'interpolation_weight': LaunchConfiguration('interpolation_weight'),
                 }
             ],
         ),

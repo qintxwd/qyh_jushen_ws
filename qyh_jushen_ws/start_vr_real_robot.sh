@@ -31,7 +31,7 @@ ROBOT_IP="${1:-192.168.2.200}"
 
 # 获取脚本所在目录的父目录作为工作空间
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WS_DIR="$(dirname "$SCRIPT_DIR")"
+WS_DIR="$SCRIPT_DIR"
 
 echo -e "${RED}${BOLD}"
 echo "╔═══════════════════════════════════════════════════════════════╗"
@@ -85,6 +85,11 @@ else
     exit 1
 fi
 
+# 启动bringup 并将日志输出到文件
+export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
+
 # 检查必要的包
 check_package() {
     if ! ros2 pkg list 2>/dev/null | grep -q "^$1$"; then
@@ -111,11 +116,18 @@ echo ""
 
 # 清理函数
 cleanup() {
+    # 恢复默认信号处理，允许再次 Ctrl+C 强制退出
+    trap - SIGINT SIGTERM
+
     echo ""
     echo -e "${YELLOW}[INFO] 停止所有节点...${NC}"
     
-    # 尝试优雅停止伺服
-    ros2 service call /jaka/bridge/stop_servo std_srvs/srv/Trigger 2>/dev/null || true
+    # 尝试优雅停止伺服 (增加超时限制)
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 2s ros2 service call /jaka/bridge/stop_servo std_srvs/srv/Trigger >/dev/null 2>&1 || true
+    else
+        ros2 service call /jaka/bridge/stop_servo std_srvs/srv/Trigger >/dev/null 2>&1 || true
+    fi
     
     # 杀死所有子进程
     pkill -P $$ 2>/dev/null || true

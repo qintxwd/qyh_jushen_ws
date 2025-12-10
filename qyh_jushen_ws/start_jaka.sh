@@ -19,6 +19,11 @@ source "$HOME/qyh_jushen_ws/qyh_jushen_ws/install/setup.bash"
 # echo "🚀 启动升降电机控制节点..."
 # ros2 launch qyh_gripper_control gripper_control_left.launch.py
 
+# 启动bringup 并将日志输出到文件
+export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
+
 # 启动jaka臂控制节点
 echo "🚀 启动JAKA臂控制节点..."
 ros2 launch qyh_jaka_control jaka_control.launch.py

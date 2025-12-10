@@ -16,6 +16,11 @@ source /opt/ros/humble/setup.bash
 # Source 工作空间
 source "$HOME/qyh_jushen_ws/qyh_jushen_ws/install/setup.bash"
 
+# 启动bringup 并将日志输出到文件
+export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
+export RCUTILS_LOGGING_BUFFERED_STREAM=1
+export RCUTILS_COLORIZED_OUTPUT=1
+
 
 ros2 launch qyh_standard_robot standard_robot.launch.py
 
