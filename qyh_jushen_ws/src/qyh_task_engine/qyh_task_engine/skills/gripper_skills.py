@@ -61,14 +61,16 @@ class GripperControlNode(SkillNode):
             from qyh_gripper_msgs.msg import GripperState
             
             side = self.params.get('side', 'left')
-            service_name = f'/gripper/{side}/move'
+            # service_name = f'/gripper/{side}/move'
+            service_name = f'/{side}/move_gripper'
             self._gripper_client = self.ros_node.create_client(
                 MoveGripper, service_name
             )
             self.log_info(f"  Gripper client created: {service_name}")
             
             # 订阅夹爪状态
-            state_topic = f'/gripper/{side}/state'
+            # state_topic = f'/gripper/{side}/state'
+            state_topic = f'/{side}/gripper_state'
             self._status_sub = self.ros_node.create_subscription(
                 GripperState,
                 state_topic,
