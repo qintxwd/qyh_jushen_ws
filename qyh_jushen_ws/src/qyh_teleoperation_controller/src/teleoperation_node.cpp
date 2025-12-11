@@ -1,6 +1,7 @@
 #include <memory>
 #include <chrono>
 #include <atomic>
+#include <cmath>
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -33,15 +34,16 @@ public:
   void initialize()
   {
     // Get parameters
-    std::string robot_desc_param = this->get_parameter("robot_description").as_string();
     std::string left_group = this->get_parameter("left_arm_group").as_string();
     std::string right_group = this->get_parameter("right_arm_group").as_string();
     double control_freq = this->get_parameter("control_frequency").as_double();
     
     // Load robot model
+    // Note: RobotModelLoader expects the PARAMETER NAME (not value)
+    // It will internally call get_parameter("robot_description") to get the URDF
     RCLCPP_INFO(this->get_logger(), "Loading robot model...");
     robot_model_loader::RobotModelLoader robot_model_loader(
-      shared_from_this(), robot_desc_param);
+      shared_from_this(), "robot_description");
     robot_model_ = robot_model_loader.getModel();
     
     if (!robot_model_) {
@@ -119,7 +121,36 @@ private:
   {
     if (!initialized_ || !left_controller_) return;
     
+    // 调试：打印当前状态
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+      "[LEFT] Current state: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+      left_current_state_.position[0], left_current_state_.position[1],
+      left_current_state_.position[2], left_current_state_.position[3],
+      left_current_state_.position[4], left_current_state_.position[5],
+      left_current_state_.position[6]);
+    
     auto command = left_controller_->computeJointCommand(*msg, left_current_state_);
+    
+    // 调试：打印计算的指令和差异
+    double max_diff = 0;
+    for (size_t i = 0; i < 7; ++i) {
+      double diff = std::abs(command.position[i] - left_current_state_.position[i]);
+      if (diff > max_diff) max_diff = diff;
+    }
+    
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+      "[LEFT] Command: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f] MaxDiff: %.4f rad",
+      command.position[0], command.position[1], command.position[2], command.position[3],
+      command.position[4], command.position[5], command.position[6], max_diff);
+    
+    // 安全检查：如果差异太大，拒绝发送
+    const double MAX_JOINT_DIFF = 0.1;  // 5.7度
+    if (max_diff > MAX_JOINT_DIFF) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+        "[LEFT] Command rejected! MaxDiff %.4f > %.4f rad", max_diff, MAX_JOINT_DIFF);
+      return;
+    }
+    
     left_virtual_arm_->updateState(command);
     
     // Publish command to real robot
@@ -142,6 +173,14 @@ private:
     // Update current states from real robot feedback
     updateCurrentState(msg, "left", left_current_state_);
     updateCurrentState(msg, "right", right_current_state_);
+    
+    // 调试：确认收到关节状态
+    static int count = 0;
+    if (++count % 100 == 0) {
+      RCLCPP_DEBUG(this->get_logger(), 
+        "Received joint_states, left: [%.3f, %.3f, ...]",
+        left_current_state_.position[0], left_current_state_.position[1]);
+    }
   }
   
   void updateCurrentState(
