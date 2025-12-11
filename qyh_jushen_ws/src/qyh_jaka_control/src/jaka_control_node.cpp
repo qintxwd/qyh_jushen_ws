@@ -3,10 +3,13 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_dual_joint_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_dual_cartesian_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_servo_status.hpp>
 #include <qyh_jaka_control_msgs/msg/robot_state.hpp>
+#include <deque>
+#include <algorithm>
 #include <qyh_jaka_control_msgs/srv/start_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/stop_servo.hpp>
 #include <qyh_jaka_control_msgs/srv/set_filter.hpp>
@@ -30,6 +33,118 @@
 
 using namespace std::chrono_literals;
 
+// ==================== 完整轨迹平滑器 ====================
+/**
+ * @brief 单臂轨迹平滑器 - 用于笛卡尔遥操作
+ * 
+ * 功能（与 teleoperation_controller 的 TrajectorySmoother 对齐）：
+ * 1. 位置增量限幅 - 防止IK跳变
+ * 2. 速度限幅 - 限制最大运动速度
+ * 3. 加速度限幅 - 限制加速能力
+ * 4. Jerk限幅 - 保证运动丝滑，无顿挫感
+ * 5. 一阶低通滤波 - 滤除VR手柄高频抖动
+ */
+class SimpleJointSmoother {
+public:
+    struct Limits {
+        double max_velocity = 1.0;        // rad/s
+        double max_acceleration = 2.0;    // rad/s²
+        double max_jerk = 10.0;           // rad/s³ - 保证平滑
+        double low_pass_cutoff = 8.0;     // Hz - 滤除人手8-12Hz抖动
+        double max_position_delta = 0.05; // rad/step (约3度)
+    };
+
+    SimpleJointSmoother(size_t num_joints = 7, const Limits& limits = Limits())
+        : num_joints_(num_joints), limits_(limits), initialized_(false) {
+        current_pos_.resize(num_joints, 0.0);
+        current_vel_.resize(num_joints, 0.0);
+        current_acc_.resize(num_joints, 0.0);
+        filtered_pos_.resize(num_joints, 0.0);
+    }
+
+    std::vector<double> smooth(const std::vector<double>& target, double dt) {
+        if (target.size() != num_joints_ || dt <= 0.0) {
+            return target;
+        }
+
+        if (!initialized_) {
+            current_pos_ = target;
+            filtered_pos_ = target;
+            std::fill(current_vel_.begin(), current_vel_.end(), 0.0);
+            std::fill(current_acc_.begin(), current_acc_.end(), 0.0);
+            initialized_ = true;
+            return target;
+        }
+
+        std::vector<double> result(num_joints_);
+
+        for (size_t i = 0; i < num_joints_; ++i) {
+            // 1. 位置增量限幅 (防止IK解跳变)
+            double pos_delta = target[i] - current_pos_[i];
+            pos_delta = std::clamp(pos_delta, -limits_.max_position_delta, limits_.max_position_delta);
+            double limited_target = current_pos_[i] + pos_delta;
+
+            // 2. 计算期望速度并限幅
+            double desired_vel = (limited_target - current_pos_[i]) / dt;
+            desired_vel = std::clamp(desired_vel, -limits_.max_velocity, limits_.max_velocity);
+
+            // 3. 计算期望加速度并限幅
+            double desired_acc = (desired_vel - current_vel_[i]) / dt;
+            desired_acc = std::clamp(desired_acc, -limits_.max_acceleration, limits_.max_acceleration);
+
+            // 4. Jerk限幅 (关键：保证运动丝滑)
+            double desired_jerk = (desired_acc - current_acc_[i]) / dt;
+            desired_jerk = std::clamp(desired_jerk, -limits_.max_jerk, limits_.max_jerk);
+            double new_acc = current_acc_[i] + desired_jerk * dt;
+
+            // 5. 从限幅后的加速度反推速度和位置
+            double new_vel = current_vel_[i] + new_acc * dt;
+            new_vel = std::clamp(new_vel, -limits_.max_velocity, limits_.max_velocity);
+            double new_pos = current_pos_[i] + new_vel * dt;
+
+            // 6. 低通滤波 (滤除人手高频抖动)
+            double RC = 1.0 / (2.0 * M_PI * limits_.low_pass_cutoff);
+            double alpha = dt / (dt + RC);
+            filtered_pos_[i] = alpha * new_pos + (1.0 - alpha) * filtered_pos_[i];
+
+            result[i] = filtered_pos_[i];
+            current_pos_[i] = new_pos;
+            current_vel_[i] = new_vel;
+            current_acc_[i] = new_acc;
+        }
+
+        return result;
+    }
+
+    void reset() {
+        initialized_ = false;
+        std::fill(current_vel_.begin(), current_vel_.end(), 0.0);
+        std::fill(current_acc_.begin(), current_acc_.end(), 0.0);
+    }
+
+    void setLimits(const Limits& limits) { limits_ = limits; }
+
+    // 用当前机器人状态初始化（避免启动跳变）
+    void initializeWith(const std::vector<double>& current_joints) {
+        if (current_joints.size() == num_joints_) {
+            current_pos_ = current_joints;
+            filtered_pos_ = current_joints;
+            std::fill(current_vel_.begin(), current_vel_.end(), 0.0);
+            std::fill(current_acc_.begin(), current_acc_.end(), 0.0);
+            initialized_ = true;
+        }
+    }
+
+private:
+    size_t num_joints_;
+    Limits limits_;
+    bool initialized_;
+    std::vector<double> current_pos_;
+    std::vector<double> current_vel_;
+    std::vector<double> current_acc_;  // 新增：加速度状态
+    std::vector<double> filtered_pos_;
+};
+
 /**
  * @brief JAKA双臂机器人统一控制节点
  * 
@@ -38,6 +153,7 @@ using namespace std::chrono_literals;
  * 2. 伺服模式：支持直接指令(JakaDualJointServo)和桥接指令(JointState)
  * 3. 轨迹平滑：集成 SmoothServoBridge
  * 4. 高级功能：MoveJ, MoveL, Jog, Payload
+ * 5. 笛卡尔遥操作：接收VR位姿 → JAKA IK → 平滑 → Servo
  */
 class JakaControlNode : public rclcpp::Node
 {
@@ -112,6 +228,26 @@ public:
         right_bridge_sub_ = create_subscription<sensor_msgs::msg::JointState>(
             "/right_arm/joint_command", qos,
             std::bind(&JakaControlNode::rightBridgeCallback, this, std::placeholders::_1));
+
+        // Subscribers (Cartesian Teleoperation - 方案C: VR位姿 → JAKA IK → 平滑 → Servo)
+        // 直接订阅 vr_clutch_node 发布的位姿，跳过 teleoperation_controller
+        left_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/vr/left_target_pose", qos,
+            std::bind(&JakaControlNode::leftPoseCallback, this, std::placeholders::_1));
+            
+        right_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/vr/right_target_pose", qos,
+            std::bind(&JakaControlNode::rightPoseCallback, this, std::placeholders::_1));
+
+        // 初始化笛卡尔遥操作平滑器 (完整版：速度+加速度+Jerk+低通滤波)
+        SimpleJointSmoother::Limits smoother_limits;
+        smoother_limits.max_velocity = 1.0;           // rad/s - 保守的速度限制
+        smoother_limits.max_acceleration = 2.0;       // rad/s² - 适中的加速能力
+        smoother_limits.max_jerk = 10.0;              // rad/s³ - 保证平滑，无顿挫
+        smoother_limits.low_pass_cutoff = 8.0;        // Hz - 滤除人手8-12Hz抖动
+        smoother_limits.max_position_delta = 0.05;    // rad (~3度/步) - 防止IK跳变
+        left_pose_smoother_ = std::make_unique<SimpleJointSmoother>(7, smoother_limits);
+        right_pose_smoother_ = std::make_unique<SimpleJointSmoother>(7, smoother_limits);
 
         // Services (Basic Control)
         srv_power_on_ = create_service<std_srvs::srv::Trigger>(
@@ -433,6 +569,104 @@ private:
         }
     }
 
+    // ==================== 笛卡尔遥操作回调 (方案C) ====================
+    /**
+     * @brief 将 ROS Pose 转换为 JAKA CartesianPose
+     */
+    CartesianPose rosPoseToJaka(const geometry_msgs::msg::Pose& pose) {
+        CartesianPose jaka_pose;
+        jaka_pose.tran.x = pose.position.x * 1000.0;  // m -> mm
+        jaka_pose.tran.y = pose.position.y * 1000.0;
+        jaka_pose.tran.z = pose.position.z * 1000.0;
+        
+        // 四元数转RPY (度)
+        double qw = pose.orientation.w;
+        double qx = pose.orientation.x;
+        double qy = pose.orientation.y;
+        double qz = pose.orientation.z;
+        
+        double sinr_cosp = 2.0 * (qw * qx + qy * qz);
+        double cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy);
+        jaka_pose.rpy.rx = std::atan2(sinr_cosp, cosr_cosp) * 180.0 / M_PI;
+        
+        double sinp = 2.0 * (qw * qy - qz * qx);
+        if (std::abs(sinp) >= 1)
+            jaka_pose.rpy.ry = std::copysign(90.0, sinp);
+        else
+            jaka_pose.rpy.ry = std::asin(sinp) * 180.0 / M_PI;
+        
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        jaka_pose.rpy.rz = std::atan2(siny_cosp, cosy_cosp) * 180.0 / M_PI;
+        
+        return jaka_pose;
+    }
+
+    /**
+     * @brief 处理单臂笛卡尔位姿回调
+     * @param robot_id 0=左臂, 1=右臂
+     * @param pose 目标位姿
+     * @param smoother 对应的平滑器
+     */
+    void processPoseCommand(int robot_id, const geometry_msgs::msg::Pose& pose, 
+                           SimpleJointSmoother* smoother) {
+        if (!servo_running_) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, 
+                "[PoseCmd] Servo not running, ignoring pose command");
+            return;
+        }
+
+        // 1. 获取当前关节位置作为 IK 参考
+        JointValue current_joints;
+        if (!jaka_interface_.getJointPositions(robot_id, current_joints)) {
+            RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[PoseCmd] Failed to get current joint positions for robot %d", robot_id);
+            return;
+        }
+
+        // 2. 转换位姿格式
+        CartesianPose target_pose = rosPoseToJaka(pose);
+
+        // 3. 调用 JAKA IK
+        JointValue ik_result;
+        if (!jaka_interface_.kineInverse(robot_id, current_joints, target_pose, ik_result)) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+                "[PoseCmd] IK failed for robot %d, target=[%.1f,%.1f,%.1f]mm",
+                robot_id, target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
+            return;
+        }
+
+        // 4. 转换为 vector
+        std::vector<double> ik_joints(7);
+        for (size_t i = 0; i < 7; ++i) {
+            ik_joints[i] = ik_result.jVal[i];
+        }
+
+        // 5. 轨迹平滑
+        double dt = cycle_time_ms_ / 1000.0;  // 8ms = 0.008s
+        std::vector<double> smoothed = smoother->smooth(ik_joints, dt);
+
+        // 6. 发送到 bridge (由 mainLoop 发送 servo 指令)
+        if (robot_id == 0) {
+            left_bridge_->addCommand(smoothed);
+        } else {
+            right_bridge_->addCommand(smoothed);
+        }
+
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 500,
+            "[PoseCmd] robot=%d, IK=[%.3f,%.3f,%.3f,...], smoothed=[%.3f,%.3f,%.3f,...]",
+            robot_id, ik_joints[0], ik_joints[1], ik_joints[2],
+            smoothed[0], smoothed[1], smoothed[2]);
+    }
+
+    void leftPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+        processPoseCommand(0, msg->pose, left_pose_smoother_.get());
+    }
+
+    void rightPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+        processPoseCommand(1, msg->pose, right_pose_smoother_.get());
+    }
+
     // ==================== 基础控制服务 ====================
     void handlePowerOn(const std_srvs::srv::Trigger::Request::SharedPtr, std_srvs::srv::Trigger::Response::SharedPtr res)
     {
@@ -750,6 +984,10 @@ private:
     std::unique_ptr<qyh_jaka_control::SmoothServoBridge> left_bridge_;
     std::unique_ptr<qyh_jaka_control::SmoothServoBridge> right_bridge_;
     
+    // 笛卡尔遥操作平滑器 (方案C)
+    std::unique_ptr<SimpleJointSmoother> left_pose_smoother_;
+    std::unique_ptr<SimpleJointSmoother> right_pose_smoother_;
+    
     // 参数
     std::string robot_ip_;
     double cycle_time_ms_;
@@ -780,6 +1018,10 @@ private:
     rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualCartesianServo>::SharedPtr cartesian_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_bridge_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr right_bridge_sub_;
+    
+    // 笛卡尔遥操作订阅 (方案C)
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_pose_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_pose_sub_;
 
     // 服务
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_on_;

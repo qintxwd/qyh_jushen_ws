@@ -1,11 +1,14 @@
 #!/bin/bash
 #
-# VR 遥操作真机启动脚本
+# VR 遥操作真机启动脚本 (方案C: JAKA原生IK)
 # 用 PICO 4 VR 手柄控制真实 JAKA 双臂机器人
+#
+# 数据流:
+#   VR → vr_bridge → vr_clutch → jaka_control_node(IK+平滑+Servo) → Robot
 #
 # 使用方法:
 #   cd ~/qyh_jushen_ws/qyh_jushen_ws
-#   ./src/start_vr_real_robot.sh [robot_ip]
+#   ./start_vr_real_robot.sh [robot_ip]
 #
 # 参数:
 #   robot_ip: JAKA 机器人 IP (默认: 192.168.2.200)
@@ -101,7 +104,8 @@ check_package() {
 
 echo -e "${YELLOW}[INFO] 检查必要的 ROS2 包...${NC}"
 MISSING=0
-for pkg in qyh_dual_arms_moveit_config qyh_vr_bridge qyh_vr_calibration qyh_teleoperation_controller qyh_jaka_control; do
+# 方案C: 不再需要 MoveIt 和 teleoperation_controller
+for pkg in qyh_vr_bridge qyh_vr_calibration qyh_jaka_control; do
     if ! check_package "$pkg"; then
         MISSING=1
     fi
@@ -143,38 +147,23 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║                    启动 ROS2 节点                              ║${NC}"
 echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
+echo -e "${YELLOW}[INFO] 方案C: 使用 JAKA 原生 IK，无需 MoveIt${NC}"
+echo ""
 
-# 1. 启动 MoveIt (用于 IK 和可视化)
-echo -e "${GREEN}[1/5] 启动 MoveIt...${NC}"
-ros2 launch qyh_dual_arms_moveit_config move_group.launch.py &
-MOVEIT_PID=$!
-sleep 5
-
-if ! kill -0 $MOVEIT_PID 2>/dev/null; then
-    echo -e "${RED}[ERROR] MoveIt 启动失败${NC}"
-    exit 1
-fi
-
-# 2. 启动 VR Bridge
-echo -e "${GREEN}[2/5] 启动 VR Bridge...${NC}"
+# 1. 启动 VR Bridge
+echo -e "${GREEN}[1/3] 启动 VR Bridge...${NC}"
 ros2 run qyh_vr_bridge vr_bridge_node --ros-args -p grip_offset_deg:=35.0 &
 VR_BRIDGE_PID=$!
 sleep 2
 
-# 3. 启动 VR Clutch (真机模式)
-echo -e "${GREEN}[3/5] 启动 VR Clutch (真机模式)...${NC}"
+# 2. 启动 VR Clutch (真机模式)
+echo -e "${GREEN}[2/3] 启动 VR Clutch (真机模式)...${NC}"
 ros2 launch qyh_vr_calibration vr_clutch.launch.py simulation_mode:=false &
 VR_CLUTCH_PID=$!
 sleep 2
 
-# 4. 启动 Teleoperation Controller
-echo -e "${GREEN}[4/5] 启动 Teleoperation Controller...${NC}"
-ros2 launch qyh_teleoperation_controller teleoperation_controller.launch.py &
-TELEOP_PID=$!
-sleep 2
-
-# 5. 启动 JAKA Bridge (使用 unified control node)
-echo -e "${GREEN}[5/5] 启动 JAKA Control Node...${NC}"
+# 3. 启动 JAKA Control Node (集成 IK + 平滑 + Servo)
+echo -e "${GREEN}[3/3] 启动 JAKA Control Node (IK+平滑+Servo)...${NC}"
 ros2 launch qyh_jaka_control jaka_control.launch.py robot_ip:=$ROBOT_IP &
 JAKA_PID=$!
 sleep 3
@@ -185,11 +174,14 @@ echo -e "${GREEN}║                    所有节点已启动!                  
 echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "节点状态:"
-echo -e "  - MoveIt:            PID ${MOVEIT_PID}"
 echo -e "  - VR Bridge:         PID ${VR_BRIDGE_PID}"
 echo -e "  - VR Clutch:         PID ${VR_CLUTCH_PID}"
-echo -e "  - Teleoperation:     PID ${TELEOP_PID}"
 echo -e "  - JAKA Control:      PID ${JAKA_PID}"
+echo ""
+echo -e "${YELLOW}数据流:${NC}"
+echo -e "  VR → vr_bridge → vr_clutch → jaka_control_node → Robot"
+echo -e "           ↓            ↓              ↓"
+echo -e "    /vr/xxx/pose  /vr/xxx_target_pose  JAKA IK+平滑+Servo"
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${YELLOW}操作前请确认:${NC}"
@@ -203,9 +195,10 @@ echo -e "  2. 按住 Grip 键 → 机械臂跟随"
 echo -e "  3. 松开 Grip 键 → 机械臂保持"
 echo ""
 echo -e "${YELLOW}验证命令:${NC}"
-echo -e "  ros2 topic hz /vr/left_hand/pose"
-echo -e "  ros2 topic echo /vr/left_clutch_engaged"
-echo -e "  ros2 topic hz /left_arm/joint_command"
+echo -e "  ros2 topic hz /vr/left_hand/pose           # VR 原始数据"
+echo -e "  ros2 topic echo /vr/left_clutch_engaged    # Clutch 状态"
+echo -e "  ros2 topic hz /vr/left_target_pose         # Clutch 输出的目标位姿"
+echo -e "  ros2 topic echo /jaka/robot_state          # 机器人状态"
 echo ""
 echo -e "${RED}${BOLD}按 Ctrl+C 停止所有节点${NC}"
 echo ""
