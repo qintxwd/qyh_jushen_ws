@@ -5,6 +5,7 @@
 #include <thread>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
+#include "jkerr.h"  // JAKA 错误码定义
 
 namespace qyh_jaka_control
 {
@@ -660,16 +661,31 @@ CartesianPose JakaInterface::rosPoseToJaka(const geometry_msgs::msg::Pose& ros_p
     jaka_pose.tran.y = ros_pose.position.y * 1000.0;
     jaka_pose.tran.z = ros_pose.position.z * 1000.0;
 
-    // Convert quaternion to Euler angles (ZYX convention)
+    // Convert quaternion to Euler angles (XYZ fixed-axis convention)
+    // JAKA uses XYZ Euler: R = Rz(rz) * Ry(ry) * Rx(rx)
+    // This is verified to match JAKA's official controller data
     tf2::Quaternion q(ros_pose.orientation.x, ros_pose.orientation.y, 
                       ros_pose.orientation.z, ros_pose.orientation.w);
     tf2::Matrix3x3 m(q);
-    double roll, pitch, yaw;
-    m.getRPY(roll, pitch, yaw);
     
-    jaka_pose.rpy.rx = roll;
-    jaka_pose.rpy.ry = pitch;
-    jaka_pose.rpy.rz = yaw;
+    // Extract XYZ Euler angles from rotation matrix
+    // Reference: 正逆解说明.md - Section 2.2.3
+    double rx, ry, rz;
+    double sy = std::sqrt(m[2][1] * m[2][1] + m[2][2] * m[2][2]);
+    
+    if (sy > 1e-6) {  // Not at singularity
+        rx = std::atan2(m[2][1], m[2][2]);
+        ry = std::atan2(-m[2][0], sy);
+        rz = std::atan2(m[1][0], m[0][0]);
+    } else {  // Gimbal lock case (ry = ±90°)
+        rx = std::atan2(-m[1][2], m[1][1]);
+        ry = std::atan2(-m[2][0], sy);
+        rz = 0.0;
+    }
+    
+    jaka_pose.rpy.rx = rx;
+    jaka_pose.rpy.ry = ry;
+    jaka_pose.rpy.rz = rz;
 
     return jaka_pose;
 }
@@ -681,9 +697,25 @@ geometry_msgs::msg::Pose JakaInterface::jakaPoseToRos(const CartesianPose& jaka_
     ros_pose.position.y = jaka_pose.tran.y / 1000.0;
     ros_pose.position.z = jaka_pose.tran.z / 1000.0;
 
-    // Convert Euler angles to quaternion
+    // Convert XYZ Euler angles to quaternion
+    // JAKA uses XYZ Euler: R = Rz(rz) * Ry(ry) * Rx(rx)
+    double rx = jaka_pose.rpy.rx;
+    double ry = jaka_pose.rpy.ry;
+    double rz = jaka_pose.rpy.rz;
+    
+    // Build rotation matrix from XYZ Euler angles
+    double cx = std::cos(rx), sx = std::sin(rx);
+    double cy = std::cos(ry), sy = std::sin(ry);
+    double cz = std::cos(rz), sz = std::sin(rz);
+    
+    tf2::Matrix3x3 m(
+        cy*cz,              -cy*sz,             sy,
+        cx*sz + sx*sy*cz,   cx*cz - sx*sy*sz,  -sx*cy,
+        sx*sz - cx*sy*cz,   sx*cz + cx*sy*sz,   cx*cy
+    );
+    
     tf2::Quaternion q;
-    q.setRPY(jaka_pose.rpy.rx, jaka_pose.rpy.ry, jaka_pose.rpy.rz);
+    m.getRotation(q);
     
     ros_pose.orientation.x = q.x();
     ros_pose.orientation.y = q.y();
@@ -733,21 +765,28 @@ bool JakaInterface::checkReturn(errno_t ret, const std::string& operation)
         return true;
     }
     
-    // Provide detailed error messages
+    // Provide detailed error messages (根据 jkerr.h)
     std::string error_msg;
     switch (ret) {
-        case -1: error_msg = "General error"; break;
-        case -2: error_msg = "Invalid parameter"; break;
-        case -3: error_msg = "Robot not ready or in error state"; break;
-        case -4: error_msg = "Communication error"; break;
-        case -5: error_msg = "Operation timeout"; break;
-        case -6: error_msg = "Robot is not powered on"; break;
-        case -7: error_msg = "Robot is not enabled"; break;
-        case -8: error_msg = "Motion in progress"; break;
-        case -9: error_msg = "Servo mode not enabled"; break;
-        case -10: error_msg = "Robot in emergency stop"; break;
-        case 255: error_msg = "Robot in error state or E-STOP active - check teach pendant"; break;
-        default: error_msg = "Unknown error (check teach pendant for details)"; break;
+        case ERR_INVALID_HANDLER: error_msg = "Invalid handler"; break;  // -1
+        case ERR_INVALID_PARAMETER: error_msg = "Invalid parameter"; break;  // -2
+        case ERR_COMMUNICATION_ERR: error_msg = "Communication error"; break;  // -3
+        case ERR_KINE_INVERSE_ERR: error_msg = "IK failed (out of workspace or singular)"; break;  // -4
+        case ERR_EMERGENCY_PRESSED: error_msg = "Emergency stop pressed"; break;  // -5
+        case ERR_NOT_POWERED: error_msg = "Robot not powered on"; break;  // -6
+        case ERR_NOT_ENABLED: error_msg = "Robot not enabled"; break;  // -7
+        case ERR_DISABLE_SERVOMODE: error_msg = "Servo mode not enabled"; break;  // -8
+        case ERR_NOT_OFF_ENABLE: error_msg = "Robot not disabled"; break;  // -9
+        case ERR_PROGRAM_IS_RUNNING: error_msg = "Program is running"; break;  // -10
+        case ERR_CANNOT_OPEN_FILE: error_msg = "Cannot open file"; break;  // -11
+        case ERR_MOTION_ABNORMAL: error_msg = "Motion abnormal"; break;  // -12
+        case ERR_FTP_PREFROM: error_msg = "FTP error"; break;  // -14
+        case ERR_VALUE_OVERSIZE: error_msg = "Value oversize"; break;  // -15
+        case ERR_TROQUE_CONTROL_NOT_ENABLE: error_msg = "Torque control not enabled"; break;  // -22
+        case ERR_ROBOT_NOT_STOPPED: error_msg = "Robot not stopped"; break;  // -23
+        case ERR_INVERSE_OUT_OF_LIMIT: error_msg = "IK out of soft limit"; break;  // -24
+        case ROBOT_IN_ERROR: error_msg = "Robot in error state - check teach pendant"; break;  // 0xFF
+        default: error_msg = "Unknown error (check teach pendant)"; break;
     }
     
     RCLCPP_ERROR(logger_, "Operation '%s' failed with error code: %d (%s)", 

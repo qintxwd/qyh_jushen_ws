@@ -30,6 +30,10 @@
 #include <map>
 #include <array>
 #include <cmath>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/static_transform_broadcaster.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using namespace std::chrono_literals;
 
@@ -247,6 +251,45 @@ public:
             "/vr/right_target_pose", qos,
             std::bind(&JakaControlNode::rightPoseCallback, this, std::placeholders::_1));
 
+        // 初始化 TF 监听器（用于坐标转换）
+        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+        
+        // 发布fake官方base坐标系（Jaka SDK期望的参考系）
+        // 从实际的left_link1/right_link1反推0.217m得到fake官方base
+        // 这样fake base到link1的关系就是标准的0.217m（SDK内部模型期望的）
+        tf_static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+        
+        geometry_msgs::msg::TransformStamped fake_left_base;
+        fake_left_base.header.stamp = this->now();
+        fake_left_base.header.frame_id = "left_link1";  // 父坐标系是实际的link1
+        fake_left_base.child_frame_id = "fake_left_official_base";
+        fake_left_base.transform.translation.x = 0.0;
+        fake_left_base.transform.translation.y = 0.0;
+        fake_left_base.transform.translation.z = -0.217;  // 反推0.217m（-Z方向）
+        fake_left_base.transform.rotation.x = 0.0;
+        fake_left_base.transform.rotation.y = 0.0;
+        fake_left_base.transform.rotation.z = 0.0;
+        fake_left_base.transform.rotation.w = 1.0;
+        
+        geometry_msgs::msg::TransformStamped fake_right_base;
+        fake_right_base.header.stamp = this->now();
+        fake_right_base.header.frame_id = "right_link1";
+        fake_right_base.child_frame_id = "fake_right_official_base";
+        fake_right_base.transform.translation.x = 0.0;
+        fake_right_base.transform.translation.y = 0.0;
+        fake_right_base.transform.translation.z = -0.217;
+        fake_right_base.transform.rotation.x = 0.0;
+        fake_right_base.transform.rotation.y = 0.0;
+        fake_right_base.transform.rotation.z = 0.0;
+        fake_right_base.transform.rotation.w = 1.0;
+        
+        tf_static_broadcaster_->sendTransform({fake_left_base, fake_right_base});
+        
+        RCLCPP_INFO(get_logger(), "Published fake official base frames for Jaka SDK coordinate reference");
+        RCLCPP_INFO(get_logger(), "  - fake_left_official_base: 0.217m below left_link1");
+        RCLCPP_INFO(get_logger(), "  - fake_right_official_base: 0.217m below right_link1");
+        
         // 初始化笛卡尔遥操作平滑器 (完整版：速度+加速度+Jerk+低通滤波)
         SimpleJointSmoother::Limits smoother_limits;
         smoother_limits.max_velocity = 1.0;           // rad/s - 保守的速度限制
@@ -592,7 +635,26 @@ private:
             return;
         }
 
-        // 1. 获取当前关节位置作为 IK 参考
+        // 1. **关键修复**: 将 base_link 坐标系的位姿转换到Jaka SDK期望的官方参考系
+        //    VR 发送的是相对 base_link，但 JAKA SDK IK 需要相对官方标准base
+        //    使用 fake_official_base 确保与SDK内部运动学模型的坐标系一致
+        geometry_msgs::msg::PoseStamped pose_in_base, pose_in_official_base;
+        pose_in_base.header.frame_id = "base_link";
+        pose_in_base.header.stamp = this->now();
+        pose_in_base.pose = pose;
+        
+        // 使用fake官方base而不是left_base_link（fake base到link1距离0.217m，符合SDK期望）
+        std::string target_frame = (robot_id == 0) ? "fake_left_official_base" : "fake_right_official_base";
+        
+        try {
+            pose_in_official_base = tf_buffer_->transform(pose_in_base, target_frame, tf2::durationFromSec(0.1));
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[PoseCmd] TF transform failed (base_link → %s): %s", target_frame.c_str(), ex.what());
+            return;
+        }
+
+        // 2. 获取当前关节位置作为 IK 参考
         JointValue current_joints;
         if (!jaka_interface_.getJointPositions(robot_id, current_joints)) {
             RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000,
@@ -600,8 +662,8 @@ private:
             return;
         }
 
-        // 2. 转换位姿格式 (使用 jaka_interface 的转换函数，确保单位正确)
-        CartesianPose target_pose = jaka_interface_.rosPoseToJaka(pose);
+        // 3. 转换位姿格式 (使用转换后的位姿，现在是相对官方base的)
+        CartesianPose target_pose = jaka_interface_.rosPoseToJaka(pose_in_official_base.pose);
 
         // 3. 调用 JAKA IK
         JointValue ik_result;
@@ -1032,6 +1094,11 @@ private:
 
     rclcpp::TimerBase::SharedPtr main_timer_;
     rclcpp::TimerBase::SharedPtr status_timer_;
+    
+    // TF 监听器和广播器（用于坐标转换）
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
 };
 
 int main(int argc, char** argv)
