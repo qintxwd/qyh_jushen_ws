@@ -244,11 +244,16 @@ private:
         auto start = std::chrono::high_resolution_clock::now();
         
         // 1. 检查 Bridge 指令 (VR遥操作) - 允许单臂控制
+        // 1. 检查 Bridge 指令 (VR遥操作) - 允许单臂控制
         std::vector<double> left_cmd, right_cmd;
         bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
         bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
         bool bridge_active = has_left || has_right;
+        bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
+        bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
+        bool bridge_active = has_left || has_right;
         
+        if (bridge_active) {
         if (bridge_active) {
             bool success = true;
             
@@ -410,9 +415,16 @@ private:
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
             "leftBridgeCallback: servo_running=%d, positions=%zu", 
             servo_running_.load(), msg->position.size());
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
+            "leftBridgeCallback: servo_running=%d, positions=%zu", 
+            servo_running_.load(), msg->position.size());
         if (servo_running_ && msg->position.size() >= 7) {
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             left_bridge_->addCommand(positions);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
+                "Left arm command added: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                positions[0], positions[1], positions[2], positions[3], 
+                positions[4], positions[5], positions[6]);
             RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
                 "Left arm command added: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
                 positions[0], positions[1], positions[2], positions[3], 
