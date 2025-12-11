@@ -256,33 +256,51 @@ public:
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         
         // 发布fake官方base坐标系（Jaka SDK期望的参考系）
-        // 从实际的left_link1/right_link1反推0.217m得到fake官方base
-        // 这样fake base到link1的关系就是标准的0.217m（SDK内部模型期望的）
+        // 验证URDF中定义了 fake_base_link→l1 和 fake_base_link→r1 的变换
+        // 这里直接使用验证URDF的定义，然后inverse得到 l1/r1→fake_base
         tf_static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
         
+        // 左臂：base→l1 = xyz(0, 0.015, 0.217) + rpy(1.5708, 0, -3.1416)
+        tf2::Transform tf_base_to_l1;
+        tf_base_to_l1.setOrigin(tf2::Vector3(0.0, 0.015, 0.217));
+        tf2::Quaternion q_left;
+        q_left.setRPY(1.5708, 0, -3.1416);
+        tf_base_to_l1.setRotation(q_left);
+        
+        // 求逆：l1→fake_base
+        tf2::Transform tf_l1_to_base = tf_base_to_l1.inverse();
         geometry_msgs::msg::TransformStamped fake_left_base;
         fake_left_base.header.stamp = this->now();
-        fake_left_base.header.frame_id = "left_link1";  // 父坐标系是实际的link1
+        fake_left_base.header.frame_id = "left_link1";
         fake_left_base.child_frame_id = "fake_left_official_base";
-        fake_left_base.transform.translation.x = 0.0;
-        fake_left_base.transform.translation.y = 0.0;
-        fake_left_base.transform.translation.z = -0.217;  // 反推0.217m（-Z方向）
-        fake_left_base.transform.rotation.x = 0.0;
-        fake_left_base.transform.rotation.y = 0.0;
-        fake_left_base.transform.rotation.z = 0.0;
-        fake_left_base.transform.rotation.w = 1.0;
+        fake_left_base.transform.translation.x = tf_l1_to_base.getOrigin().x();
+        fake_left_base.transform.translation.y = tf_l1_to_base.getOrigin().y();
+        fake_left_base.transform.translation.z = tf_l1_to_base.getOrigin().z();
+        fake_left_base.transform.rotation.x = tf_l1_to_base.getRotation().x();
+        fake_left_base.transform.rotation.y = tf_l1_to_base.getRotation().y();
+        fake_left_base.transform.rotation.z = tf_l1_to_base.getRotation().z();
+        fake_left_base.transform.rotation.w = tf_l1_to_base.getRotation().w();
         
+        // 右臂：base→r1 = xyz(0, -0.015, 0.217) + rpy(1.5708, 0, 0)
+        tf2::Transform tf_base_to_r1;
+        tf_base_to_r1.setOrigin(tf2::Vector3(0.0, -0.015, 0.217));
+        tf2::Quaternion q_right;
+        q_right.setRPY(1.5708, 0, 0);
+        tf_base_to_r1.setRotation(q_right);
+        
+        // 求逆：r1→fake_base
+        tf2::Transform tf_r1_to_base = tf_base_to_r1.inverse();
         geometry_msgs::msg::TransformStamped fake_right_base;
         fake_right_base.header.stamp = this->now();
         fake_right_base.header.frame_id = "right_link1";
         fake_right_base.child_frame_id = "fake_right_official_base";
-        fake_right_base.transform.translation.x = 0.0;
-        fake_right_base.transform.translation.y = 0.0;
-        fake_right_base.transform.translation.z = -0.217;
-        fake_right_base.transform.rotation.x = 0.0;
-        fake_right_base.transform.rotation.y = 0.0;
-        fake_right_base.transform.rotation.z = 0.0;
-        fake_right_base.transform.rotation.w = 1.0;
+        fake_right_base.transform.translation.x = tf_r1_to_base.getOrigin().x();
+        fake_right_base.transform.translation.y = tf_r1_to_base.getOrigin().y();
+        fake_right_base.transform.translation.z = tf_r1_to_base.getOrigin().z();
+        fake_right_base.transform.rotation.x = tf_r1_to_base.getRotation().x();
+        fake_right_base.transform.rotation.y = tf_r1_to_base.getRotation().y();
+        fake_right_base.transform.rotation.z = tf_r1_to_base.getRotation().z();
+        fake_right_base.transform.rotation.w = tf_r1_to_base.getRotation().w();
         
         tf_static_broadcaster_->sendTransform({fake_left_base, fake_right_base});
         
