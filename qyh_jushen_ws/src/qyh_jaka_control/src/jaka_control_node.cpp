@@ -658,7 +658,7 @@ private:
         //    使用 fake_official_base 确保与SDK内部运动学模型的坐标系一致
         geometry_msgs::msg::PoseStamped pose_in_base, pose_in_official_base;
         pose_in_base.header.frame_id = "base_link";
-        pose_in_base.header.stamp = this->now();
+        pose_in_base.header.stamp = rclcpp::Time(0);  // 使用Time(0)表示"最新可用"，避免静态TF时间戳问题
         pose_in_base.pose = pose;
         
         // 使用fake官方base而不是left_base_link（fake base到link1距离0.217m，符合SDK期望）
