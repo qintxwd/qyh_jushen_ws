@@ -154,6 +154,59 @@ sudo usermod -a -G dialout $USER
 3. 使用 `ros2 service call` 尝试使能扭矩
 4. 检查电源供应
 
+## 舵机ID设置工具
+
+当需要设置舵机ID时（例如两个舵机出厂时都是ID=1），使用 `set_servo_id` 工具。
+
+### 使用方法
+
+⚠️ **重要**: 使用此工具时，必须只连接一个舵机！
+
+```bash
+# 将舵机ID设置为 2
+ros2 run qyh_head_motor_control set_servo_id --ros-args -p new_id:=2
+
+# 指定串口（默认 /dev/ttyUSB0）
+ros2 run qyh_head_motor_control set_servo_id --ros-args \
+    -p new_id:=2 \
+    -p port:=/dev/ttyACM0
+
+# 指定波特率（默认 1000000）
+ros2 run qyh_head_motor_control set_servo_id --ros-args \
+    -p new_id:=2 \
+    -p port:=/dev/ttyACM0 \
+    -p baudrate:=115200
+```
+
+### 参数
+
+| 参数 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `new_id` | int | 必填 | 新的舵机ID (0-253) |
+| `port` | string | `/dev/ttyUSB0` | 串口设备路径 |
+| `baudrate` | int | `1000000` | 波特率 |
+
+### 操作流程
+
+1. **断开所有舵机**
+2. **只连接需要设置ID的那个舵机**
+3. 运行工具设置ID
+4. 工具会自动扫描并验证只有一个舵机连接
+5. 设置成功后，可以连接下一个舵机重复操作
+
+### 示例：设置两个舵机
+
+```bash
+# 第一步：只连接第一个舵机，设置为ID=1
+ros2 run qyh_head_motor_control set_servo_id --ros-args -p new_id:=1 -p port:=/dev/ttyACM0
+
+# 第二步：断开第一个舵机，只连接第二个舵机，设置为ID=2
+ros2 run qyh_head_motor_control set_servo_id --ros-args -p new_id:=2 -p port:=/dev/ttyACM0
+
+# 第三步：同时连接两个舵机，启动正常节点
+ros2 launch qyh_head_motor_control head_motor.launch.py
+```
+
 ## 文件结构
 
 ```
@@ -170,7 +223,8 @@ qyh_head_motor_control/
 │   └── head_motor.launch.py
 └── src/
     ├── bus_servo_protocol.cpp
-    └── head_motor_node.cpp
+    ├── head_motor_node.cpp
+    └── set_servo_id.cpp      # 舵机ID设置工具
 ```
 
 ## License

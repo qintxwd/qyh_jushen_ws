@@ -29,9 +29,19 @@ ament_target_dependencies(head_motor_node
   std_srvs
 )
 
+# Set servo ID tool
+add_executable(set_servo_id
+  src/set_servo_id.cpp
+  src/bus_servo_protocol.cpp
+)
+ament_target_dependencies(set_servo_id
+  rclcpp
+)
+
 # Install executables
 install(TARGETS
   head_motor_node
+  set_servo_id
   DESTINATION lib/${PROJECT_NAME}
 )
 
