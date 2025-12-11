@@ -17,7 +17,8 @@ public:
   TeleoperationNode()
   : Node("teleoperation_node"),
     left_clutch_engaged_(false),
-    right_clutch_engaged_(false)
+    right_clutch_engaged_(false),
+    initialized_(false)
   {
     // Declare parameters
     this->declare_parameter<std::string>("robot_description", "robot_description");
@@ -26,7 +27,11 @@ public:
     this->declare_parameter<double>("control_frequency", 125.0);
     this->declare_parameter<double>("max_velocity", 1.0);
     this->declare_parameter<double>("max_acceleration", 0.5);
-    
+  }
+  
+  // 两阶段初始化：在 shared_ptr 创建后调用
+  void initialize()
+  {
     // Get parameters
     std::string robot_desc_param = this->get_parameter("robot_description").as_string();
     std::string left_group = this->get_parameter("left_arm_group").as_string();
@@ -41,7 +46,6 @@ public:
     
     if (!robot_model_) {
       RCLCPP_ERROR(this->get_logger(), "Failed to load robot model");
-      rclcpp::shutdown();
       return;
     }
     
@@ -57,7 +61,6 @@ public:
       RCLCPP_INFO(this->get_logger(), "Controllers initialized");
     } catch (const std::exception& e) {
       RCLCPP_ERROR(this->get_logger(), "Failed to initialize controllers: %s", e.what());
-      rclcpp::shutdown();
       return;
     }
     
@@ -104,6 +107,8 @@ public:
     left_current_state_ = qyh_teleoperation_controller::JointState(7);
     right_current_state_ = qyh_teleoperation_controller::JointState(7);
     
+    initialized_ = true;
+    
     RCLCPP_INFO(this->get_logger(), 
       "Teleoperation node initialized at %.1f Hz", control_freq);
     RCLCPP_INFO(this->get_logger(), "Using Clutch mode - waiting for grip button...");
@@ -112,24 +117,24 @@ public:
 private:
   void leftTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
   {
-    if (left_controller_) {
-      auto command = left_controller_->computeJointCommand(*msg, left_current_state_);
-      left_virtual_arm_->updateState(command);
-      
-      // Publish command to real robot
-      publishJointCommand(left_command_pub_, command, "left");
-    }
+    if (!initialized_ || !left_controller_) return;
+    
+    auto command = left_controller_->computeJointCommand(*msg, left_current_state_);
+    left_virtual_arm_->updateState(command);
+    
+    // Publish command to real robot
+    publishJointCommand(left_command_pub_, command, "left");
   }
   
   void rightTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
   {
-    if (right_controller_) {
-      auto command = right_controller_->computeJointCommand(*msg, right_current_state_);
-      right_virtual_arm_->updateState(command);
-      
-      // Publish command to real robot
-      publishJointCommand(right_command_pub_, command, "right");
-    }
+    if (!initialized_ || !right_controller_) return;
+    
+    auto command = right_controller_->computeJointCommand(*msg, right_current_state_);
+    right_virtual_arm_->updateState(command);
+    
+    // Publish command to real robot
+    publishJointCommand(right_command_pub_, command, "right");
   }
   
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
@@ -190,6 +195,7 @@ private:
   // Clutch state
   std::atomic<bool> left_clutch_engaged_;
   std::atomic<bool> right_clutch_engaged_;
+  std::atomic<bool> initialized_;
   
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_target_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_target_sub_;
@@ -205,6 +211,10 @@ int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<TeleoperationNode>();
+  
+  // 两阶段初始化：shared_ptr 创建后再调用 initialize()
+  node->initialize();
+  
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;
