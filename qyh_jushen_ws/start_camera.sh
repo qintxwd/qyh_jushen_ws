@@ -77,23 +77,21 @@ start_head_camera() {
     export RCUTILS_LOGGING_BUFFERED_STREAM=1
 export RCUTILS_COLORIZED_OUTPUT=1
     # Orbbec 相机启动参数
+    # 使用最小参数集启动，依赖相机默认配置
     ros2 launch orbbec_camera gemini_330_series.launch.py \
         camera_name:=head_camera \
-        usb_port:="" \
-        device_num:=1 \
-        enable_colored_point_cloud:=false \
-        depth_registration:=true \
-        enable_point_cloud:=false \
-        color_width:=640 \
-        color_height:=480 \
-        color_fps:=30 \
-        depth_width:=640 \
-        depth_height:=480 \
-        depth_fps:=30 \
+        enumerate_net_device:=true \
         &
     
     HEAD_CAMERA_PID=$!
     echo -e "${GREEN}✓ 头部相机已启动 (PID: $HEAD_CAMERA_PID)${NC}"
+
+    # 启动深度图可视化转换节点
+    echo -e "${BLUE}启动深度图可视化转换...${NC}"
+    # python3 "$WS_DIR/depth_visualizer.py" &
+    ros2 run orbbec_camera depth_visualizer.py &
+    VISUALIZER_PID=$!
+    echo -e "${GREEN}✓ 深度图转换节点已启动 (PID: $VISUALIZER_PID)${NC}"
 }
 
 # 启动 web_video_server
@@ -119,6 +117,7 @@ export RCUTILS_COLORIZED_OUTPUT=1
     echo -e "${GREEN}✓ web_video_server 已启动 (PID: $WEB_VIDEO_PID)${NC}"
     echo -e "${GREEN}  访问地址: http://localhost:8080${NC}"
     echo -e "${GREEN}  视频流:   http://localhost:8080/stream?topic=/head_camera/color/image_raw${NC}"
+    echo -e "${GREEN}  深度流:   http://localhost:8080/stream?topic=/head_camera/depth/image_visual${NC}"
 }
 
 # 显示可用话题
@@ -141,10 +140,14 @@ cleanup() {
     if [ ! -z "$WEB_VIDEO_PID" ]; then
         kill $WEB_VIDEO_PID 2>/dev/null || true
     fi
+    if [ ! -z "$VISUALIZER_PID" ]; then
+        kill $VISUALIZER_PID 2>/dev/null || true
+    fi
     
     # 终止所有相关节点
     pkill -f "orbbec_camera" 2>/dev/null || true
     pkill -f "web_video_server" 2>/dev/null || true
+    pkill -f "depth_visualizer" 2>/dev/null || true
     
     echo -e "${GREEN}✓ 相机系统已关闭${NC}"
     exit 0
@@ -179,7 +182,8 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo -e "${BLUE}可用服务:${NC}"
     echo -e "  - 头部相机话题: /head_camera/color/image_raw"
-    echo -e "  - 深度图话题:   /head_camera/depth/image_raw"
+    echo -e "  - 深度图话题:   /head_camera/depth/image_raw (原始16位)"
+    echo -e "  - 深度图可视:   /head_camera/depth/image_visual (彩色8位)"
     echo -e "  - 视频流服务:   http://localhost:8080"
     echo ""
     echo -e "${YELLOW}按 Ctrl+C 停止所有服务${NC}"
