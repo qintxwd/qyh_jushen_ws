@@ -243,23 +243,32 @@ private:
 
         auto start = std::chrono::high_resolution_clock::now();
         
-        // 1. 优先检查 Bridge 指令 (VR遥操作)
+        // 1. 检查 Bridge 指令 (VR遥操作) - 允许单臂控制
         std::vector<double> left_cmd, right_cmd;
-        bool bridge_active = false;
+        bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
+        bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
+        bool bridge_active = has_left || has_right;
         
-        if (left_bridge_->getInterpolatedCommand(left_cmd) && 
-            right_bridge_->getInterpolatedCommand(right_cmd)) {
-            
-            // 使用 edgServoJ 分别发送
+        if (bridge_active) {
             bool success = true;
-            success &= jaka_interface_.edgServoJ(0, convertToJointValue(left_cmd), true);
-            success &= jaka_interface_.edgServoJ(1, convertToJointValue(right_cmd), true);
+            
+            // 分别发送有效的指令
+            if (has_left) {
+                success &= jaka_interface_.edgServoJ(0, convertToJointValue(left_cmd), true);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
+                    "Sending left arm servo command");
+            }
+            if (has_right) {
+                success &= jaka_interface_.edgServoJ(1, convertToJointValue(right_cmd), true);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
+                    "Sending right arm servo command");
+            }
+            
             success &= jaka_interface_.edgSend();
             
             if (!success) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000, "Failed to send bridge servo commands");
             }
-            bridge_active = true;
         }
         
         // 2. 如果没有 Bridge 指令，检查标准指令
@@ -394,9 +403,16 @@ private:
     }
     
     void leftBridgeCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
+            "leftBridgeCallback: servo_running=%d, positions=%zu", 
+            servo_running_.load(), msg->position.size());
         if (servo_running_ && msg->position.size() >= 7) {
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             left_bridge_->addCommand(positions);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
+                "Left arm command added: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                positions[0], positions[1], positions[2], positions[3], 
+                positions[4], positions[5], positions[6]);
         }
     }
     

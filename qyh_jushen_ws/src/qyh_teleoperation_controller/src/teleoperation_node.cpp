@@ -33,15 +33,16 @@ public:
   void initialize()
   {
     // Get parameters
-    std::string robot_desc_param = this->get_parameter("robot_description").as_string();
     std::string left_group = this->get_parameter("left_arm_group").as_string();
     std::string right_group = this->get_parameter("right_arm_group").as_string();
     double control_freq = this->get_parameter("control_frequency").as_double();
     
     // Load robot model
+    // Note: RobotModelLoader expects the PARAMETER NAME (not value)
+    // It will internally call get_parameter("robot_description") to get the URDF
     RCLCPP_INFO(this->get_logger(), "Loading robot model...");
     robot_model_loader::RobotModelLoader robot_model_loader(
-      shared_from_this(), robot_desc_param);
+      shared_from_this(), "robot_description");
     robot_model_ = robot_model_loader.getModel();
     
     if (!robot_model_) {
