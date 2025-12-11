@@ -1,15 +1,15 @@
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, Command
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
     # Get package directories
     teleoperation_pkg = get_package_share_directory('qyh_teleoperation_controller')
-    moveit_config_pkg = get_package_share_directory('qyh_dual_arms_moveit_config')
     description_pkg = get_package_share_directory('qyh_dual_arms_description')
     
     # Configuration file
@@ -26,6 +26,10 @@ def generate_launch_description():
         'dual_arms.urdf.xacro'
     )
     
+    # 使用 xacro 处理 URDF 文件，获取实际的 XML 内容
+    robot_description_content = Command(['xacro ', urdf_file])
+    robot_description = {'robot_description': ParameterValue(robot_description_content, value_type=str)}
+    
     # Teleoperation Node
     teleoperation_node = Node(
         package='qyh_teleoperation_controller',
@@ -34,8 +38,8 @@ def generate_launch_description():
         output='screen',
         parameters=[
             config_file,
+            robot_description,
             {
-                'robot_description': urdf_file,
                 'use_sim_time': False
             }
         ]
