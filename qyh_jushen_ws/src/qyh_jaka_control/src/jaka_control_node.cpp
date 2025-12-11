@@ -47,11 +47,19 @@ using namespace std::chrono_literals;
 class SimpleJointSmoother {
 public:
     struct Limits {
-        double max_velocity = 1.0;        // rad/s
-        double max_acceleration = 2.0;    // rad/s²
-        double max_jerk = 10.0;           // rad/s³ - 保证平滑
-        double low_pass_cutoff = 8.0;     // Hz - 滤除人手8-12Hz抖动
-        double max_position_delta = 0.05; // rad/step (约3度)
+        double max_velocity;
+        double max_acceleration;
+        double max_jerk;
+        double low_pass_cutoff;
+        double max_position_delta;
+        
+        Limits() 
+            : max_velocity(1.0),           // rad/s
+              max_acceleration(2.0),       // rad/s²
+              max_jerk(10.0),              // rad/s³ - 保证平滑
+              low_pass_cutoff(8.0),        // Hz - 滤除人手8-12Hz抖动
+              max_position_delta(0.05)     // rad/step (约3度)
+        {}
     };
 
     SimpleJointSmoother(size_t num_joints = 7, const Limits& limits = Limits())
