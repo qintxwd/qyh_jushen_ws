@@ -152,14 +152,18 @@ echo ""
 
 # 1. 启动 Robot State Publisher (发布 TF 树)
 echo -e "${GREEN}[1/4] 启动 Robot State Publisher (TF 树)...${NC}"
-URDF_PATH="$WS_DIR/src/qyh_dual_arms_description/urdf/dual_arms.urdf.xacro"
-if [ ! -f "$URDF_PATH" ]; then
-    echo -e "${RED}[ERROR] URDF 文件不存在: $URDF_PATH${NC}"
+# 使用专用的 launch 文件（只启动 robot_state_publisher，不启动 RViz/GUI）
+ros2 launch qyh_dual_arms_description robot_state_publisher.launch.py > /dev/null 2>&1 &
+RSP_PID=$!
+sleep 2
+
+# 验证 robot_state_publisher 是否启动
+if ! ros2 node list 2>/dev/null | grep -q "robot_state_publisher"; then
+    echo -e "${RED}[ERROR] robot_state_publisher 未成功启动${NC}"
+    echo -e "${RED}请检查 qyh_dual_arms_description 包是否正确编译${NC}"
     exit 1
 fi
-ros2 run robot_state_publisher robot_state_publisher --ros-args -p robot_description:="$(xacro $URDF_PATH)" &
-RSP_PID=$!
-sleep 1
+echo -e "${GREEN}[OK] robot_state_publisher 已启动${NC}"
 
 # 2. 启动 VR Bridge
 echo -e "${GREEN}[2/4] 启动 VR Bridge...${NC}"
