@@ -132,9 +132,9 @@ public:
 
     void setLimits(const Limits& limits) { limits_ = limits; }
 
-    // 用当前机器人状态初始化（避免启动跳变）
+    // 用当前机器人状态初始化（避免启动跳变）- 仅在未初始化时生效
     void initializeWith(const std::vector<double>& current_joints) {
-        if (current_joints.size() == num_joints_) {
+        if (!initialized_ && current_joints.size() == num_joints_) {
             current_pos_ = current_joints;
             filtered_pos_ = current_joints;
             std::fill(current_vel_.begin(), current_vel_.end(), 0.0);
@@ -579,38 +579,6 @@ private:
 
     // ==================== 笛卡尔遥操作回调 (方案C) ====================
     /**
-     * @brief 将 ROS Pose 转换为 JAKA CartesianPose
-     */
-    CartesianPose rosPoseToJaka(const geometry_msgs::msg::Pose& pose) {
-        CartesianPose jaka_pose;
-        jaka_pose.tran.x = pose.position.x * 1000.0;  // m -> mm
-        jaka_pose.tran.y = pose.position.y * 1000.0;
-        jaka_pose.tran.z = pose.position.z * 1000.0;
-        
-        // 四元数转RPY (度)
-        double qw = pose.orientation.w;
-        double qx = pose.orientation.x;
-        double qy = pose.orientation.y;
-        double qz = pose.orientation.z;
-        
-        double sinr_cosp = 2.0 * (qw * qx + qy * qz);
-        double cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy);
-        jaka_pose.rpy.rx = std::atan2(sinr_cosp, cosr_cosp) * 180.0 / M_PI;
-        
-        double sinp = 2.0 * (qw * qy - qz * qx);
-        if (std::abs(sinp) >= 1)
-            jaka_pose.rpy.ry = std::copysign(90.0, sinp);
-        else
-            jaka_pose.rpy.ry = std::asin(sinp) * 180.0 / M_PI;
-        
-        double siny_cosp = 2.0 * (qw * qz + qx * qy);
-        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
-        jaka_pose.rpy.rz = std::atan2(siny_cosp, cosy_cosp) * 180.0 / M_PI;
-        
-        return jaka_pose;
-    }
-
-    /**
      * @brief 处理单臂笛卡尔位姿回调
      * @param robot_id 0=左臂, 1=右臂
      * @param pose 目标位姿
@@ -632,8 +600,8 @@ private:
             return;
         }
 
-        // 2. 转换位姿格式
-        CartesianPose target_pose = rosPoseToJaka(pose);
+        // 2. 转换位姿格式 (使用 jaka_interface 的转换函数，确保单位正确)
+        CartesianPose target_pose = jaka_interface_.rosPoseToJaka(pose);
 
         // 3. 调用 JAKA IK
         JointValue ik_result;
@@ -646,9 +614,14 @@ private:
 
         // 4. 转换为 vector
         std::vector<double> ik_joints(7);
+        std::vector<double> curr_joints(7);
         for (size_t i = 0; i < 7; ++i) {
             ik_joints[i] = ik_result.jVal[i];
+            curr_joints[i] = current_joints.jVal[i];
         }
+
+        // ★★★ 关键修复：用当前关节位置初始化平滑器（避免首次调用跳变）★★★
+        smoother->initializeWith(curr_joints);
 
         // 5. 轨迹平滑
         double dt = cycle_time_ms_ / 1000.0;  // 8ms = 0.008s

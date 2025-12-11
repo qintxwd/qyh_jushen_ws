@@ -150,20 +150,31 @@ echo ""
 echo -e "${YELLOW}[INFO] 方案C: 使用 JAKA 原生 IK，无需 MoveIt${NC}"
 echo ""
 
-# 1. 启动 VR Bridge
-echo -e "${GREEN}[1/3] 启动 VR Bridge...${NC}"
+# 1. 启动 Robot State Publisher (发布 TF 树)
+echo -e "${GREEN}[1/4] 启动 Robot State Publisher (TF 树)...${NC}"
+URDF_PATH="$WS_DIR/src/qyh_dual_arms_description/urdf/dual_arms.urdf.xacro"
+if [ ! -f "$URDF_PATH" ]; then
+    echo -e "${RED}[ERROR] URDF 文件不存在: $URDF_PATH${NC}"
+    exit 1
+fi
+ros2 run robot_state_publisher robot_state_publisher --ros-args -p robot_description:="$(xacro $URDF_PATH)" &
+RSP_PID=$!
+sleep 1
+
+# 2. 启动 VR Bridge
+echo -e "${GREEN}[2/4] 启动 VR Bridge...${NC}"
 ros2 run qyh_vr_bridge vr_bridge_node --ros-args -p grip_offset_deg:=35.0 &
 VR_BRIDGE_PID=$!
 sleep 2
 
-# 2. 启动 VR Clutch (真机模式)
-echo -e "${GREEN}[2/3] 启动 VR Clutch (真机模式)...${NC}"
+# 3. 启动 VR Clutch (真机模式)
+echo -e "${GREEN}[3/4] 启动 VR Clutch (真机模式)...${NC}"
 ros2 launch qyh_vr_calibration vr_clutch.launch.py simulation_mode:=false &
 VR_CLUTCH_PID=$!
 sleep 2
 
-# 3. 启动 JAKA Control Node (集成 IK + 平滑 + Servo)
-echo -e "${GREEN}[3/3] 启动 JAKA Control Node (IK+平滑+Servo)...${NC}"
+# 4. 启动 JAKA Control Node (集成 IK + 平滑 + Servo)
+echo -e "${GREEN}[4/4] 启动 JAKA Control Node (IK+平滑+Servo)...${NC}"
 ros2 launch qyh_jaka_control jaka_control.launch.py robot_ip:=$ROBOT_IP &
 JAKA_PID=$!
 sleep 3
@@ -174,6 +185,7 @@ echo -e "${GREEN}║                    所有节点已启动!                  
 echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "节点状态:"
+echo -e "  - Robot State Pub:   PID ${RSP_PID}"
 echo -e "  - VR Bridge:         PID ${VR_BRIDGE_PID}"
 echo -e "  - VR Clutch:         PID ${VR_CLUTCH_PID}"
 echo -e "  - JAKA Control:      PID ${JAKA_PID}"
@@ -199,6 +211,8 @@ echo -e "  ros2 topic hz /vr/left_hand/pose           # VR 原始数据"
 echo -e "  ros2 topic echo /vr/left_clutch_engaged    # Clutch 状态"
 echo -e "  ros2 topic hz /vr/left_target_pose         # Clutch 输出的目标位姿"
 echo -e "  ros2 topic echo /jaka/robot_state          # 机器人状态"
+echo -e "  ros2 run tf2_tools view_frames             # 生成 TF 树 PDF"
+echo -e "  ros2 run tf2_ros tf2_echo base_link left_tool0  # 查看 TF 变换"
 echo ""
 echo -e "${RED}${BOLD}按 Ctrl+C 停止所有节点${NC}"
 echo ""
