@@ -33,6 +33,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/JogStop.srv"
   "srv/SetPayload.srv"
   "srv/GetPayload.srv"
+  "srv/ComputeIK.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

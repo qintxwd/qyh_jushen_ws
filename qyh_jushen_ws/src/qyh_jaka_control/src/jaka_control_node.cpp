@@ -19,6 +19,7 @@
 #include <qyh_jaka_control_msgs/srv/jog_stop.hpp>
 #include <qyh_jaka_control_msgs/srv/set_payload.hpp>
 #include <qyh_jaka_control_msgs/srv/get_payload.hpp>
+#include <qyh_jaka_control_msgs/srv/compute_ik.hpp>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -196,6 +197,11 @@ public:
             "/jaka/get_payload",
             std::bind(&JakaControlNode::handleGetPayload, this, std::placeholders::_1, std::placeholders::_2));
 
+        // IK 服务
+        srv_compute_ik_ = create_service<qyh_jaka_control_msgs::srv::ComputeIK>(
+            "/jaka/compute_ik",
+            std::bind(&JakaControlNode::handleComputeIK, this, std::placeholders::_1, std::placeholders::_2));
+
         // Initialization
         connected_ = false;
         powered_ = false;
@@ -257,14 +263,14 @@ private:
                 auto jv = convertToJointValue(left_cmd);
                 RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, 
                     "[SERVO] Left cmd: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                    jv[0], jv[1], jv[2], jv[3], jv[4], jv[5], jv[6]);
+                    jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
                 success &= jaka_interface_.edgServoJ(0, jv, true);
             }
             if (has_right) {
                 auto jv = convertToJointValue(right_cmd);
                 RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, 
                     "[SERVO] Right cmd: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                    jv[0], jv[1], jv[2], jv[3], jv[4], jv[5], jv[6]);
+                    jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
                 success &= jaka_interface_.edgServoJ(1, jv, true);
             }
             
@@ -662,6 +668,82 @@ private:
     void handleGetPayload(const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr, qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res) {
         res->success = true; // Placeholder
     }
+    
+    // ==================== IK 服务 ====================
+    void handleComputeIK(
+        const qyh_jaka_control_msgs::srv::ComputeIK::Request::SharedPtr req,
+        qyh_jaka_control_msgs::srv::ComputeIK::Response::SharedPtr res)
+    {
+        if (!connected_) {
+            res->success = false;
+            res->message = "Robot not connected";
+            return;
+        }
+        
+        // 获取参考关节位置
+        JointValue ref_pos;
+        if (req->reference_joints.size() >= 7) {
+            // 使用请求中提供的参考位置
+            for (size_t i = 0; i < 7; ++i) {
+                ref_pos.jVal[i] = req->reference_joints[i];
+            }
+        } else {
+            // 使用当前关节位置作为参考
+            if (!jaka_interface_.getJointPositions(req->robot_id, ref_pos)) {
+                res->success = false;
+                res->message = "Failed to get current joint positions";
+                return;
+            }
+        }
+        
+        // 转换目标位姿为 JAKA 格式
+        CartesianPose target_pose;
+        target_pose.tran.x = req->target_pose.position.x * 1000.0;  // m -> mm
+        target_pose.tran.y = req->target_pose.position.y * 1000.0;
+        target_pose.tran.z = req->target_pose.position.z * 1000.0;
+        
+        // 四元数转欧拉角 (JAKA 使用 RPY)
+        double qw = req->target_pose.orientation.w;
+        double qx = req->target_pose.orientation.x;
+        double qy = req->target_pose.orientation.y;
+        double qz = req->target_pose.orientation.z;
+        
+        // RPY from quaternion
+        double sinr_cosp = 2.0 * (qw * qx + qy * qz);
+        double cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy);
+        target_pose.rpy.rx = std::atan2(sinr_cosp, cosr_cosp) * 180.0 / M_PI;
+        
+        double sinp = 2.0 * (qw * qy - qz * qx);
+        if (std::abs(sinp) >= 1)
+            target_pose.rpy.ry = std::copysign(90.0, sinp);
+        else
+            target_pose.rpy.ry = std::asin(sinp) * 180.0 / M_PI;
+        
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        target_pose.rpy.rz = std::atan2(siny_cosp, cosy_cosp) * 180.0 / M_PI;
+        
+        // 调用 JAKA IK
+        JointValue result_joints;
+        if (jaka_interface_.kineInverse(req->robot_id, ref_pos, target_pose, result_joints)) {
+            res->success = true;
+            res->message = "IK success";
+            res->joint_positions.resize(7);
+            for (size_t i = 0; i < 7; ++i) {
+                res->joint_positions[i] = result_joints.jVal[i];
+            }
+            
+            RCLCPP_DEBUG(get_logger(), 
+                "[IK] robot_id=%d, target=[%.3f,%.3f,%.3f], result=[%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f]",
+                req->robot_id,
+                target_pose.tran.x, target_pose.tran.y, target_pose.tran.z,
+                result_joints.jVal[0], result_joints.jVal[1], result_joints.jVal[2],
+                result_joints.jVal[3], result_joints.jVal[4], result_joints.jVal[5], result_joints.jVal[6]);
+        } else {
+            res->success = false;
+            res->message = "IK failed - target may be out of workspace or near singularity";
+        }
+    }
 
     // 成员变量
     qyh_jaka_control::JakaInterface jaka_interface_;
@@ -723,6 +805,7 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::JogStop>::SharedPtr srv_jog_stop_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetPayload>::SharedPtr srv_set_payload_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::GetPayload>::SharedPtr srv_get_payload_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::ComputeIK>::SharedPtr srv_compute_ik_;
 
     rclcpp::TimerBase::SharedPtr main_timer_;
     rclcpp::TimerBase::SharedPtr status_timer_;

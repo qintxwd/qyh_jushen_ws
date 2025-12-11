@@ -1,0 +1,12 @@
+# 计算逆运动学
+# 使用 JAKA 机械臂自带的 IK 求解器
+
+# 请求
+int32 robot_id                        # 0: 左臂, 1: 右臂
+geometry_msgs/Pose target_pose        # 目标末端位姿
+float64[] reference_joints            # 参考关节位置（用于选择最优解，空则使用当前位置）
+---
+# 响应
+bool success                          # 是否成功
+string message                        # 错误信息
+float64[] joint_positions             # 计算出的关节位置 (7个)

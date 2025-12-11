@@ -1,6 +1,7 @@
 #include "qyh_teleoperation_controller/differential_ik_controller.hpp"
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <cmath>
+#include <algorithm>
 
 namespace qyh_teleoperation_controller
 {
@@ -60,18 +61,17 @@ JointState DifferentialIKController::computeJointCommand(
   Eigen::Matrix<double, 6, 1> pose_delta = 
     computePoseDelta(target_ee_pose, current_ee_pose);
   
-  // Compute joint velocities
-  std::vector<double> joint_velocities = computeJointVelocities(pose_delta);
+  // Compute joint position delta (NOT velocities anymore)
+  std::vector<double> joint_delta = computeJointVelocities(pose_delta);
   
   // Create target joint state
   JointState target_state(current_state.position.size());
   target_state.timestamp = rclcpp::Time(target_pose.header.stamp);
   
-  // Integrate velocities to get target positions
+  // 直接加上关节位置差（不再乘以 dt）
   for (size_t i = 0; i < current_state.position.size(); ++i) {
-    target_state.position[i] = current_state.position[i] + 
-                                joint_velocities[i] * params_.dt;
-    target_state.velocity[i] = joint_velocities[i];
+    target_state.position[i] = current_state.position[i] + joint_delta[i];
+    target_state.velocity[i] = joint_delta[i] / params_.dt;  // 估算速度用于平滑
   }
   
   // Apply trajectory smoothing
@@ -149,28 +149,49 @@ std::vector<double> DifferentialIKController::computeJointVelocities(
     return std::vector<double>(joint_model_group_->getVariableCount(), 0.0);
   }
   
-  // Compute desired end-effector velocity (twist)
-  Eigen::Matrix<double, 6, 1> ee_velocity = pose_delta / params_.dt;
+  // 直接使用位置差（不除以dt转换为速度）
+  // 这样关节变化量 = J^+ * pose_delta，而不是 J^+ * velocity * dt
+  Eigen::Matrix<double, 6, 1> scaled_delta = pose_delta;
+  
+  // 限制位置误差幅度，防止大跳变
+  const double max_pos_delta = 0.01;  // 10mm
+  const double max_rot_delta = 0.05;  // ~3度
+  
+  for (int i = 0; i < 3; ++i) {
+    scaled_delta(i) = std::clamp(scaled_delta(i), -max_pos_delta, max_pos_delta);
+  }
+  for (int i = 3; i < 6; ++i) {
+    scaled_delta(i) = std::clamp(scaled_delta(i), -max_rot_delta, max_rot_delta);
+  }
   
   // Damped Least Squares (DLS) solution: dq = J^T * (J*J^T + lambda^2*I)^-1 * dx
-  // This is more stable near singularities than pure pseudoinverse
+  // 使用更大的阻尼因子以提高稳定性
   size_t m = jacobian.rows();  // 6 (task space dimension)
   size_t n = jacobian.cols();  // num_joints
   
+  // 增大阻尼因子，防止奇异点附近的大跳变
+  double effective_damping = std::max(params_.damping_factor, 0.1);
+  
   Eigen::MatrixXd J_JT = jacobian * jacobian.transpose();
-  Eigen::MatrixXd damping = params_.damping_factor * params_.damping_factor * 
+  Eigen::MatrixXd damping = effective_damping * effective_damping * 
                             Eigen::MatrixXd::Identity(m, m);
   
   Eigen::MatrixXd JJT_damped = J_JT + damping;
   
-  // Solve for joint velocities
-  Eigen::VectorXd joint_velocities_eigen = 
-    jacobian.transpose() * JJT_damped.ldlt().solve(ee_velocity);
+  // 解出关节位置变化量（不是速度）
+  Eigen::VectorXd joint_delta = 
+    jacobian.transpose() * JJT_damped.ldlt().solve(scaled_delta);
   
-  // Convert to std::vector
+  // 限制每个关节的最大变化量
+  const double max_joint_delta = 0.05;  // ~3度
+  for (size_t i = 0; i < n; ++i) {
+    joint_delta(i) = std::clamp(joint_delta(i), -max_joint_delta, max_joint_delta);
+  }
+  
+  // 返回关节变化量（作为"速度"返回，但实际是位置差）
   std::vector<double> joint_velocities(n);
   for (size_t i = 0; i < n; ++i) {
-    joint_velocities[i] = joint_velocities_eigen(i);
+    joint_velocities[i] = joint_delta(i);
   }
   
   return joint_velocities;
