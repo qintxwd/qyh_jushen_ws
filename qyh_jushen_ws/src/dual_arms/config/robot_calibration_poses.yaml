@@ -1,0 +1,103 @@
+# 机械臂VR标定姿态配置
+# 用于VR到机械臂空间的位置映射标定
+# 
+# 使用说明:
+# 1. 控制机械臂移动到每个姿态
+# 2. 记录末端执行器的XYZ坐标（base_link坐标系）
+# 3. 填入下方对应位置
+# 4. 运行标定工具时，会读取这些数据作为目标位置
+
+calibration_poses:
+  # 姿态1: 双臂打开，与肩平齐
+  # 描述: 两臂水平伸展，覆盖工作空间的X轴左右边界
+  arms_open:
+    description: "Arms spread horizontally at shoulder height"
+    left_arm:
+      position:  # 单位: 米
+        x: 0.0  # 左侧（负值）或右侧（正值）
+        y: 0.0  # 高度
+        z: 0.0  # 前后位置
+    right_arm:
+      position:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+  
+  # 姿态2: 双臂垂直放下
+  # 描述: 自然下垂，定义工作空间下边界和零点参考
+  arms_down:
+    description: "Arms hanging down naturally"
+    left_arm:
+      position:
+        x: 0.0
+        y: 0.0  # 应该是最低点
+        z: 0.0
+    right_arm:
+      position:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+  
+  # 姿态3: 双臂水平前伸
+  # 描述: 向前伸展，覆盖Z轴前方范围
+  arms_forward:
+    description: "Arms extended forward horizontally"
+    left_arm:
+      position:
+        x: 0.0
+        y: 0.0
+        z: 0.0  # 应该是最前方
+    right_arm:
+      position:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+  
+  # 姿态4: 双臂低位前伸
+  # 描述: 向前伸展但手臂自然下垂，覆盖前下方区域（类似端托盘姿态）
+  arms_forward_low:
+    description: "Arms extended forward at low angle (like holding a tray)"
+    left_arm:
+      position:
+        x: 0.0  # 左侧偏移
+        y: 0.0  # 较低位置
+        z: 0.0  # 前方
+    right_arm:
+      position:
+        x: 0.0  # 右侧偏移
+        y: 0.0  # 较低位置
+        z: 0.0  # 前方
+
+# 标定参考信息
+calibration_info:
+  coordinate_frame: "base_link"  # 坐标系
+  units: "meters"  # 单位
+  date_created: ""  # 创建日期
+  notes: |
+    标定建议:
+    1. 确保所有姿态在机械臂工作空间内且无自碰撞风险
+    2. 使用示教器或MoveIt精确控制机械臂到达目标位置
+    3. 记录末端执行器（TCP）的位置，而非手腕关节
+    4. 姿态应覆盖工作空间的不同方向和高度
+    5. 避免关节接近极限位置的姿态
+    6. 选择容易精确重复的姿态，避免依赖角度判断
+    
+    姿态覆盖策略（4个姿态，左右手共8个点）:
+    - arms_open: 覆盖X轴左右边界（左右手形成2个X轴采样点）
+    - arms_down: 覆盖Y轴下边界（零点参考）
+    - arms_forward: 覆盖Z轴前方、中等高度
+    - arms_forward_low: 覆盖Z轴前方、较低高度
+    
+    空间采样分布:
+    - X轴: 2个位置（arms_open的左右手）
+    - Y轴: 3个高度（arms_down低、arms_forward_low中低、arms_forward中）
+    - Z轴: 2个深度（arms_forward和arms_forward_low都在前方）
+
+# 可选: 如果需要更精确的标定，可以添加更多姿态
+# additional_poses:
+#   arms_side_high:
+#     description: "Arms to the side at high position"
+#     left_arm:
+#       position: {x: 0.0, y: 0.0, z: 0.0}
+#     right_arm:
+#       position: {x: 0.0, y: 0.0, z: 0.0}
