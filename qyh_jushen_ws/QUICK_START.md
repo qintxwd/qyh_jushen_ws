@@ -74,10 +74,10 @@ qyh_jushen_ws/
 ├── QUICK_START.md                  # 本文件
 ├── 仿真训练项目计划.md              # 完整项目计划
 └── src/
-    ├── Dual-Arms/
+    ├── dual_arms/
     │   ├── urdf/
-    │   │   ├── Dual-Arms-gazebo.urdf          # ✨ 已添加ros2_control
-    │   │   └── Dual-Arms-gazebo.urdf.backup   # 原始备份
+    │   │   ├── dual_arms-gazebo.urdf          # ✨ 已添加ros2_control
+    │   │   └── dual_arms-gazebo.urdf.backup   # 原始备份
     │   └── config/
     │       └── dual_arms_controllers.yaml     # 控制器配置
     └── sim_training_env/

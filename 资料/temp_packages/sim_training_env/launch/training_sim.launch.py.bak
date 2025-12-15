@@ -16,7 +16,7 @@ def generate_launch_description():
     dual_arms_pkg = get_package_share_directory('dual_arms')
     
     world_file = os.path.join(sim_pkg, 'worlds', 'pick_place_training.world')
-    urdf_file = os.path.join(dual_arms_pkg, 'urdf', 'Dual-Arms-gazebo.urdf')
+    urdf_file = os.path.join(dual_arms_pkg, 'urdf', 'dual_arms-gazebo.urdf')
     controllers_file = os.path.join(dual_arms_pkg, 'config', 'dual_arms_controllers.yaml')
     
     # Load URDF

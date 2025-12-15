@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-urdf_file = 'src/Dual-Arms/urdf/Dual-Arms-gazebo.urdf'
+urdf_file = 'src/dual_arms/urdf/dual_arms-gazebo.urdf'
 
 with open(urdf_file, 'r') as f:
     lines = f.readlines()

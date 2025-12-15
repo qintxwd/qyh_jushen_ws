@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # 修复URDF中的gazebo_ros2_control插件
 
-urdf_file = 'src/Dual-Arms/urdf/Dual-Arms-gazebo.urdf'
+urdf_file = 'src/dual_arms/urdf/dual_arms-gazebo.urdf'
 
 with open(urdf_file, 'r', encoding='utf-8') as f:
     content = f.read()
