@@ -20,20 +20,7 @@
         iyz="-2.22463099675456E-13"
         izz="0.0350085747713705" />
     </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://dual_arms/meshes/base_link.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
-      </material>
-    </visual>
+    <!-- Visual removed: base platform hidden in RViz -->
     <collision>
       <origin
         xyz="0 0 0"
@@ -44,6 +31,24 @@
       </geometry>
     </collision>
   </link>
+  
+  <!-- Calibration offset link for right arm -->
+  <!-- Compensates for difference between URDF calculation and real robot -->
+  <!-- Offset based on zero-position measurement: xyz=[-0.001080, 0.001050, 0.000951] -->
+  <link name="base_link_right">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  
+  <joint name="base_to_right" type="fixed">
+    <origin xyz="-0.001080 0.001050 0.000951" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="base_link_right" />
+  </joint>
+  
   <link
     name="r1">
     <inertial>
@@ -91,7 +96,7 @@
       xyz="0 -0.015 0.217"
       rpy="1.5708 0 0" />
     <parent
-      link="base_link" />
+      link="base_link_right" />
     <child
       link="r1" />
     <axis
@@ -503,6 +508,24 @@
     <axis
       xyz="0 0 0" />
   </joint>
+  
+  <!-- Calibration offset link for left arm -->
+  <!-- Compensates for difference between URDF calculation and real robot -->
+  <!-- Offset based on zero-position measurement: xyz=[-0.0004, 0.0022, 0.0030] -->
+  <link name="base_link_left">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  
+  <joint name="base_to_left" type="fixed">
+    <origin xyz="-0.0004 0.0022 0.0030" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="base_link_left" />
+  </joint>
+  
   <link
     name="l1">
     <inertial>
@@ -550,7 +573,7 @@
       xyz="0 0.015 0.217"
       rpy="1.5708 0 -3.1416" />
     <parent
-      link="base_link" />
+      link="base_link_left" />
     <child
       link="l1" />
     <axis
