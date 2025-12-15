@@ -44,7 +44,7 @@
   </link>
   
   <joint name="base_to_right" type="fixed">
-    <origin xyz="-0.001080 -0.083950 0.000951" rpy="0 0 0.5236" />
+    <origin xyz="-0.001080 -0.098950 0.000951" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="base_link_right" />
   </joint>
@@ -521,7 +521,7 @@
   </link>
   
   <joint name="base_to_left" type="fixed">
-    <origin xyz="-0.0004 0.08522 0.0030" rpy="0 0 -0.5236" />
+    <origin xyz="-0.0004 0.1022 0.0030" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="base_link_left" />
   </joint>
