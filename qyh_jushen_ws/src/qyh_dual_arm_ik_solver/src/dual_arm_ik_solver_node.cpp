@@ -16,6 +16,7 @@
 #include <JAKAZuRobot.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <chrono>
 #include <memory>
@@ -56,11 +57,13 @@ public:
         // ⭐ 必须使用TF查询，因为coordinate_mapper发布的是vr_origin坐标系
         // 需要转换到base_link_left/right才能调用JAKA IK
         declare_parameter<bool>("use_tf_lookup", true);  // 默认启用TF查询
+        declare_parameter<bool>("publish_debug_tf", true);  // 发布调试TF
         
         robot_ip_ = get_parameter("robot_ip").as_string();
         ik_rate_ = get_parameter("ik_rate").as_double();
         auto_connect_ = get_parameter("auto_connect").as_bool();
         use_tf_lookup_ = get_parameter("use_tf_lookup").as_bool();
+        publish_debug_tf_ = get_parameter("publish_debug_tf").as_bool();
         
         RCLCPP_INFO(get_logger(), "===========================================");
         RCLCPP_INFO(get_logger(), "  双臂IK求解节点启动");
@@ -68,6 +71,7 @@ public:
         RCLCPP_INFO(get_logger(), "控制器IP: %s", robot_ip_.c_str());
         RCLCPP_INFO(get_logger(), "IK求解频率: %.1f Hz", ik_rate_);
         RCLCPP_INFO(get_logger(), "使用TF查询: %s", use_tf_lookup_ ? "是" : "否");
+        RCLCPP_INFO(get_logger(), "发布调试TF: %s", publish_debug_tf_ ? "是" : "否");
         
         // 初始化JAKA SDK
         robot_ = std::make_unique<JAKAZuRobot>();
@@ -76,6 +80,11 @@ public:
         // coordinate_mapper发布vr_origin坐标系，需要转换到base_link_left/right
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
         tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+        
+        // TF广播器 - 用于发布调试坐标系
+        if (publish_debug_tf_) {
+            tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+        }
         
         if (!use_tf_lookup_) {
             RCLCPP_WARN(get_logger(), "⚠️ use_tf_lookup=false 不推荐！");
@@ -305,6 +314,22 @@ private:
         // 位置不变（位置已经在base_link_left坐标系下，不需要旋转）
         tf2::Vector3 pos_corrected = pos_base_left;
         
+        // === 发布调试TF（可选）===
+        if (publish_debug_tf_) {
+            geometry_msgs::msg::TransformStamped debug_tf;
+            debug_tf.header.stamp = now();
+            debug_tf.header.frame_id = "base_link_left";
+            debug_tf.child_frame_id = "left_hand_corrected";
+            debug_tf.transform.translation.x = pos_corrected.x();
+            debug_tf.transform.translation.y = pos_corrected.y();
+            debug_tf.transform.translation.z = pos_corrected.z();
+            debug_tf.transform.rotation.x = q_corrected.x();
+            debug_tf.transform.rotation.y = q_corrected.y();
+            debug_tf.transform.rotation.z = q_corrected.z();
+            debug_tf.transform.rotation.w = q_corrected.w();
+            tf_broadcaster_->sendTransform(debug_tf);
+        }
+        
         // === 步骤2: 转换到JAKA格式 ===
         CartesianPose target_pose;
         target_pose.tran.x = pos_corrected.x() * 1000.0;  // m -> mm
@@ -426,6 +451,22 @@ private:
         
         // 位置不变
         tf2::Vector3 pos_corrected = pos_base_right;
+        
+        // === 发布调试TF（可选）===
+        if (publish_debug_tf_) {
+            geometry_msgs::msg::TransformStamped debug_tf;
+            debug_tf.header.stamp = now();
+            debug_tf.header.frame_id = "base_link_right";
+            debug_tf.child_frame_id = "right_hand_corrected";
+            debug_tf.transform.translation.x = pos_corrected.x();
+            debug_tf.transform.translation.y = pos_corrected.y();
+            debug_tf.transform.translation.z = pos_corrected.z();
+            debug_tf.transform.rotation.x = q_corrected.x();
+            debug_tf.transform.rotation.y = q_corrected.y();
+            debug_tf.transform.rotation.z = q_corrected.z();
+            debug_tf.transform.rotation.w = q_corrected.w();
+            tf_broadcaster_->sendTransform(debug_tf);
+        }
         
         // === 步骤2: 转换到JAKA格式 ===
         CartesianPose target_pose;
@@ -565,6 +606,7 @@ private:
     // TF
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     
     // JAKA SDK
     std::unique_ptr<JAKAZuRobot> robot_;
@@ -598,6 +640,7 @@ private:
     // 配置
     double ik_rate_;
     bool use_tf_lookup_;
+    bool publish_debug_tf_;
     
     // 统计
     int solve_count_{0};
