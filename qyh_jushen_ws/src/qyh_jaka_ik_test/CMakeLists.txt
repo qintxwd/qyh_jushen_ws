@@ -14,19 +14,21 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-
-# 使用qyh_jaka_control的JAKA SDK
-set(JAKA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../qyh_jaka_control/thirdparty/include")
-set(JAKA_API_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../qyh_jaka_control/thirdparty/lib/libjakaAPI_2_3_0_13.so")
-
-if(NOT EXISTS ${JAKA_API_LIB})
-  message(FATAL_ERROR "JAKA API library not found: ${JAKA_API_LIB}")
-endif()
-
+# Include directories
 include_directories(
   include
-  ${JAKA_INCLUDE_DIR}
+  ./thirdparty/include
 )
+
+# Resolve JAKA API shared library (Jetson ARM64 version)
+set(JAKA_API_LIB "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/lib/libjakaAPI_2_3_0_13.so")
+if(NOT EXISTS ${JAKA_API_LIB})
+  message(FATAL_ERROR "JAKA API shared library not found at ${JAKA_API_LIB}. Please verify thirdparty/lib contents.")
+endif()
+
+# Set RPATH so the executable can find the shared library at runtime
+set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/thirdparty")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # IK测试节点
 add_executable(ik_test_node src/ik_test_node.cpp)
@@ -53,6 +55,12 @@ install(DIRECTORY
 install(DIRECTORY
   launch/
   DESTINATION share/${PROJECT_NAME}/launch
+)
+
+# Install JAKA API shared library
+install(FILES
+  ${JAKA_API_LIB}
+  DESTINATION lib/${PROJECT_NAME}/thirdparty
 )
 
 ament_package()

@@ -59,10 +59,10 @@ install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
 
-# Install header files
-install(DIRECTORY include/
-  DESTINATION include
-)
+# # Install header files
+# install(DIRECTORY include/
+#   DESTINATION include
+# )
 
 # Testing disabled to avoid catkin_pkg dependency
 # if(BUILD_TESTING)
