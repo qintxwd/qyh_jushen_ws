@@ -121,23 +121,29 @@ T(base_link_left → lt_target) =
 
 ### 📐 关键变换矩阵
 
-#### A. VR手柄 → 人手语义（轴对齐）
+#### A. PICO SDK → ROS标准坐标系（在vr_bridge中完成）⭐
 
-VR坐标系：`[X右, Y上, Z后]` → 人手坐标系：`[X前, Y左, Z上]`
+**已在节点1实现，无需在后续节点重复**
+
+PICO SDK坐标系：`[X右, Y上, -Z前]` → ROS标准坐标系：`[X前, Y左, Z上]`
 
 ```python
-# 轴映射关系
-X_human = -Z_vr
-Y_human = -X_vr
-Z_human =  Y_vr
+# vr_bridge_node.cpp 中的实现
+def map_position(vr_x, vr_y, vr_z):
+    ros_x = -vr_z   # PICO的-Z(前) → ROS的X(前)
+    ros_y = -vr_x   # PICO的-X(左) → ROS的Y(左)
+    ros_z = vr_y    # PICO的Y(上)  → ROS的Z(上)
+    return ros_x, ros_y, ros_z
 
 # 对应旋转矩阵
-R_human_vr = [
+R_ros_pico = [
     [ 0,  0, -1],
     [-1,  0,  0],
     [ 0,  1,  0]
 ]
 ```
+
+**结果**：`vr_left_controller` 和 `vr_right_controller` 输出已经是ROS标准坐标
 
 #### B. base_link → teleop_base（可配置）
 
@@ -202,23 +208,23 @@ R_rt_human_right = [
 ## 4️⃣ ROS2 节点职责划分
 
 ### 🟦 节点1: `vr_bridge_node` (已实现)
-**功能：** VR设备原始数据接收
+**功能：** VR设备原始数据接收 + 底层坐标对齐
 
 **职责：**
 - 监听UDP端口接收PICO4数据包
-- **底层坐标对齐：** PICO SDK坐标系 → ROS标准坐标系 (REP-103)
-  - PICO: X-右, Y-上, -Z-前 (OpenXR)
-  - ROS: X-前, Y-左, Z-上
+- **⭐ 底层坐标对齐：** PICO SDK坐标系 → ROS标准坐标系 (REP-103)
+  - **输入** PICO: `X-右, Y-上, -Z-前` (OpenXR标准)
+  - **输出** ROS: `X-前, Y-左, Z-上` (REP-103标准)
+  - **实现**: `ros_x = -vr_z`, `ros_y = -vr_x`, `ros_z = vr_y`
 - 发布TF：`vr_origin → vr_head`
-- 发布TF：`vr_origin → vr_left_controller`
-- 发布TF：`vr_origin → vr_right_controller`
+- 发布TF：`vr_origin → vr_left_controller` (已对齐到ROS坐标系)
+- 发布TF：`vr_origin → vr_right_controller` (已对齐到ROS坐标系)
 - 发布话题：`/vr/*/pose`, `/vr/*/joy`, `/vr/*/active`
 
-**不包含：**
-- ❌ 握持补偿
-- ❌ 位置缩放
-- ❌ 滤波处理
-- ❌ 零位校准
+**⚠️ 重要说明：**
+- ✅ **已完成VR → ROS的轴对齐**，后续节点接收到的 `vr_*_controller` 已经是ROS标准坐标
+- ✅ `vr_*_controller` 输出：X-前（手指向前）, Y-左（手掌左侧）, Z-上（手掌向上）
+- ❌ 不包含：握持补偿、位置缩放、滤波、零位校准（由后续节点处理）
 
 **输出频率：** 取决于PICO4发送频率（通常60-100Hz）
 
@@ -248,10 +254,10 @@ on_recenter_button():
 ---
 
 ### 🟦 节点3: `coordinate_mapper_node` ⭐核心
-**功能：** 坐标系对齐与数据处理
+**功能：** 握持补偿与数据处理
 
 **职责：**
-- 订阅：`vr_*_controller` TF
+- 订阅：`vr_*_controller` TF (已经是ROS标准坐标系)
 - 处⚠️ 应用末端坐标系校正：human_hand → lt/rt 旋转
 3. 转换到机械臂坐标系：base_link_left/right → lt_target
 4. 调用IK求解器（JAKA SDK或KDL）

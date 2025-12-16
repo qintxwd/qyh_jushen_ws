@@ -23,6 +23,27 @@
 
 using namespace std::chrono_literals;
 
+// ========== JAKA Zu7 关节限位和速度限制 ==========
+// 来源：JAKA官方手册
+struct JointLimits {
+    double pos_min;  // 负限位（弧度）
+    double pos_max;  // 正限位（弧度）
+    double vel_max;  // 速度限制（弧度/秒）
+};
+
+const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
+    {-6.2832, 6.2832, 1.5708},   // 关节1: ±360°, 90°/s
+    {-1.8326, 1.8326, 1.5708},   // 关节2: ±105°, 90°/s
+    {-6.2832, 6.2832, 2.0944},   // 关节3: ±360°, 120°/s
+    {-2.5307, 0.5236, 2.0944},   // 关节4: -145°~30°, 120°/s
+    {-6.2832, 6.2832, 2.6180},   // 关节5: ±360°, 150°/s
+    {-1.8326, 1.8326, 2.6180},   // 关节6: ±105°, 150°/s
+    {-6.2832, 6.2832, 2.6180}    // 关节7: ±360°, 150°/s
+}};
+
+const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
+const double SAFETY_MARGIN_VEL = 0.8;     // 速度降到80%
+
 class DualArmIKSolverNode : public rclcpp::Node
 {
 public:
@@ -150,6 +171,9 @@ private:
             return;
         }
         
+        // 记录时间戳供速度检查使用
+        last_solve_time_ = now();
+        
         bool left_success = false;
         bool right_success = false;
         
@@ -186,20 +210,44 @@ private:
     
     bool solveLeftArmIK()
     {
-        // 转换目标位姿到JAKA格式
-        CartesianPose target_pose;
-        target_pose.tran.x = left_target_->pose.position.x * 1000.0;  // m -> mm
-        target_pose.tran.y = left_target_->pose.position.y * 1000.0;
-        target_pose.tran.z = left_target_->pose.position.z * 1000.0;
+        // === 步骤1: 应用末端坐标系校正 ⚠️ 关键 ===
+        // human_left_hand: [X前, Y左, Z上] → lt: [X左, Y上, Z后]
+        // 旋转矩阵: R_lt_human = [[0,1,0], [0,0,1], [-1,0,0]]
         
-        // 四元数转欧拉角（RPY，弧度）
-        tf2::Quaternion q(
+        tf2::Quaternion q_human(
             left_target_->pose.orientation.x,
             left_target_->pose.orientation.y,
             left_target_->pose.orientation.z,
             left_target_->pose.orientation.w
         );
-        tf2::Matrix3x3 m(q);
+        
+        tf2::Vector3 pos_human(
+            left_target_->pose.position.x,
+            left_target_->pose.position.y,
+            left_target_->pose.position.z
+        );
+        
+        // 应用坐标系校正旋转 (绕Z轴-90度)
+        // 这将 human 坐标系的 X(前) 对齐到 lt 坐标系的 -Z(前)
+        tf2::Quaternion q_correction;
+        q_correction.setRPY(0, 0, -M_PI_2);  // 绕Z轴逆时针90度
+        
+        // 校正后的姿态
+        tf2::Quaternion q_corrected = q_correction * q_human;
+        q_corrected.normalize();
+        
+        // 校正后的位置 (应用旋转矩阵)
+        tf2::Matrix3x3 R_correction(q_correction);
+        tf2::Vector3 pos_corrected = R_correction * pos_human;
+        
+        // === 步骤2: 转换到JAKA格式 ===
+        CartesianPose target_pose;
+        target_pose.tran.x = pos_corrected.x() * 1000.0;  // m -> mm
+        target_pose.tran.y = pos_corrected.y() * 1000.0;
+        target_pose.tran.z = pos_corrected.z() * 1000.0;
+        
+        // 四元数转欧拉角（RPY，弧度）
+        tf2::Matrix3x3 m(q_corrected);
         double roll, pitch, yaw;
         m.getRPY(roll, pitch, yaw);
         
@@ -212,6 +260,28 @@ private:
         errno_t ret = robot_->kine_inverse(0, &ref_left_joints_, &target_pose, &ik_result);
         
         if (ret == ERR_SUCC) {
+            // === 步骤3: 安全检查 ===
+            // 检查关节位置限位
+            if (!checkJointLimits(ik_result, "左臂")) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                    "左臂IK结果超出关节限位，跳过本次指令");
+                return false;
+            }
+            
+            // 检查关节速度
+            if (has_prev_left_) {
+                double dt = (now() - last_solve_time_).seconds();
+                if (!checkJointVelocity(ik_result, prev_left_joints_, dt, "左臂")) {
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                        "左臂关节速度超限，跳过本次指令");
+                    return false;
+                }
+            }
+            
+            // 记录当前关节值供下次速度检查
+            prev_left_joints_ = ik_result;
+            has_prev_left_ = true;
+            
             // 更新参考位置（用于下次求解）
             ref_left_joints_ = ik_result;
             
@@ -229,20 +299,43 @@ private:
     
     bool solveRightArmIK()
     {
-        // 转换目标位姿到JAKA格式
-        CartesianPose target_pose;
-        target_pose.tran.x = right_target_->pose.position.x * 1000.0;  // m -> mm
-        target_pose.tran.y = right_target_->pose.position.y * 1000.0;
-        target_pose.tran.z = right_target_->pose.position.z * 1000.0;
+        // === 步骤1: 应用末端坐标系校正 ⚠️ 关键 ===
+        // human_right_hand: [X前, Y左, Z上] → rt: [X左, Y上, Z后]
+        // 旋转矩阵: R_rt_human = [[0,-1,0], [0,0,1], [1,0,0]]
         
-        // 四元数转欧拉角
-        tf2::Quaternion q(
+        tf2::Quaternion q_human(
             right_target_->pose.orientation.x,
             right_target_->pose.orientation.y,
             right_target_->pose.orientation.z,
             right_target_->pose.orientation.w
         );
-        tf2::Matrix3x3 m(q);
+        
+        tf2::Vector3 pos_human(
+            right_target_->pose.position.x,
+            right_target_->pose.position.y,
+            right_target_->pose.position.z
+        );
+        
+        // 应用坐标系校正旋转 (绕Z轴+90度，右臂与左臂镜像)
+        tf2::Quaternion q_correction;
+        q_correction.setRPY(0, 0, M_PI_2);  // 绕Z轴顺时针90度
+        
+        // 校正后的姿态
+        tf2::Quaternion q_corrected = q_correction * q_human;
+        q_corrected.normalize();
+        
+        // 校正后的位置 (应用旋转矩阵)
+        tf2::Matrix3x3 R_correction(q_correction);
+        tf2::Vector3 pos_corrected = R_correction * pos_human;
+        
+        // === 步骤2: 转换到JAKA格式 ===
+        CartesianPose target_pose;
+        target_pose.tran.x = pos_corrected.x() * 1000.0;  // m -> mm
+        target_pose.tran.y = pos_corrected.y() * 1000.0;
+        target_pose.tran.z = pos_corrected.z() * 1000.0;
+        
+        // 四元数转欧拉角
+        tf2::Matrix3x3 m(q_corrected);
         double roll, pitch, yaw;
         m.getRPY(roll, pitch, yaw);
         
@@ -255,6 +348,28 @@ private:
         errno_t ret = robot_->kine_inverse(1, &ref_right_joints_, &target_pose, &ik_result);
         
         if (ret == ERR_SUCC) {
+            // === 步骤3: 安全检查 ===
+            // 检查关节位置限位
+            if (!checkJointLimits(ik_result, "右臂")) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                    "右臂IK结果超出关节限位，跳过本次指令");
+                return false;
+            }
+            
+            // 检查关节速度
+            if (has_prev_right_) {
+                double dt = (now() - last_solve_time_).seconds();
+                if (!checkJointVelocity(ik_result, prev_right_joints_, dt, "右臂")) {
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                        "右臂关节速度超限，跳过本次指令");
+                    return false;
+                }
+            }
+            
+            // 记录当前关节值供下次速度检查
+            prev_right_joints_ = ik_result;
+            has_prev_right_ = true;
+            
             // 更新参考位置
             ref_right_joints_ = ik_result;
             
@@ -268,6 +383,58 @@ private:
             }
             return false;
         }
+    }
+    
+    /**
+     * @brief 检查关节位置是否在安全范围内
+     * @param joints 待检查的关节值
+     * @param arm_name 机械臂名称（用于日志）
+     * @return true表示安全，false表示超限
+     */
+    bool checkJointLimits(const JointValue& joints, const std::string& arm_name)
+    {
+        bool safe = true;
+        for (int i = 0; i < 7; i++) {
+            double pos = joints.jVal[i];
+            double min_safe = JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS;
+            double max_safe = JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS;
+            
+            if (pos < min_safe || pos > max_safe) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "⚠️ %s 关节%d 超限: %.3f rad (安全范围: [%.3f, %.3f])",
+                    arm_name.c_str(), i+1, pos, min_safe, max_safe);
+                safe = false;
+            }
+        }
+        return safe;
+    }
+    
+    /**
+     * @brief 检查关节速度是否在安全范围内
+     * @param joints 当前关节值
+     * @param prev_joints 上一次关节值
+     * @param dt 时间间隔（秒）
+     * @param arm_name 机械臂名称（用于日志）
+     * @return true表示安全，false表示超速
+     */
+    bool checkJointVelocity(const JointValue& joints, const JointValue& prev_joints, 
+                           double dt, const std::string& arm_name)
+    {
+        if (dt <= 0.0) return true;
+        
+        bool safe = true;
+        for (int i = 0; i < 7; i++) {
+            double vel = std::abs((joints.jVal[i] - prev_joints.jVal[i]) / dt);
+            double max_safe_vel = JAKA_ZU7_LIMITS[i].vel_max * SAFETY_MARGIN_VEL;
+            
+            if (vel > max_safe_vel) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                    "⚠️ %s 关节%d 超速: %.3f rad/s (限制: %.3f rad/s)",
+                    arm_name.c_str(), i+1, vel, max_safe_vel);
+                safe = false;
+            }
+        }
+        return safe;
     }
     
     void publishJointCommand(const JointValue& joints, 
@@ -311,6 +478,13 @@ private:
     // 参考关节位置
     JointValue ref_left_joints_;
     JointValue ref_right_joints_;
+    
+    // 上次关节位置（用于速度检查）
+    JointValue prev_left_joints_;
+    JointValue prev_right_joints_;
+    bool has_prev_left_{false};
+    bool has_prev_right_{false};
+    rclcpp::Time last_solve_time_;
     
     // 配置
     double ik_rate_;
