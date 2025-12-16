@@ -23,8 +23,9 @@ VR → coordinate_mapper → /teleop/left_hand/target
 ## 📋 节点信息
 
 ### 订阅话题
-- `/teleop/left_hand/target` (geometry_msgs/PoseStamped) - 左手目标位姿
-- `/teleop/right_hand/target` (geometry_msgs/PoseStamped) - 右手目标位姿
+- `/teleop/left_hand/target` (geometry_msgs/PoseStamped) - 左手目标位姿 (frame_id="vr_origin")
+- `/teleop/right_hand/target` (geometry_msgs/PoseStamped) - 右手目标位姿 (frame_id="vr_origin")
+- `/joint_states` (sensor_msgs/JointState) - 当前关节状态（用作IK参考）
 
 ### 发布话题
 - `/left_arm/joint_command` (sensor_msgs/JointState) - 左臂关节指令
@@ -35,7 +36,7 @@ VR → coordinate_mapper → /teleop/left_hand/target
 - `robot_ip`: JAKA控制器IP地址（默认: 192.168.2.200）
 - `ik_rate`: IK求解频率（默认: 125.0 Hz）
 - `auto_connect`: 自动连接控制器（默认: true）
-- `use_tf_lookup`: 使用TF查询（默认: false）
+- `use_tf_lookup`: ⭐ 使用TF查询（默认: true，必须启用）
 
 ## 🚀 使用方法
 
@@ -90,6 +91,27 @@ use_tf_lookup: false       # 直接订阅话题更高效
 
 ## ⚠️ 重要说明
 
+### 坐标系处理 ⭐核心
+本节点负责完整的坐标系转换流程：
+
+1. **接收VR空间位姿**
+   - 输入：`/teleop/left_hand/target` (frame_id="vr_origin")
+   - coordinate_mapper已完成VR→人手语义的映射
+
+2. **TF坐标系转换**
+   - 通过TF自动查询完整变换链
+   - `vr_origin` → `teleop_base` → `base_link` → `base_link_left/right`
+   - 自动包含零位校准、机器人配置等所有变换
+
+3. **末端坐标系校正**
+   - human_hand: [X前, Y左, Z上] (人手语义)
+   - lt/rt: [X左, Y上, Z后] (JAKA末端)
+   - 应用Z轴旋转校正（左臂-90°，右臂+90°）
+
+4. **调用JAKA IK**
+   - 输入已在`base_link_left/right`坐标系
+   - 使用当前关节状态作为参考
+
 ### 多客户端连接
 - ✅ JAKA SDK支持**最多2个客户端**同时连接
 - 🔌 qyh_jaka_control = 第一连接（主控制）
@@ -97,7 +119,8 @@ use_tf_lookup: false       # 直接订阅话题更高效
 - ❌ 第三个连接会失败
 
 ### IK参考位置
-- 使用**上一次成功的IK解**作为参考
+- 优先使用**当前实际关节状态**作为参考（来自/joint_states）
+- 备选：使用初始零位参考
 - 初始参考位置：零位或张开姿态
 - 确保IK解的连续性和稳定性
 

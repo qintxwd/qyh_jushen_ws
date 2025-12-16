@@ -53,7 +53,9 @@ public:
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
         declare_parameter<double>("ik_rate", 125.0);  // 125Hz匹配伺服频率
         declare_parameter<bool>("auto_connect", true);
-        declare_parameter<bool>("use_tf_lookup", false);  // 是否使用TF查询
+        // ⭐ 必须使用TF查询，因为coordinate_mapper发布的是vr_origin坐标系
+        // 需要转换到base_link_left/right才能调用JAKA IK
+        declare_parameter<bool>("use_tf_lookup", true);  // 默认启用TF查询
         
         robot_ip_ = get_parameter("robot_ip").as_string();
         ik_rate_ = get_parameter("ik_rate").as_double();
@@ -70,10 +72,14 @@ public:
         // 初始化JAKA SDK
         robot_ = std::make_unique<JAKAZuRobot>();
         
-        // TF监听器（如果需要）
-        if (use_tf_lookup_) {
-            tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
-            tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+        // ⭐ TF监听器 - 必须初始化，用于坐标系转换
+        // coordinate_mapper发布vr_origin坐标系，需要转换到base_link_left/right
+        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+        tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+        
+        if (!use_tf_lookup_) {
+            RCLCPP_WARN(get_logger(), "⚠️ use_tf_lookup=false 不推荐！");
+            RCLCPP_WARN(get_logger(), "coordinate_mapper发布vr_origin坐标系，必须使用TF转换");
         }
         
         // 订阅VR目标位姿
@@ -233,35 +239,71 @@ private:
     
     bool solveLeftArmIK()
     {
-        // === 步骤1: 应用末端坐标系校正 ⚠️ 关键 ===
-        // human_left_hand: [X前, Y左, Z上] → lt: [X左, Y上, Z后]
+        // === 步骤1: TF坐标系转换 ⚠️ 关键 ===
+        // 输入: left_target_ 在 vr_origin 坐标系下
+        // 需要: 转换到 base_link_left 坐标系
+        // TF自动处理完整链: vr_origin → teleop_base → base_link → base_link_left
+        
+        geometry_msgs::msg::PoseStamped target_in_base_left;
+        
+        try {
+            // 使用TF转换到base_link_left坐标系
+            target_in_base_left = tf_buffer_->transform(
+                *left_target_, 
+                "base_link_left",
+                tf2::durationFromSec(0.1)  // 100ms超时
+            );
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                "左臂TF转换失败: %s", ex.what());
+            return false;
+        }
+        
+        // 提取转换后的位姿（已经在base_link_left坐标系下）
+        tf2::Quaternion q_base_left(
+            target_in_base_left.pose.orientation.x,
+            target_in_base_left.pose.orientation.y,
+            target_in_base_left.pose.orientation.z,
+            target_in_base_left.pose.orientation.w
+        );
+        
+        tf2::Vector3 pos_base_left(
+            target_in_base_left.pose.position.x,
+            target_in_base_left.pose.position.y,
+            target_in_base_left.pose.position.z
+        );
+        
+        // === 步骤2: 应用末端坐标系校正 ⚠️ 关键 ===
+        // human_hand坐标系: [X前, Y左, Z上] (人手语义)
+        // lt坐标系: [X左, Y上, Z后] (JAKA末端)
+        // 
+        // 坐标轴映射：
+        //   lt的X = human的Y  (左)
+        //   lt的Y = human的Z  (上)
+        //   lt的Z = -human的X (后)
         // 旋转矩阵: R_lt_human = [[0,1,0], [0,0,1], [-1,0,0]]
         
-        tf2::Quaternion q_human(
-            left_target_->pose.orientation.x,
-            left_target_->pose.orientation.y,
-            left_target_->pose.orientation.z,
-            left_target_->pose.orientation.w
+        // 从旋转矩阵创建tf2::Matrix3x3
+        tf2::Matrix3x3 R_correction(
+            0.0,  1.0,  0.0,   // 第1行
+            0.0,  0.0,  1.0,   // 第2行
+           -1.0,  0.0,  0.0    // 第3行
         );
         
-        tf2::Vector3 pos_human(
-            left_target_->pose.position.x,
-            left_target_->pose.position.y,
-            left_target_->pose.position.z
-        );
-        
-        // 应用坐标系校正旋转 (绕Z轴-90度)
-        // 这将 human 坐标系的 X(前) 对齐到 lt 坐标系的 -Z(前)
+        // 从旋转矩阵提取四元数
         tf2::Quaternion q_correction;
-        q_correction.setRPY(0, 0, -M_PI_2);  // 绕Z轴逆时针90度
+        R_correction.getRotation(q_correction);
         
-        // 校正后的姿态
-        tf2::Quaternion q_corrected = q_correction * q_human;
+        // 应用旋转校正到姿态（注意：只旋转姿态，不旋转位置）
+        tf2::Matrix3x3 R_base_left(q_base_left);
+        tf2::Matrix3x3 R_corrected = R_correction * R_base_left;
+        
+        tf2::Quaternion q_corrected;
+        R_corrected.getRotation(q_corrected);
         q_corrected.normalize();
         
-        // 校正后的位置 (应用旋转矩阵)
-        tf2::Matrix3x3 R_correction(q_correction);
-        tf2::Vector3 pos_corrected = R_correction * pos_human;
+        // 位置不变（位置已经在base_link_left坐标系下，不需要旋转）
+        tf2::Vector3 pos_corrected = pos_base_left;
         
         // === 步骤2: 转换到JAKA格式 ===
         CartesianPose target_pose;
@@ -282,6 +324,7 @@ private:
         JointValue* ref_joints = has_current_left_ ? &current_left_joints_ : &ref_left_joints_;
         
         // 调用IK求解 - robot_id=0表示左臂
+        // 输入位姿已经在base_link_left坐标系下，且已应用末端校正
         JointValue ik_result;
         errno_t ret = robot_->kine_inverse(0, ref_joints, &target_pose, &ik_result);
         
@@ -324,34 +367,65 @@ private:
     
     bool solveRightArmIK()
     {
-        // === 步骤1: 应用末端坐标系校正 ⚠️ 关键 ===
-        // human_right_hand: [X前, Y左, Z上] → rt: [X左, Y上, Z后]
-        // 旋转矩阵: R_rt_human = [[0,-1,0], [0,0,1], [1,0,0]]
+        // === 步骤1: TF坐标系转换 ⚠️ 关键 ===
+        // 输入: right_target_ 在 vr_origin 坐标系下
+        // 需要: 转换到 base_link_right 坐标系
         
-        tf2::Quaternion q_human(
-            right_target_->pose.orientation.x,
-            right_target_->pose.orientation.y,
-            right_target_->pose.orientation.z,
-            right_target_->pose.orientation.w
+        geometry_msgs::msg::PoseStamped target_in_base_right;
+        
+        try {
+            // 使用TF转换到base_link_right坐标系
+            target_in_base_right = tf_buffer_->transform(
+                *right_target_, 
+                "base_link_right",
+                tf2::durationFromSec(0.1)  // 100ms超时
+            );
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                "右臂TF转换失败: %s", ex.what());
+            return false;
+        }
+        
+        // 提取转换后的位姿
+        tf2::Quaternion q_base_right(
+            target_in_base_right.pose.orientation.x,
+            target_in_base_right.pose.orientation.y,
+            target_in_base_right.pose.orientation.z,
+            target_in_base_right.pose.orientation.w
         );
         
-        tf2::Vector3 pos_human(
-            right_target_->pose.position.x,
-            right_target_->pose.position.y,
-            right_target_->pose.position.z
+        tf2::Vector3 pos_base_right(
+            target_in_base_right.pose.position.x,
+            target_in_base_right.pose.position.y,
+            target_in_base_right.pose.position.z
         );
         
-        // 应用坐标系校正旋转 (绕Z轴+90度，右臂与左臂镜像)
+        // === 步骤2: 应用末端坐标系校正 ⚠️ 关键 ===
+        // human_hand坐标系: [X前, Y左, Z上]
+        // rt坐标系: [X左, Y上, Z后] (与lt相同，只是左右臂镜像安装)
+        // 
+        // 使用与左臂相同的旋转矩阵
+        // R_rt_human = [[0,1,0], [0,0,1], [-1,0,0]]
+        
+        tf2::Matrix3x3 R_correction(
+            0.0,  1.0,  0.0,
+            0.0,  0.0,  1.0,
+           -1.0,  0.0,  0.0
+        );
+        
         tf2::Quaternion q_correction;
-        q_correction.setRPY(0, 0, M_PI_2);  // 绕Z轴顺时针90度
+        R_correction.getRotation(q_correction);
         
-        // 校正后的姿态
-        tf2::Quaternion q_corrected = q_correction * q_human;
+        // 应用旋转校正到姿态
+        tf2::Matrix3x3 R_base_right(q_base_right);
+        tf2::Matrix3x3 R_corrected = R_correction * R_base_right;
+        
+        tf2::Quaternion q_corrected;
+        R_corrected.getRotation(q_corrected);
         q_corrected.normalize();
         
-        // 校正后的位置 (应用旋转矩阵)
-        tf2::Matrix3x3 R_correction(q_correction);
-        tf2::Vector3 pos_corrected = R_correction * pos_human;
+        // 位置不变
+        tf2::Vector3 pos_corrected = pos_base_right;
         
         // === 步骤2: 转换到JAKA格式 ===
         CartesianPose target_pose;
@@ -372,6 +446,7 @@ private:
         JointValue* ref_joints = has_current_right_ ? &current_right_joints_ : &ref_right_joints_;
         
         // 调用IK求解 - robot_id=1表示右臂
+        // 输入位姿已经在base_link_right坐标系下，且已应用末端校正
         JointValue ik_result;
         errno_t ret = robot_->kine_inverse(1, ref_joints, &target_pose, &ik_result);
         

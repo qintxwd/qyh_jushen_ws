@@ -61,6 +61,7 @@
 │  - 低通滤波 (EMA + Slerp)                                               │
 │  - 速度/加速度限制                                                       │
 │  - 位置缩放 (2.0x)                                                      │
+│  - ⭐ 输出坐标系: vr_origin (人体语义空间)                              │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                 ┌──────────────┴──────────────┐
@@ -68,19 +69,20 @@
                 ↓ TF (100Hz)                  ↓ Topics (100Hz)
     vr_left_controller →              /teleop/left_hand/target
         human_left_hand               (geometry_msgs/PoseStamped)
-    vr_right_controller →             /teleop/right_hand/target
-        human_right_hand              (geometry_msgs/PoseStamped)
-                │
+    vr_right_controller →             frame_id: "vr_origin" ⭐
+        human_right_hand              /teleop/right_hand/target
+                │                     frame_id: "vr_origin" ⭐
                 ↓
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  [节点4] dual_arm_ik_solver_node                             ✅ 已实现   │
 │  - 包名: qyh_dual_arm_ik_solver                                          │
-│  - 订阅目标位姿                                                          │
-│  - 高频IK求解 (125Hz)                                                   │
-│  - ⚠️ 末端坐标系校正（human_hand → lt/rt）                              │
+│  - 订阅目标位姿 (frame_id="vr_origin")                                 │
+│  - ⭐ TF转换: vr_origin → base_link_left/right                          │
+│  - ⭐ 末端坐标系校正: human_hand [X前] → lt/rt [X左]                   │
+│  - 高频IK求解 (125Hz, JAKA SDK)                                        │
 │  - ✅ 关节限位检查（±5°裕度）                                           │
 │  - ✅ 关节速度检查（80%限制）                                           │
-│  - 使用上次解作为参考                                                    │
+│  - 使用当前关节状态作为IK参考                                            │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                 ┌──────────────┴──────────────┐
@@ -226,16 +228,19 @@ processing:
 ### `/teleop/left_hand/target`
 ```yaml
 type: geometry_msgs/PoseStamped
-frame_id: vr_origin
+frame_id: "vr_origin"  # ⭐ 重要：在VR零位坐标系下
 frequency: 100 Hz
 content:
   position: [x, y, z]  # 人手语义位置 (已滤波, 已缩放, 米)
   orientation: [x, y, z, w]  # 人手语义姿态 (已滤波, 四元数)
 processing:
-  - 坐标轴对齐完成
-  - 低通滤波应用 (alpha=0.3)
-  - 速度限制应用 (0.5 m/s)
-  - 平滑且安全
+  - ✅ 坐标轴对齐完成 (VR → 人手语义)
+  - ✅ 低通滤波应用 (alpha=0.3)
+  - ✅ 速度限制应用 (0.5 m/s)
+  - ✅ 平滑且安全
+  - ❌ 尚未转换到机器人坐标系 (由IK求解器完成)
+note:
+  IK求解器需要通过TF查询将此位姿转换到base_link_left/right坐标系
 ```
 
 ### `/left_arm/joint_command`

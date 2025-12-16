@@ -258,12 +258,17 @@ on_recenter_button():
 
 **职责：**
 - 订阅：`vr_*_controller` TF (已经是ROS标准坐标系)
-- 处⚠️ 应用末端坐标系校正：human_hand → lt/rt 旋转
-3. 转换到机械臂坐标系：base_link_left/right → lt_target
-4. 调用IK求解器（JAKA SDK或KDL）
-5. 应用关节限位检查
-6. 输出关节轨迹
-```
+- 应用握持补偿旋转（35度pitch）
+- 位置缩放（VR空间 → 机器人工作空间）
+- 低通滤波（平滑抖动）
+- 速度/加速度限制
+- 发布TF：`vr_*_controller → human_*_hand`
+- **发布目标位姿话题：frame_id = "vr_origin"**
+
+**重要说明：**
+- ✅ 发布的位姿在`vr_origin`坐标系下（人体语义空间）
+- ✅ 不负责转换到机器人坐标系（由IK求解器完成）
+- ✅ 保持独立性，不依赖机器人模型
 
 **代码示例：**
 ```python
@@ -304,21 +309,50 @@ coordinate_mapper:
 **功能：** 逆运动学求解
 
 **职责：**
-- 订阅：`/teleop/left_hand/target`、`/teleop/right_hand/target`
-- 查询TF：
-  - `T(base_link_left → human_left_hand)`
-  - `T(base_link_right → human_right_hand)`
-- 求解：左右臂关节角度
-- 发布：`/left_arm/joint_trajectory`、`/right_arm/joint_trajectory`
+- 订阅：`/teleop/left_hand/target`、`/teleop/right_hand/target` (frame_id="vr_origin")
+- **⭐ 坐标系转换**：通过TF查询将目标位姿转换到机器人坐标系
+  - `T(base_link_left → human_left_hand)` = TF查询完整变换链
+  - `T(base_link_right → human_right_hand)` = TF查询完整变换链
+- **⭐ 末端坐标系校正**：应用`human_hand → lt/rt`旋转（X前→X左）
+- 调用IK求解器（JAKA SDK）
+- 关节限位和速度检查
+- 发布关节指令
 
 **IK求解流程：**
+```python
+def solve_left_arm_ik(target_pose_stamped):  # frame_id="vr_origin"
+    # Step 1: ⭐ 坐标系转换 - 通过TF查询完整变换链
+    # 自动包含: vr_origin → teleop_base → base_link → base_link_left
+    target_in_base_left = tf_buffer.transform(
+        target_pose_stamped, 
+        "base_link_left",  # 目标坐标系
+        timeout=0.1
+    )
+    
+    # Step 2: ⭐ 末端坐标系校正 (human_hand坐标系 → lt坐标系)
+    # human_hand: [X前, Y左, Z上] → lt: [X左, Y上, Z后]
+    R_correction = [[ 0,  1,  0],
+                    [ 0,  0,  1],
+                    [-1,  0,  0]]
+    pose_corrected = apply_rotation(target_in_base_left, R_correction)
+    
+    # Step 3: 调用JAKA IK求解
+    joint_angles = robot.kine_inverse(
+        robot_id=0,  # 左臂
+        ref_joints=current_joints,
+        target_pose=pose_corrected  # 已经在base_link_left坐标系
+    )
+    
+    # Step 4: 安全检查
+    if check_joint_limits(joint_angles):
+        return joint_angles
 ```
-1. 获取目标：human_*_hand 在 teleop_base 下的位姿
-2. 转换到机械臂坐标系：base_link_left/right
-3. 调用IK求解器（JAKA SDK或KDL）
-4. 应用关节限位检查
-5. 输出关节轨迹
-```
+
+**重要说明：**
+- ✅ 接收`vr_origin`坐标系的目标位姿
+- ✅ 使用TF查询自动处理完整变换链（包括teleop_base, base_link等）
+- ✅ 应用末端坐标系校正（人手语义→机械臂末端）
+- ✅ JAKA IK输入是相对于`base_link_left/right`的位姿
 
 ---
 

@@ -9,7 +9,7 @@
     # 自动连接
     auto_connect: true
     
-    # 是否使用TF查询获取目标位姿
-    # false: 直接订阅 /teleop/left_hand/target 话题
-    # true: 通过TF查询 base_link_left -> human_left_hand
-    use_tf_lookup: false
+    # ⭐ 必须使用TF查询进行坐标系转换
+    # coordinate_mapper发布的是vr_origin坐标系，需要转换到base_link_left/right
+    # 完整TF链: vr_origin → teleop_base → base_link → base_link_left/right
+    use_tf_lookup: true  # 必须为true
