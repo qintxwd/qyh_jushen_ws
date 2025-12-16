@@ -29,30 +29,48 @@
 using namespace std::chrono_literals;
 
 /**
- * VR Bridge Node - PICO 4 VR 数据接收与坐标变换
+ * VR Bridge Node - PICO 4 VR 原始数据接收 (节点1/5)
+ * 
+ * 职责：
+ *   - 接收PICO4 SDK的UDP数据包
+ *   - 将PICO坐标系转换为ROS标准坐标系（底层对齐）
+ *   - 发布原始controller位姿，不做高层语义处理
  * 
  * TF 树:
  *   vr_origin (ROS坐标系: X前 Y左 Z上)
  *       ├── vr_head
- *       ├── vr_left_hand (含握持补偿)
- *       └── vr_right_hand (含握持补偿)
+ *       ├── vr_left_controller  (原始VR手柄坐标)
+ *       └── vr_right_controller (原始VR手柄坐标)
  *
- * 坐标变换:
- *   VR坐标系 (PICO): X-右, Y-上, -Z-前
- *   ROS坐标系: X-前, Y-左, Z-上
+ * 坐标变换说明:
+ *   PICO SDK坐标系: X-右, Y-上, -Z-前 (OpenXR标准)
+ *   ROS标准坐标系: X-前, Y-左, Z-上 (REP-103)
  *   
- *   位置映射: ros_x = -vr_z, ros_y = -vr_x, ros_z = vr_y
- *   四元数映射: ros_qx = -vr_qz, ros_qy = -vr_qx, ros_qz = vr_qy, ros_qw = vr_qw
+ *   底层对齐映射（固定）:
+ *     ros_x = -vr_z   (PICO的-Z向前 → ROS的X向前)
+ *     ros_y = -vr_x   (PICO的-X向左 → ROS的Y向左)
+ *     ros_z = vr_y    (PICO的Y向上  → ROS的Z向上)
+ *   
+ *   四元数同样映射:
+ *     ros_qx = -vr_qz, ros_qy = -vr_qx, ros_qz = vr_qy, ros_qw = vr_qw
  *
  * 参数:
  *   udp_port (int): UDP监听端口，默认9999
- *   grip_offset_deg (double): 手柄握持补偿角度(pitch)，默认35.0
  *
  * 发布话题:
- *   /vr/head/pose, /vr/left_hand/pose, /vr/right_hand/pose (PoseStamped)
- *   /vr/left_hand/joy, /vr/right_hand/joy (Joy)
- *   /vr/left_hand/active, /vr/right_hand/active (Bool)
- *   TF: vr_origin -> vr_head/vr_left_hand/vr_right_hand
+ *   /vr/head/pose (PoseStamped)
+ *   /vr/left_controller/pose, /vr/right_controller/pose (PoseStamped)
+ *   /vr/left_controller/joy, /vr/right_controller/joy (Joy)
+ *   /vr/left_controller/active, /vr/right_controller/active (Bool)
+ * 
+ * 发布TF:
+ *   vr_origin → vr_head
+ *   vr_origin → vr_left_controller
+ *   vr_origin → vr_right_controller
+ * 
+ * 注意：
+ *   - 不包含握持补偿、缩放、滤波等高层处理
+ *   - 这些由后续节点 (coordinate_mapper_node) 负责
  */
 
 #pragma pack(push, 1)
@@ -92,29 +110,23 @@ public:
     {
         // Parameters
         this->declare_parameter("udp_port", 9999);
-        this->declare_parameter("grip_offset_deg", 35.0);  // 默认35度握持补偿
-        
         udp_port_ = this->get_parameter("udp_port").as_int();
-        grip_offset_deg_ = this->get_parameter("grip_offset_deg").as_double();
-        
-        // 预计算握持补偿四元数 (绕Y轴旋转，pitch方向)
-        grip_offset_q_.setRPY(0, grip_offset_deg_ * M_PI / 180.0, 0);
-        grip_offset_q_.normalize();
 
-        // Publishers
+        // Publishers - 使用 controller 命名（原始VR数据）
         head_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/head/pose", 10);
-        left_hand_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/left_hand/pose", 10);
-        left_hand_joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/vr/left_hand/joy", 10);
-        left_hand_active_pub_ = this->create_publisher<std_msgs::msg::Bool>("/vr/left_hand/active", 10);
-        right_hand_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/right_hand/pose", 10);
-        right_hand_joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/vr/right_hand/joy", 10);
-        right_hand_active_pub_ = this->create_publisher<std_msgs::msg::Bool>("/vr/right_hand/active", 10);
+        left_controller_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/left_controller/pose", 10);
+        left_controller_joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/vr/left_controller/joy", 10);
+        left_controller_active_pub_ = this->create_publisher<std_msgs::msg::Bool>("/vr/left_controller/active", 10);
+        right_controller_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/right_controller/pose", 10);
+        right_controller_joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/vr/right_controller/joy", 10);
+        right_controller_active_pub_ = this->create_publisher<std_msgs::msg::Bool>("/vr/right_controller/active", 10);
 
         // TF Broadcaster
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         
-        RCLCPP_INFO(this->get_logger(), "VR Bridge - Simplified coordinate mapping");
-        RCLCPP_INFO(this->get_logger(), "Grip offset: %.1f deg (pitch)", grip_offset_deg_);
+        RCLCPP_INFO(this->get_logger(), "=== VR Bridge Node (1/5) ===");
+        RCLCPP_INFO(this->get_logger(), "Role: Raw VR data receiver");
+        RCLCPP_INFO(this->get_logger(), "Coordinate mapping: PICO SDK → ROS standard (REP-103)");
 
         // Initialize UDP
         if (!init_udp()) {
@@ -271,40 +283,38 @@ private:
             head_pose_pub_->publish(msg);
         }
 
-        // === Left Hand ===
+        // === Left Controller ===
         std_msgs::msg::Bool left_active_msg;
         left_active_msg.data = (packet.left_active != 0);
-        left_hand_active_pub_->publish(left_active_msg);
+        left_controller_active_pub_->publish(left_active_msg);
 
         if (packet.left_active) {
             geometry_msgs::msg::TransformStamped t;
             t.header.stamp = now;
             t.header.frame_id = "vr_origin";
-            t.child_frame_id = "vr_left_hand";
+            t.child_frame_id = "vr_left_controller";
             
             // 原始VR数据 (PICO坐标系)
             float vr_x = packet.left_position[0];
             float vr_y = packet.left_position[1];
             float vr_z = packet.left_position[2];
             
+            // 底层坐标对齐：PICO SDK → ROS标准
             map_position(vr_x, vr_y, vr_z,
                         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
             
             // 调试输出
             if (should_log) {
                 RCLCPP_INFO(this->get_logger(), 
-                    "[LEFT] VR raw: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
+                    "[LEFT] PICO: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
                     vr_x, vr_y, vr_z,
                     t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
             }
             
+            // 四元数坐标对齐（不做额外旋转补偿）
             tf2::Quaternion q = map_quaternion(
                 packet.left_orientation[0], packet.left_orientation[1],
                 packet.left_orientation[2], packet.left_orientation[3]);
-            
-            // 应用握持补偿 (本体坐标系下的旋转，右乘)
-            q = q * grip_offset_q_;
-            q.normalize();
             
             t.transform.rotation.x = q.x();
             t.transform.rotation.y = q.y();
@@ -320,7 +330,7 @@ private:
             msg.pose.position.y = t.transform.translation.y;
             msg.pose.position.z = t.transform.translation.z;
             msg.pose.orientation = t.transform.rotation;
-            left_hand_pose_pub_->publish(msg);
+            left_controller_pose_pub_->publish(msg);
 
             // Joy
             sensor_msgs::msg::Joy joy;
@@ -333,43 +343,41 @@ private:
                 (packet.buttons_bitmask & (1 << 4)) ? 1 : 0,   // Menu
                 (packet.buttons_bitmask & (1 << 10)) ? 1 : 0   // Joy Click
             };
-            left_hand_joy_pub_->publish(joy);
+            left_controller_joy_pub_->publish(joy);
         }
 
-        // === Right Hand ===
+        // === Right Controller ===
         std_msgs::msg::Bool right_active_msg;
         right_active_msg.data = (packet.right_active != 0);
-        right_hand_active_pub_->publish(right_active_msg);
+        right_controller_active_pub_->publish(right_active_msg);
 
         if (packet.right_active) {
             geometry_msgs::msg::TransformStamped t;
             t.header.stamp = now;
             t.header.frame_id = "vr_origin";
-            t.child_frame_id = "vr_right_hand";
+            t.child_frame_id = "vr_right_controller";
             
             // 原始VR数据 (PICO坐标系)
             float vr_x = packet.right_position[0];
             float vr_y = packet.right_position[1];
             float vr_z = packet.right_position[2];
             
+            // 底层坐标对齐：PICO SDK → ROS标准
             map_position(vr_x, vr_y, vr_z,
                         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
             
             // 调试输出
             if (should_log) {
                 RCLCPP_INFO(this->get_logger(), 
-                    "[RIGHT] VR raw: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
+                    "[RIGHT] PICO: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
                     vr_x, vr_y, vr_z,
                     t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
             }
             
+            // 四元数坐标对齐（不做额外旋转补偿）
             tf2::Quaternion q = map_quaternion(
                 packet.right_orientation[0], packet.right_orientation[1],
                 packet.right_orientation[2], packet.right_orientation[3]);
-            
-            // 应用握持补偿
-            q = q * grip_offset_q_;
-            q.normalize();
             
             t.transform.rotation.x = q.x();
             t.transform.rotation.y = q.y();
@@ -385,7 +393,7 @@ private:
             msg.pose.position.y = t.transform.translation.y;
             msg.pose.position.z = t.transform.translation.z;
             msg.pose.orientation = t.transform.rotation;
-            right_hand_pose_pub_->publish(msg);
+            right_controller_pose_pub_->publish(msg);
 
             // Joy
             sensor_msgs::msg::Joy joy;
@@ -398,7 +406,7 @@ private:
                 (packet.buttons_bitmask & (1 << 5)) ? 1 : 0,   // Home
                 (packet.buttons_bitmask & (1 << 11)) ? 1 : 0   // Joy Click
             };
-            right_hand_joy_pub_->publish(joy);
+            right_controller_joy_pub_->publish(joy);
         }
 
         // 批量发布所有 TF
@@ -409,19 +417,17 @@ private:
 
     int udp_socket_ = -1;
     int udp_port_;
-    double grip_offset_deg_;
-    tf2::Quaternion grip_offset_q_;
     std::thread recv_thread_;
     std::atomic<bool> running_;
 
-    // Publishers
+    // Publishers - 原始controller数据
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr head_pose_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr left_hand_pose_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr left_hand_joy_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr left_hand_active_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr right_hand_pose_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr right_hand_joy_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr right_hand_active_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr left_controller_pose_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr left_controller_joy_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr left_controller_active_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr right_controller_pose_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr right_controller_joy_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr right_controller_active_pub_;
 
     // TF Broadcaster
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
