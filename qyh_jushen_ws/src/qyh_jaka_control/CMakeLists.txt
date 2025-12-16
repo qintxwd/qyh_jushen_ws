@@ -31,6 +31,10 @@ if(NOT EXISTS ${JAKA_API_LIB})
   message(FATAL_ERROR "JAKA API shared library not found at ${JAKA_API_LIB}. Please verify thirdparty/lib contents.")
 endif()
 
+# Set RPATH so the executable can find the shared library at runtime
+set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/thirdparty")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # Libraries
 add_library(jaka_interface src/jaka_interface.cpp)
 ament_target_dependencies(jaka_interface
@@ -106,6 +110,12 @@ install(DIRECTORY
 install(DIRECTORY
   launch/
   DESTINATION share/${PROJECT_NAME}/launch
+)
+
+# Install JAKA API shared library
+install(FILES
+  ${JAKA_API_LIB}
+  DESTINATION lib/${PROJECT_NAME}/thirdparty
 )
 
 ament_package()
