@@ -24,13 +24,13 @@ def generate_launch_description():
     # Declare launch arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
-    # Force j4 to zero node (corrects floating point errors from GUI)
-    force_j4_zero_node = Node(
-        package='qyh_dual_arms_description',
-        executable='force_j4_zero.py',
-        name='force_j4_zero',
-        output='screen'
-    )
+    # # Force j4 to zero node (corrects floating point errors from GUI)
+    # force_j4_zero_node = Node(
+    #     package='qyh_dual_arms_description',
+    #     executable='force_j4_zero.py',
+    #     name='force_j4_zero',
+    #     output='screen'
+    # )
 
     # Robot State Publisher node (uses corrected joint states)
     robot_state_publisher_node = Node(
@@ -42,9 +42,9 @@ def generate_launch_description():
             'use_sim_time': use_sim_time,
             'robot_description': robot_desc
         }],
-        remappings=[
-            ('/joint_states', '/joint_states_corrected')
-        ]
+        # remappings=[
+        #     ('/joint_states', '/joint_states_corrected')
+        # ]
     )
 
     # Joint State Publisher GUI node
@@ -71,7 +71,7 @@ def generate_launch_description():
             default_value='false',
             description='Use simulation (Gazebo) clock if true'
         ),
-        force_j4_zero_node,
+        # force_j4_zero_node,
         robot_state_publisher_node,
         joint_state_publisher_gui_node,
         rviz_node

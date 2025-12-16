@@ -1,0 +1,31 @@
+# VR双臂遥操作参数配置
+# ROS2参数文件格式：所有参数必须在 ros__parameters 下
+
+/**:
+  ros__parameters:
+    # === Teleop Manager 参数 ===
+    grip_engage_threshold: 0.8    # Grip按钮接合阈值 [0-1]
+    grip_release_threshold: 0.2   # Grip按钮释放阈值 [0-1]
+    
+    # === Coordinate Mapper 参数 ===
+    # 握持补偿：手柄自然握持时手指方向与设备Z轴的偏差
+    grip_offset_deg: 35.0         # 握持补偿角度 (度，绕Y轴pitch)
+    
+    # 位置缩放：VR移动范围 → 机器人工作空间
+    # 建议：机械臂工作半径(~1.2m) / 手臂活动范围(~0.6m) ≈ 2.0
+    position_scale: 2.0           # 位置缩放因子
+    rotation_scale: 1.0           # 旋转缩放因子（通常保持1.0）
+    
+    # 低通滤波：平滑VR抖动
+    # alpha越小滤波越强，但延迟越大
+    filter_alpha: 0.3             # 滤波系数 [0-1]
+    
+    # 速度限制：单帧最大变化量（安全保护）
+    max_position_delta: 0.05      # 单帧最大位移 (m)
+    max_rotation_delta: 0.1       # 单帧最大旋转 (rad ≈ 5.7°)
+    
+    # 更新频率
+    update_rate: 100.0            # Hz (与VR数据频率匹配)
+
+# 注意：静态TF (base_link → teleop_base) 在launch文件中通过 static_transform_publisher 发布
+# 配置：人站在机器人前方0.5米处 (x=0.5, y=0, z=0)
