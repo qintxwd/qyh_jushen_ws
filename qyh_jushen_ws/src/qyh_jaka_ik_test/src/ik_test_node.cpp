@@ -104,17 +104,18 @@ private:
         
         test_count_++;
         
-        // 生成测试位姿（简单的圆周运动）
+        // 使用真实零位位姿（机械臂伸直状态）
+        // 左臂零位：X=0, Y=992.7, Z=220, RX=90°, RY=0°, RZ=180°
         double t = test_count_ * 0.01;  // 时间参数
         CartesianPose target_pose;
         
-        // 左臂测试位姿（robot_id = 0）
-        target_pose.tran.x = 400.0 + 50.0 * std::cos(t);  // mm
-        target_pose.tran.y = 100.0 + 50.0 * std::sin(t);
-        target_pose.tran.z = 300.0;
-        target_pose.rpy.rx = 180.0;  // deg
-        target_pose.rpy.ry = 0.0;
-        target_pose.rpy.rz = 0.0;
+        // 仅在Z轴做小幅度上下运动（±10mm），保持在工作空间内
+        target_pose.tran.x = 0.0;  // mm
+        target_pose.tran.y = 992.7;  // mm
+        target_pose.tran.z = 220.0 + 10.0 * std::sin(t);  // 上下±10mm
+        target_pose.rpy.rx = 1.5708;  // 90° = π/2 rad
+        target_pose.rpy.ry = 0.0;     // 0°
+        target_pose.rpy.rz = 3.1416;  // 180° = π rad
         
         // 使用固定的参考关节角度（避免依赖状态获取）
         // 参考位置：左臂张开姿态 [0, -60, 0, 0, 0, 0, 0] 度
