@@ -33,7 +33,7 @@ class IKTestPublisher(Node):
         left_pose.header.stamp = self.get_clock().now().to_msg()
         left_pose.header.frame_id = 'base_link_left'
         left_pose.pose.position.x = 0.0
-        left_pose.pose.position.y = 0.9927  # 992.7mm
+        left_pose.pose.position.y = 0.500  # 500mm (修改为可达范围内的值，原992mm超出Zu7范围)
         left_pose.pose.position.z = 0.220 + 0.01 * math.sin(self.t)  # ±10mm
         left_pose.pose.orientation.x = 0.0
         left_pose.pose.orientation.y = 0.0
@@ -45,7 +45,7 @@ class IKTestPublisher(Node):
         right_pose.header.stamp = self.get_clock().now().to_msg()
         right_pose.header.frame_id = 'base_link_right'
         right_pose.pose.position.x = 0.0
-        right_pose.pose.position.y = -0.9927
+        right_pose.pose.position.y = -0.500 # -500mm
         right_pose.pose.position.z = 0.220 + 0.01 * math.sin(self.t + math.pi)
         right_pose.pose.orientation.x = 0.0
         right_pose.pose.orientation.y = 0.0

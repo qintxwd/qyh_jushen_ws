@@ -319,7 +319,7 @@ ros2 topic echo /teleop/left_hand/target
 # 验证:
 # 1. 输出位姿经过滤波（变化更平滑）☐
 # 2. 输出位姿有缩放（比输入大2倍）☐
-# 3. frame_id正确 ☐
+# 3. frame_id正确 (应为 'vr_origin') ☐
 ```
 
 **1.2.5 检查TF链完整性**
@@ -347,7 +347,7 @@ ros2 topic hz /teleop/left_hand/target
 
 ---
 
-### 1.3 验证节点4: dual_arm_ik_solver_node（仅IK计算）
+### 1.3 验证节点4: dual_arm_ik_solver（仅IK计算）
 
 **⚠️ 重要**: 此阶段**不启动**机械臂控制节点，只验证IK计算
 
@@ -365,24 +365,24 @@ ros2 launch qyh_dual_arm_ik_solver ik_solver.launch.py
 
 #### 验证步骤
 
-**1.3.1 检查JAKA连接（会失败，这是预期的）**
+**1.3.1 检查JAKA连接**
 ```bash
 # 观察终端3的输出
 # 预期看到: "连接到JAKA控制器 192.168.2.200 (第二个客户端)..."
-# 如果jaka_control未运行，会看到连接失败
 
-# ⚠️ 这是正常的！此阶段不需要连接成功
+# 情况A: 如果jaka_control已运行且机器人在线 → ✅ "连接成功！"
+# 情况B: 如果jaka_control未运行或机器人离线 → ⚠️ "连接失败" (这也是正常的，此阶段仅验证节点启动)
 ```
 
 **1.3.2 检查节点启动（即使连接失败）**
 ```bash
 ros2 node list
-# 预期输出: /dual_arm_ik_solver_node
+# 预期输出: /dual_arm_ik_solver
 ```
 
 **1.3.3 检查订阅的Topic**
 ```bash
-ros2 node info /dual_arm_ik_solver_node
+ros2 node info /dual_arm_ik_solver
 
 # 检查Subscriptions:
 # - /teleop/left_hand/target ✅

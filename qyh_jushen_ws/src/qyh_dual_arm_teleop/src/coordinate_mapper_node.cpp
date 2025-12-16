@@ -6,6 +6,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "sensor_msgs/msg/joy.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Transform.h"
 #include "tf2/LinearMath/Vector3.h"
@@ -25,7 +26,7 @@ using namespace std::chrono_literals;
  *   4. 低通滤波（平滑抖动）
  *   5. 速度限制（安全保护）
  *   6. 发布 vr_*_controller → human_*_hand TF
- *   7. 发布目标位姿话题 /teleop/*_hand/target
+ *   7. 发布目标位姿话题 /teleop/hand/target
  * 
  * 坐标系说明：
  *   输入: vr_*_controller (ROS标准坐标系: X前 Y左 Z上)
@@ -48,6 +49,7 @@ public:
         this->declare_parameter("filter_alpha", 0.3);          // 低通滤波系数
         this->declare_parameter("max_position_delta", 0.05);   // 单帧最大位移(m)
         this->declare_parameter("max_rotation_delta", 0.1);    // 单帧最大旋转(rad)
+        this->declare_parameter("grip_threshold", 0.5);        // 握持阈值
         this->declare_parameter("update_rate", 100.0);         // Hz
         
         grip_offset_deg_ = this->get_parameter("grip_offset_deg").as_double();
@@ -56,11 +58,25 @@ public:
         filter_alpha_ = this->get_parameter("filter_alpha").as_double();
         max_position_delta_ = this->get_parameter("max_position_delta").as_double();
         max_rotation_delta_ = this->get_parameter("max_rotation_delta").as_double();
+        grip_threshold_ = this->get_parameter("grip_threshold").as_double();
         double update_rate = this->get_parameter("update_rate").as_double();
         
         // 预计算握持补偿四元数
         grip_offset_quat_.setRPY(0, grip_offset_deg_ * M_PI / 180.0, 0);
         grip_offset_quat_.normalize();
+        
+        // Joy Subscribers
+        left_joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
+            "/vr/left_controller/joy", 10,
+            [this](const sensor_msgs::msg::Joy::SharedPtr msg) {
+                if (msg->axes.size() >= 4) left_grip_ = msg->axes[3];
+            });
+            
+        right_joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
+            "/vr/right_controller/joy", 10,
+            [this](const sensor_msgs::msg::Joy::SharedPtr msg) {
+                if (msg->axes.size() >= 4) right_grip_ = msg->axes[3];
+            });
         
         // TF2
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -110,6 +126,12 @@ private:
         rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr& pub,
         const rclcpp::Time& now)
     {
+        // Check grip state (Clutch)
+        double grip_val = (hand_name == "left") ? left_grip_ : right_grip_;
+        if (grip_val < grip_threshold_) {
+            return;
+        }
+
         // 查询 vr_origin → vr_*_controller TF
         geometry_msgs::msg::TransformStamped transform;
         try {
@@ -232,6 +254,11 @@ private:
     double filter_alpha_;
     double max_position_delta_;
     double max_rotation_delta_;
+    double grip_threshold_;
+    
+    // Grip state
+    double left_grip_ = 0.0;
+    double right_grip_ = 0.0;
     
     // Grip compensation
     tf2::Quaternion grip_offset_quat_;
@@ -248,6 +275,8 @@ private:
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr left_target_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr right_target_pub_;
+    rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr left_joy_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr right_joy_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 
