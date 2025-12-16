@@ -356,18 +356,37 @@ def solve_left_arm_ik(target_pose_stamped):  # frame_id="vr_origin"
 
 ---
 
-### 🟦 节点5: `arm_controller_node`
-**功能：** 机械臂底层控制
+### 🟦 节点5: `arm_controller_node` + `robot_state_publisher`
+**功能：** 机械臂底层控制 + TF树发布
 
 **职责：**
 - 订阅：`/left_arm/joint_trajectory`、`/right_arm/joint_trajectory`
 - 通过JAKA SDK发送关节指令
+- 发布 `/joint_states` (14个关节)
 - 监控机械臂状态
 - 安全检查（碰撞、奇异点）
+
+**⭐ 必须同时启动 `robot_state_publisher`：**
+```bash
+# 在launch文件中添加
+robot_state_publisher = Node(
+    package='robot_state_publisher',
+    executable='robot_state_publisher',
+    parameters=[{'robot_description': robot_description_content}]
+)
+```
+
+**TF发布说明：**
+- **URDF定义**：`base_link → base_link_left/right`（包含校准偏移）
+- **robot_state_publisher发布**：
+  - 静态TF：`base_link → base_link_left/right`
+  - 动态TF：`base_link_left → l1 → l2 → ... → lt` (根据/joint_states)
+  - 动态TF：`base_link_right → r1 → r2 → ... → rt`
 
 **特别注意：**
 - 最终发送的位姿是 **`lt` 相对于 `base_link_left`** 和 **`rt` 相对于 `base_link_right`**
 - 校准偏移已经包含在 `base_link_left/right` 的定义中
+- **如果robot_state_publisher未启动**：TF树不完整，IK求解器将失败
 
 ---
 

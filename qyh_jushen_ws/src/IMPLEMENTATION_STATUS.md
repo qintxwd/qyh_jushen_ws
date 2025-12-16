@@ -195,7 +195,7 @@ tf2::Vector3 pos_corrected = R_correction * pos_human;
 
 ---
 
-### ✅ 节点5: `arm_controller_node` (100% 完成)
+### ✅ 节点5: `arm_controller_node` + `robot_state_publisher` (100% 完成)
 
 **包名**: `qyh_jaka_control`  
 **状态**: ✅ 已完整实现
@@ -208,9 +208,37 @@ tf2::Vector3 pos_corrected = R_correction * pos_human;
 | JAKA伺服控制 | ✅ 调用`servoJ` | ✅ 已实现 | `jaka_control_node.cpp:472-499` |
 | 频率 | ✅ 125Hz (8ms周期) | ✅ 已实现 | 伺服循环 |
 | 发布状态 | ✅ `/joint_states` | ✅ 已实现 | `jaka_control_node.cpp:514-540` |
-| 发布TF | ✅ `base_link_* → l1~lt/r1~rt` | ✅ 已实现 | 通过URDF |
+| **发布TF** | ✅ `base_link_* → l1~lt/r1~rt` | ✅ 已实现 | **见下方说明** ⭐ |
 | 安全检查 | ⚠️ 碰撞/奇异点检测 | ⚠️ 待增强 | 见下方 |
 | JAKA连接 | ✅ 作为第一客户端 | ✅ 已实现 | `jaka_interface.cpp` |
+
+#### ⭐ TF发布机制说明
+
+**robot_state_publisher 必须启动**：
+- **URDF文件**：定义机械臂的完整运动学模型
+  - `base_link → base_link_left` (静态，包含校准偏移)
+  - `base_link → base_link_right` (静态，包含校准偏移)
+  - `base_link_left → l1 → l2 → ... → lt` (运动学链)
+  - `base_link_right → r1 → r2 → ... → rt` (运动学链)
+
+- **robot_state_publisher**：订阅 `/joint_states`，发布TF树
+  - 将URDF中的静态变换发布为TF
+  - 根据关节角度计算动态TF
+
+- **launch文件检查**：
+```python
+# 确认launch文件中包含以下内容
+robot_state_publisher = Node(
+    package='robot_state_publisher',
+    executable='robot_state_publisher',
+    parameters=[{'robot_description': robot_description}]
+)
+```
+
+- **如果缺失**：
+  - ❌ `base_link → base_link_left/right` TF不存在
+  - ❌ IK求解器无法查询TF变换
+  - ❌ 系统无法工作
 
 #### ⚠️ 可选增强项
 

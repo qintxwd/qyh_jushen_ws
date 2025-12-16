@@ -101,15 +101,20 @@
 │  - 伺服控制 (125Hz)                                                     │
 │  - 安全检查                                                              │
 │  - 发布机械臂状态                                                        │
+│  - ⭐ 必须配合 robot_state_publisher 启动                               │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                 ┌──────────────┴──────────────┐
                 │                             │
                 ↓ TF (实时)                   ↓ Topics
     base_link → base_link_left          /joint_states
-    base_link → base_link_right         (sensor_msgs/JointState)
-    base_link_left → l1 → ... → lt      /robot_status
+    (通过URDF发布，静态变换) ⭐         (sensor_msgs/JointState)
+    base_link → base_link_right         /robot_status
+    (通过URDF发布，静态变换) ⭐
+    base_link_left → l1 → ... → lt
+    (通过robot_state_publisher动态发布)
     base_link_right → r1 → ... → rt
+    (通过robot_state_publisher动态发布)
                 │
                 ↓
         ┌───────────────┐
@@ -152,6 +157,10 @@
 - **包名**: `qyh_jaka_control`
 - **状态**: 已存在，功能完整。
 - **功能**: 主控制节点，负责底层伺服通信。
+- **⭐ 重要依赖**: 必须同时启动 `robot_state_publisher` 发布机械臂TF树
+  - **URDF文件**: 定义了 `base_link → base_link_left/right` 的静态变换（包含校准偏移）
+  - **robot_state_publisher**: 根据 `/joint_states` 发布完整的机械臂运动学TF树
+  - **没有这些TF**: IK求解器无法进行坐标转换，系统将无法工作
 
 ---
 

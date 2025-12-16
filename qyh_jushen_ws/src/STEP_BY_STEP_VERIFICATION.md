@@ -436,11 +436,27 @@ ros2 topic echo /left_arm/joint_command
 ### 2.2 启动机械臂控制节点（仅读取状态）
 
 ```bash
-# 终端1: 启动jaka_control
+# 终端1: 启动jaka_control (应包含robot_state_publisher)
 ros2 launch qyh_jaka_control jaka_control.launch.py
 ```
 
 #### 验证步骤
+
+**2.2.0 检查robot_state_publisher启动 ⭐ 关键**
+```bash
+# 检查节点列表
+ros2 node list | grep robot_state_publisher
+
+# 预期输出: /robot_state_publisher
+# ✅ 通过: robot_state_publisher正在运行
+# ❌ 失败: 需要在launch文件中添加robot_state_publisher节点
+
+# 检查URDF是否加载
+ros2 param get /robot_state_publisher robot_description | head -20
+
+# 预期输出: URDF XML内容
+# ✅ 通过: URDF已加载
+```
 
 **2.2.1 检查连接状态**
 ```bash
@@ -473,16 +489,34 @@ ros2 topic hz /joint_states
 # ✅ 通过: 频率稳定
 ```
 
-**2.2.4 验证TF发布**
+**2.2.4 验证TF发布 ⭐ 关键**
 ```bash
-# 检查机械臂TF链
+# 首先检查基础TF（静态变换，由URDF定义）
+ros2 run tf2_ros tf2_echo base_link base_link_left
+
+# 预期输出: 
+# Translation: [-0.0004, 0.08522, 0.0030]
+# Rotation: 绕Z轴-30° (包含校准偏移)
+# ✅ 通过: 输出正确的静态变换
+# ❌ 失败: robot_state_publisher未启动或URDF未加载
+
+ros2 run tf2_ros tf2_echo base_link base_link_right
+# 预期: 输出右臂安装点变换 (y=-0.08395, rz=30°)
+
+# 然后检查完整机械臂TF链（动态变换，随关节运动）
 ros2 run tf2_ros tf2_echo base_link lt
 
-# 预期: 输出左臂末端位置
+# 预期: 输出左臂末端位置（会随关节角度变化）
 # ✅ 通过: 有输出
 
 ros2 run tf2_ros tf2_echo base_link rt
 # 预期: 输出右臂末端位置
+
+# 检查完整TF树
+ros2 run tf2_tools view_frames
+# 生成frames.pdf，检查:
+# base_link → base_link_left → l1 → l2 → ... → lt ✅
+# base_link → base_link_right → r1 → r2 → ... → rt ✅
 ```
 
 **2.2.5 手动移动机械臂测试**
