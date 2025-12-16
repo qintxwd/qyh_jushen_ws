@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 Force j4 joints (l-j4/r-j4) to exactly zero in /joint_states
 Subscribes to /joint_states, modifies l-j4 and r-j4 to 0.0, and republishes to /joint_states_corrected

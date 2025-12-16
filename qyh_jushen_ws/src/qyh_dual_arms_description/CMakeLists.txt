@@ -10,18 +10,26 @@ find_package(ament_cmake REQUIRED)
 
 # Install directories
 install(DIRECTORY
-  urdf
-  meshes
-  launch
   config
-  DESTINATION share/${PROJECT_NAME}
+  launch
+  meshes
+  urdf
+  DESTINATION share/${PROJECT_NAME}/
 )
 
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
+# Install Python scripts
+install(PROGRAMS
+  scripts/vr_to_base_vr.py
+  scripts/calibrate_vr_mapping.py
+  scripts/robot_pose_calibration_gui.py
+  scripts/print_robot_info.py
+  scripts/force_j4_zero.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# if(BUILD_TESTING)
+#   find_package(ament_lint_auto REQUIRED)
+#   ament_lint_auto_find_test_dependencies()
+# endif()
 
 ament_package()

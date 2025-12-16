@@ -1,68 +1,78 @@
+#!/usr/bin/env python3
+"""Launch file for displaying qyh_dual_arms_description robot in RViz2."""
+
 import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, Command
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
-from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
-    # 获取包路径
+    """Generate launch description for qyh_dual_arms_description display."""
+    # Get the package directory
     pkg_share = get_package_share_directory('qyh_dual_arms_description')
     
-    # URDF文件路径
-    urdf_file = os.path.join(pkg_share, 'urdf', 'dual_arms.urdf.xacro')
+    # Path to URDF file
+    urdf_file = os.path.join(pkg_share, 'urdf', 'dual_arms.urdf')
     
-    # RViz配置文件路径
-    rviz_config_file = os.path.join(pkg_share, 'config', 'display.rviz')
-    
-    # 声明launch参数
+    # Read URDF file
+    with open(urdf_file, 'r') as infp:
+        robot_desc = infp.read()
+
+    # Declare launch arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
-    
-    # 使用xacro处理URDF
-    robot_description_content = ParameterValue(
-        Command(['xacro ', urdf_file]),
-        value_type=str
+
+    # Force j4 to zero node (corrects floating point errors from GUI)
+    force_j4_zero_node = Node(
+        package='qyh_dual_arms_description',
+        executable='force_j4_zero.py',
+        name='force_j4_zero',
+        output='screen'
     )
-    
-    # Robot State Publisher节点
-    robot_state_publisher = Node(
+
+    # Robot State Publisher node (uses corrected joint states)
+    robot_state_publisher_node = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
         name='robot_state_publisher',
         output='screen',
         parameters=[{
-            'robot_description': robot_description_content,
-            'use_sim_time': use_sim_time
-        }]
+            'use_sim_time': use_sim_time,
+            'robot_description': robot_desc
+        }],
+        remappings=[
+            ('/joint_states', '/joint_states_corrected')
+        ]
     )
-    
-    # Joint State Publisher GUI节点
-    joint_state_publisher_gui = Node(
+
+    # Joint State Publisher GUI node
+    joint_state_publisher_gui_node = Node(
         package='joint_state_publisher_gui',
         executable='joint_state_publisher_gui',
         name='joint_state_publisher_gui',
         output='screen'
     )
-    
-    # RViz2节点
-    rviz2 = Node(
+
+    # RViz2 node
+    rviz_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
         output='screen',
-        arguments=['-d', rviz_config_file],
-        parameters=[{'use_sim_time': use_sim_time}]
+        arguments=['-d', os.path.join(pkg_share, 'urdf.rviz')] if os.path.exists(
+            os.path.join(pkg_share, 'urdf.rviz')) else []
     )
-    
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_sim_time',
             default_value='false',
             description='Use simulation (Gazebo) clock if true'
         ),
-        robot_state_publisher,
-        joint_state_publisher_gui,
-        rviz2
+        force_j4_zero_node,
+        robot_state_publisher_node,
+        joint_state_publisher_gui_node,
+        rviz_node
     ])

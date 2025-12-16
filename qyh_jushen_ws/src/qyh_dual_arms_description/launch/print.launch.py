@@ -10,7 +10,7 @@ def generate_launch_description():
     Launch file to print joint states and tool poses at 5Hz with j4 forced to zero
     """
     # Get the package directory
-    pkg_share = get_package_share_directory('dual_arms')
+    pkg_share = get_package_share_directory('qyh_dual_arms_description')
     
     # Path to URDF file
     urdf_file = os.path.join(pkg_share, 'urdf', 'dual_arms.urdf')
@@ -21,7 +21,7 @@ def generate_launch_description():
 
     # Force j4 to zero node (corrects floating point errors)
     force_j4_zero_node = Node(
-        package='dual_arms',
+        package='qyh_dual_arms_description',
         executable='force_j4_zero.py',
         name='force_j4_zero',
         output='screen'
@@ -43,7 +43,7 @@ def generate_launch_description():
 
     # Print robot info node (uses corrected joint states)
     print_info_node = Node(
-        package='dual_arms',
+        package='qyh_dual_arms_description',
         executable='print_robot_info.py',
         name='print_robot_info',
         output='screen',

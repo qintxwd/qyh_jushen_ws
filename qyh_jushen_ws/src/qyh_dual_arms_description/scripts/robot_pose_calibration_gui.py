@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 机械臂姿态标定GUI工具
 
@@ -8,7 +8,7 @@
 3. 保存当前姿态到robot_calibration_poses.yaml
 
 使用方法:
-ros2 run dual_arms robot_pose_calibration_gui.py
+ros2 run qyh_dual_arms_description robot_pose_calibration_gui.py
 """
 
 import sys

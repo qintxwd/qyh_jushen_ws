@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 Print robot joint states and tool poses at specified frequency
 """

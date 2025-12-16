@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 VR数据接收并发布到base_vr坐标系
 

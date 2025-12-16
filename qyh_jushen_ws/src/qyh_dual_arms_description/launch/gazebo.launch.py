@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch file for spawning dual_arms robot in Gazebo."""
+"""Launch file for spawning qyh_dual_arms_description robot in Gazebo."""
 
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -11,9 +11,9 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    """Generate launch description for dual_arms in Gazebo."""
+    """Generate launch description for qyh_dual_arms_description in Gazebo."""
     # Get the package directory
-    pkg_share = get_package_share_directory('dual_arms')
+    pkg_share = get_package_share_directory('qyh_dual_arms_description')
     gazebo_ros_share = get_package_share_directory('gazebo_ros')
     
     # Path to URDF file
@@ -39,7 +39,7 @@ def generate_launch_description():
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=[
-            '-entity', 'dual_arms',
+            '-entity', 'qyh_dual_arms_description',
             '-topic', 'robot_description',
             '-x', '0', '-y', '0', '-z', '0'
         ],

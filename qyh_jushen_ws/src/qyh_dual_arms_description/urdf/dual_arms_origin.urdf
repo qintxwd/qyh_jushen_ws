@@ -3,7 +3,7 @@
      Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
      For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
 <robot
-  name="dual_arms">
+  name="qyh_dual_arms_description">
   <link
     name="base_link">
     <inertial>
@@ -27,7 +27,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/base_link.STL" />
+          filename="package://qyh_dual_arms_description/meshes/base_link.STL" />
       </geometry>
     </collision>
   </link>
@@ -44,7 +44,7 @@
   </link>
   
   <joint name="base_to_right" type="fixed">
-    <origin xyz="-0.001080 -0.098950 0.000951" rpy="0 0 0" />
+    <origin xyz="-0.001080 0.001050 0.000951" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="base_link_right" />
   </joint>
@@ -71,7 +71,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r1.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r1.STL" />
       </geometry>
       <material
         name="">
@@ -85,7 +85,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r1.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r1.STL" />
       </geometry>
     </collision>
   </link>
@@ -129,7 +129,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r2.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r2.STL" />
       </geometry>
       <material
         name="">
@@ -143,7 +143,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r2.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r2.STL" />
       </geometry>
     </collision>
   </link>
@@ -187,7 +187,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r3.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r3.STL" />
       </geometry>
       <material
         name="">
@@ -201,7 +201,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r3.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r3.STL" />
       </geometry>
     </collision>
   </link>
@@ -245,7 +245,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r4.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r4.STL" />
       </geometry>
       <material
         name="">
@@ -259,7 +259,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r4.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r4.STL" />
       </geometry>
     </collision>
   </link>
@@ -303,7 +303,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r5.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r5.STL" />
       </geometry>
       <material
         name="">
@@ -317,7 +317,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r5.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r5.STL" />
       </geometry>
     </collision>
   </link>
@@ -361,7 +361,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r6.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r6.STL" />
       </geometry>
       <material
         name="">
@@ -375,7 +375,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r6.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r6.STL" />
       </geometry>
     </collision>
   </link>
@@ -419,7 +419,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r7.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r7.STL" />
       </geometry>
       <material
         name="">
@@ -433,7 +433,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/r7.STL" />
+          filename="package://qyh_dual_arms_description/meshes/r7.STL" />
       </geometry>
     </collision>
   </link>
@@ -477,7 +477,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/rt.STL" />
+          filename="package://qyh_dual_arms_description/meshes/rt.STL" />
       </geometry>
       <material
         name="">
@@ -491,7 +491,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/rt.STL" />
+          filename="package://qyh_dual_arms_description/meshes/rt.STL" />
       </geometry>
     </collision>
   </link>
@@ -521,7 +521,7 @@
   </link>
   
   <joint name="base_to_left" type="fixed">
-    <origin xyz="-0.0004 0.1022 0.0030" rpy="0 0 0" />
+    <origin xyz="-0.0004 0.0022 0.0030" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="base_link_left" />
   </joint>
@@ -548,7 +548,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l1.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l1.STL" />
       </geometry>
       <material
         name="">
@@ -562,7 +562,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l1.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l1.STL" />
       </geometry>
     </collision>
   </link>
@@ -606,7 +606,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l2.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l2.STL" />
       </geometry>
       <material
         name="">
@@ -620,7 +620,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l2.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l2.STL" />
       </geometry>
     </collision>
   </link>
@@ -664,7 +664,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l3.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l3.STL" />
       </geometry>
       <material
         name="">
@@ -678,7 +678,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l3.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l3.STL" />
       </geometry>
     </collision>
   </link>
@@ -722,7 +722,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l4.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l4.STL" />
       </geometry>
       <material
         name="">
@@ -736,7 +736,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l4.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l4.STL" />
       </geometry>
     </collision>
   </link>
@@ -780,7 +780,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l5.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l5.STL" />
       </geometry>
       <material
         name="">
@@ -794,7 +794,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l5.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l5.STL" />
       </geometry>
     </collision>
   </link>
@@ -838,7 +838,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l6.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l6.STL" />
       </geometry>
       <material
         name="">
@@ -852,7 +852,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l6.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l6.STL" />
       </geometry>
     </collision>
   </link>
@@ -896,7 +896,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l7.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l7.STL" />
       </geometry>
       <material
         name="">
@@ -910,7 +910,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/l7.STL" />
+          filename="package://qyh_dual_arms_description/meshes/l7.STL" />
       </geometry>
     </collision>
   </link>
@@ -954,7 +954,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/lt.STL" />
+          filename="package://qyh_dual_arms_description/meshes/lt.STL" />
       </geometry>
       <material
         name="">
@@ -968,7 +968,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://dual_arms/meshes/lt.STL" />
+          filename="package://qyh_dual_arms_description/meshes/lt.STL" />
       </geometry>
     </collision>
   </link>

@@ -8,7 +8,7 @@
 3. VR手柄坐标直接对应base_vr的坐标系（X右 Y上 Z后）
 
 使用方法:
-    ros2 launch dual_arms vr_bridge.launch.py
+    ros2 launch qyh_dual_arms_description vr_bridge.launch.py
     
 参数:
     udp_port: UDP监听端口，默认9999
@@ -39,7 +39,7 @@ def generate_launch_description():
     
     # VR到base_vr的桥接节点
     vr_bridge_node = Node(
-        package='dual_arms',
+        package='qyh_dual_arms_description',
         executable='vr_to_base_vr.py',
         name='vr_to_base_vr',
         output='screen',

@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 VR位置映射标定工具
 
 使用方法:
-1. 运行此脚本: ros2 run dual_arms calibrate_vr_mapping.py
+1. 运行此脚本: ros2 run qyh_dual_arms_description calibrate_vr_mapping.py
 2. 按提示移动VR手柄到5个标准姿态
 3. 每个姿态: 按空格键记录VR位置，输入机械臂目标XYZ
 4. 自动计算并保存映射参数到yaml文件
