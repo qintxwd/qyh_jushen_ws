@@ -1,0 +1,10 @@
+/**:
+  ros__parameters:
+    # 连接到相同的控制器
+    robot_ip: "192.168.2.200"
+    
+    # IK测试频率（Hz）
+    ik_test_rate: 100.0
+    
+    # 自动连接
+    auto_connect: true
