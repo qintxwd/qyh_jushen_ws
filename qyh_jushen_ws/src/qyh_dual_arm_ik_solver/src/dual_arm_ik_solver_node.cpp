@@ -304,8 +304,10 @@ private:
         R_correction.getRotation(q_correction);
         
         // 应用旋转校正到姿态（注意：只旋转姿态，不旋转位置）
+        // ⭐ 变换链：base_link_left → human_left_hand → lt
+        // 右乘：R_lt = R_human * R_human_to_lt
         tf2::Matrix3x3 R_base_left(q_base_left);
-        tf2::Matrix3x3 R_corrected = R_correction * R_base_left;
+        tf2::Matrix3x3 R_corrected = R_base_left * R_correction;  // ✅ 右乘！
         
         tf2::Quaternion q_corrected;
         R_corrected.getRotation(q_corrected);
@@ -442,8 +444,10 @@ private:
         R_correction.getRotation(q_correction);
         
         // 应用旋转校正到姿态
+        // ⭐ 变换链：base_link_right → human_right_hand → rt
+        // 右乘：R_rt = R_human * R_human_to_rt
         tf2::Matrix3x3 R_base_right(q_base_right);
-        tf2::Matrix3x3 R_corrected = R_correction * R_base_right;
+        tf2::Matrix3x3 R_corrected = R_base_right * R_correction;  // ✅ 右乘！
         
         tf2::Quaternion q_corrected;
         R_corrected.getRotation(q_corrected);
