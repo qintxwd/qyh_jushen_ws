@@ -96,6 +96,11 @@ public:
         ik_status_pub_ = create_publisher<std_msgs::msg::Bool>(
             "/ik_solver/status", 10);
         
+        // 订阅实际关节状态 (用作IK参考)
+        joint_states_sub_ = create_subscription<sensor_msgs::msg::JointState>(
+            "/joint_states", 10,
+            std::bind(&DualArmIKSolverNode::jointStatesCallback, this, std::placeholders::_1));
+        
         // 自动连接
         if (auto_connect_) {
             connectToRobot();
@@ -163,6 +168,24 @@ private:
     {
         right_target_ = msg;
         has_right_target_ = true;
+    }
+    
+    void jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+    {
+        // 更新当前机械臂关节位置（用作IK参考）
+        if (msg->position.size() >= 14) {  // 双臂14个关节
+            // 左臂: 前7个关节
+            for (int i = 0; i < 7; i++) {
+                current_left_joints_.jVal[i] = msg->position[i];
+            }
+            has_current_left_ = true;
+            
+            // 右臂: 后7个关节
+            for (int i = 0; i < 7; i++) {
+                current_right_joints_.jVal[i] = msg->position[i + 7];
+            }
+            has_current_right_ = true;
+        }
     }
     
     void ikSolverCallback()
@@ -255,9 +278,12 @@ private:
         target_pose.rpy.ry = pitch;
         target_pose.rpy.rz = yaw;
         
+        // 选择IK参考: 优先使用当前实际关节位置，否则使用初始参考
+        JointValue* ref_joints = has_current_left_ ? &current_left_joints_ : &ref_left_joints_;
+        
         // 调用IK求解 - robot_id=0表示左臂
         JointValue ik_result;
-        errno_t ret = robot_->kine_inverse(0, &ref_left_joints_, &target_pose, &ik_result);
+        errno_t ret = robot_->kine_inverse(0, ref_joints, &target_pose, &ik_result);
         
         if (ret == ERR_SUCC) {
             // === 步骤3: 安全检查 ===
@@ -282,8 +308,7 @@ private:
             prev_left_joints_ = ik_result;
             has_prev_left_ = true;
             
-            // 更新参考位置（用于下次求解）
-            ref_left_joints_ = ik_result;
+            // 注意: 不再更新ref_joints，因为使用实际joint_states作为参考
             
             // 发布关节指令
             publishJointCommand(ik_result, left_joint_pub_);
@@ -343,9 +368,12 @@ private:
         target_pose.rpy.ry = pitch;
         target_pose.rpy.rz = yaw;
         
+        // 选择IK参考: 优先使用当前实际关节位置，否则使用初始参考
+        JointValue* ref_joints = has_current_right_ ? &current_right_joints_ : &ref_right_joints_;
+        
         // 调用IK求解 - robot_id=1表示右臂
         JointValue ik_result;
-        errno_t ret = robot_->kine_inverse(1, &ref_right_joints_, &target_pose, &ik_result);
+        errno_t ret = robot_->kine_inverse(1, ref_joints, &target_pose, &ik_result);
         
         if (ret == ERR_SUCC) {
             // === 步骤3: 安全检查 ===
@@ -370,8 +398,7 @@ private:
             prev_right_joints_ = ik_result;
             has_prev_right_ = true;
             
-            // 更新参考位置
-            ref_right_joints_ = ik_result;
+            // 注意: 不再更新ref_joints，因为使用实际joint_states作为参考
             
             // 发布关节指令
             publishJointCommand(ik_result, right_joint_pub_);
@@ -455,6 +482,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_target_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_target_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;  // 订阅实际关节状态
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_joint_pub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr right_joint_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ik_status_pub_;
@@ -475,9 +503,15 @@ private:
     bool has_left_target_{false};
     bool has_right_target_{false};
     
-    // 参考关节位置
+    // 参考关节位置（初始化时的零位，用作fallback）
     JointValue ref_left_joints_;
     JointValue ref_right_joints_;
+    
+    // 当前实际关节位置（从/joint_states获取，用作IK参考）
+    JointValue current_left_joints_;
+    JointValue current_right_joints_;
+    bool has_current_left_{false};
+    bool has_current_right_{false};
     
     // 上次关节位置（用于速度检查）
     JointValue prev_left_joints_;
