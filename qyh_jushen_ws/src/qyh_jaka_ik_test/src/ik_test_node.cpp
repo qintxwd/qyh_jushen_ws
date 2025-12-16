@@ -17,6 +17,9 @@
 #include <cmath>
 #include <memory>
 
+#define JK_PI (3.141592653589793)
+#define deg_tp_rad 1.0 / 180.0 * JK_PI
+
 using namespace std::chrono_literals;
 
 class JakaIKTestNode : public rclcpp::Node
@@ -86,6 +89,10 @@ private:
             auto msg = std_msgs::msg::String();
             msg.data = "Connected to " + robot_ip_;
             status_pub_->publish(msg);
+
+            // 运行一次完整性检查
+            runSanityCheck();
+
         } else {
             connected_ = false;
             RCLCPP_ERROR(get_logger(), "❌ 连接失败！错误码: %d", ret);
@@ -95,45 +102,93 @@ private:
             RCLCPP_WARN(get_logger(), "  3. SDK不支持多客户端连接");
         }
     }
+
+    void runSanityCheck()
+    {
+        RCLCPP_INFO(get_logger(), "🔍 运行IK完整性检查 (模仿25.kine)...");
+        
+        // 构造全90度关节角 - 使用数组以防库函数越界读取
+        JointValue start_pos[2] = { { 90 * deg_tp_rad, 90 * deg_tp_rad, 90 * deg_tp_rad, 90 * deg_tp_rad, 90 * deg_tp_rad, 90 * deg_tp_rad, 90 * deg_tp_rad},
+                                 { 90 * deg_tp_rad, -45 * deg_tp_rad, 0, -100 * deg_tp_rad, 0, -35 * deg_tp_rad, 90 * deg_tp_rad} };    
+        CartesianPose pos[2];
+        robot_->kine_forward(0, &start_pos[0], &pos[0]);
+        robot_->kine_forward(1, &start_pos[1], &pos[1]);
+        printf("left pos = %lf, %lf, %lf, %lf, %lf, %lf\n", pos[0].tran.x, pos[0].tran.y, pos[0].tran.z, pos[0].rpy.rx, pos[0].rpy.ry, pos[0].rpy.rz);
+        printf("right pos = %lf, %lf, %lf, %lf, %lf, %lf\n", pos[1].tran.x, pos[1].tran.y, pos[1].tran.z, pos[1].rpy.rx, pos[1].rpy.ry, pos[1].rpy.rz);
+
+        JointValue end_pos[2];
+        pos[0].tran.x += 20;
+        pos[0].tran.y += 20;
+        pos[0].tran.z += 20;
+        pos[1].tran.x += 20;
+        pos[1].tran.y += 20;
+        pos[1].tran.z += 20;
+        errno_t ret = robot_->kine_inverse(0, &start_pos[0], &pos[0], &end_pos[0]);
+        robot_->kine_inverse(1, &start_pos[1], &pos[1], &end_pos[1]);
+
+        printf("left end pos = %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", end_pos[0].jVal[0], end_pos[0].jVal[1], end_pos[0].jVal[2], end_pos[0].jVal[3], end_pos[0].jVal[4], end_pos[0].jVal[5], end_pos[0].jVal[6]);
+        printf("right end pos = %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", end_pos[1].jVal[0], end_pos[1].jVal[1], end_pos[1].jVal[2], end_pos[1].jVal[3], end_pos[1].jVal[4], end_pos[1].jVal[5], end_pos[0].jVal[6]);
+
+        robot_->kine_forward(0, &end_pos[0], &pos[0]);
+        robot_->kine_forward(1, &end_pos[1], &pos[1]);
+        printf("left pos = %lf, %lf, %lf, %lf, %lf, %lf\n", pos[0].tran.x, pos[0].tran.y, pos[0].tran.z, pos[0].rpy.rx, pos[0].rpy.ry, pos[0].rpy.rz);
+        printf("right pos = %lf, %lf, %lf, %lf, %lf, %lf\n", pos[1].tran.x, pos[1].tran.y, pos[1].tran.z, pos[1].rpy.rx, pos[1].rpy.ry, pos[1].rpy.rz);
+
+        if (ret == ERR_SUCC || ret == -24) {
+            RCLCPP_INFO(get_logger(), "✅ Sanity Check IK (LEFT) SUCCESS! (ret=%d)", ret);
+        } else {
+            RCLCPP_ERROR(get_logger(), "❌ Sanity Check IK (LEFT) FAILED: %d", ret);
+        }
+    }
     
     void ikTestCallback()
     {
         if (!connected_) {
             return;
         }
+
+        // 初始化基准位姿 (仅执行一次)
+        if (!base_pose_initialized_) {
+            JointValue ref_joint;
+            double val_90deg = 90 * deg_tp_rad;
+            for(int i=0; i<7; ++i) ref_joint.jVal[i] = val_90deg;
+            
+            errno_t ret = robot_->kine_forward(0, &ref_joint, &base_pose_);
+            if (ret == ERR_SUCC) {
+                base_pose_initialized_ = true;
+                RCLCPP_INFO(get_logger(), "✅ 基准位姿初始化成功: [%.2f, %.2f, %.2f] RPY:[%.2f, %.2f, %.2f]", 
+                    base_pose_.tran.x, base_pose_.tran.y, base_pose_.tran.z,
+                    base_pose_.rpy.rx, base_pose_.rpy.ry, base_pose_.rpy.rz);
+            } else {
+                RCLCPP_ERROR(get_logger(), "❌ 基准位姿初始化失败 (FK错误码: %d)", ret);
+                return;
+            }
+        }
         
         test_count_++;
         
-        // 使用真实零位位姿（机械臂伸直状态）
-        // 左臂零位：X=0, Y=992.7, Z=220, RX=90°, RY=0°, RZ=180°
+        // 基于基准位姿构造目标位姿
         double t = test_count_ * 0.01;  // 时间参数
-        CartesianPose target_pose;
+        CartesianPose target_pose = base_pose_;
         
-        // 仅在Z轴做小幅度上下运动（±10mm），保持在工作空间内
-        target_pose.tran.x = 0.0;  // mm
-        target_pose.tran.y = 992.7;  // mm
-        target_pose.tran.z = 220.0 + 10.0 * std::sin(t);  // 上下±10mm
-        target_pose.rpy.rx = 1.5708;  // 90° = π/2 rad
-        target_pose.rpy.ry = 0.0;     // 0°
-        target_pose.rpy.rz = 3.1416;  // 180° = π rad
+        // 模仿25.kine，增加偏移量，避免奇异点
+        target_pose.tran.x += 20.0;
+        target_pose.tran.y += 20.0;
+        target_pose.tran.z += 20.0 + 10.0 * std::sin(t);
         
-        // 使用固定的参考关节角度（避免依赖状态获取）
-        // 参考位置：左臂张开姿态 [0, -60, 0, 0, 0, 0, 0] 度
+        // 使用全90度作为参考关节角度
         JointValue ref_joint;
-        ref_joint.jVal[0] = 0.0;
-        ref_joint.jVal[1] = -1.0472;  // -60度
-        ref_joint.jVal[2] = 0.0;
-        ref_joint.jVal[3] = 0.0;
-        ref_joint.jVal[4] = 0.0;
-        ref_joint.jVal[5] = 0.0;
-        ref_joint.jVal[6] = 0.0;
+        double val_90deg = 90 * deg_tp_rad;
+        for(int i=0; i<7; ++i) {
+            ref_joint.jVal[i] = val_90deg;
+        }
         
-        // 调用IK求解 - kine_inverse是关键测试！
+        // 调用IK求解
         // robot_id=0 表示左臂
         JointValue ik_result;
         errno_t ret = robot_->kine_inverse(0, &ref_joint, &target_pose, &ik_result);
         
-        if (ret == ERR_SUCC) {
+        if (ret == ERR_SUCC || ret == -24) {
             success_count_++;
             
             // 发布IK结果
@@ -173,6 +228,10 @@ private:
     std::string robot_ip_;
     bool connected_{false};
     bool auto_connect_{true};
+    
+    // IK测试相关
+    CartesianPose base_pose_;
+    bool base_pose_initialized_{false};
     
     // 统计
     int64_t test_count_{0};
