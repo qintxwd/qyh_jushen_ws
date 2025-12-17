@@ -49,7 +49,11 @@ public:
         this->declare_parameter("filter_alpha", 0.3);          // 低通滤波系数
         this->declare_parameter("max_position_delta", 0.05);   // 单帧最大位移(m)
         this->declare_parameter("max_rotation_delta", 0.1);    // 单帧最大旋转(rad)
-        this->declare_parameter("grip_threshold", 0.5);        // 握持阈值
+        // Clutch阈值（带滞回）：按下时用engage，松开时用release
+        // 兼容旧参数 grip_threshold（没有engage/release时退化为单阈值）
+        this->declare_parameter("grip_engage_threshold", 0.8);
+        this->declare_parameter("grip_release_threshold", 0.2);
+        this->declare_parameter("grip_threshold", 0.5);        // [legacy]
         this->declare_parameter("update_rate", 100.0);         // Hz
         
         grip_offset_deg_ = this->get_parameter("grip_offset_deg").as_double();
@@ -58,6 +62,8 @@ public:
         filter_alpha_ = this->get_parameter("filter_alpha").as_double();
         max_position_delta_ = this->get_parameter("max_position_delta").as_double();
         max_rotation_delta_ = this->get_parameter("max_rotation_delta").as_double();
+        grip_engage_threshold_ = this->get_parameter("grip_engage_threshold").as_double();
+        grip_release_threshold_ = this->get_parameter("grip_release_threshold").as_double();
         grip_threshold_ = this->get_parameter("grip_threshold").as_double();
         double update_rate = this->get_parameter("update_rate").as_double();
         
@@ -99,6 +105,8 @@ public:
         RCLCPP_INFO(this->get_logger(), "Role: VR → human hand coordinate mapping");
         RCLCPP_INFO(this->get_logger(), "Grip offset: %.1f deg, Position scale: %.2f", 
                    grip_offset_deg_, position_scale_);
+        RCLCPP_INFO(this->get_logger(), "Clutch thresholds: engage=%.2f release=%.2f (legacy grip_threshold=%.2f)",
+                grip_engage_threshold_, grip_release_threshold_, grip_threshold_);
         RCLCPP_INFO(this->get_logger(), "Filter alpha: %.2f, Max pos delta: %.3f m", 
                    filter_alpha_, max_position_delta_);
     }
@@ -126,10 +134,25 @@ private:
         rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr& pub,
         const rclcpp::Time& now)
     {
-        // Check grip state (Clutch)
-        double grip_val = (hand_name == "left") ? left_grip_ : right_grip_;
-        if (grip_val < grip_threshold_) {
-            return;
+        // === Clutch state (per-hand) ===
+        const double grip_val = (hand_name == "left") ? left_grip_ : right_grip_;
+        HandState& hs = (hand_name == "left") ? left_hand_state_ : right_hand_state_;
+
+        const bool clutch_pressed = grip_val > grip_engage_threshold_;
+        const bool clutch_released = grip_val < grip_release_threshold_;
+
+        if (!hs.engaged) {
+            if (!clutch_pressed) {
+                return;  // 未接合，不发布新目标（下游保持最后目标）
+            }
+            hs.engaged = true;
+            hs.just_engaged = true;
+        } else {
+            if (clutch_released) {
+                hs.engaged = false;
+                hs.just_engaged = false;
+                return;
+            }
         }
 
         // 查询 vr_origin → vr_*_controller TF
@@ -155,25 +178,69 @@ private:
             transform.transform.rotation.z,
             transform.transform.rotation.w
         );
-        
-        // === 1. 应用握持补偿 ===
+
+        // === 0. 应用握持补偿（先补偿再做增量更符合“人手语义”） ===
         tf2::Quaternion compensated_quat = vr_quat * grip_offset_quat_;
         compensated_quat.normalize();
-        
-        // === 2. 位置缩放 ===
-        tf2::Vector3 scaled_pos = vr_pos * position_scale_;
-        
-        // === 3. 旋转缩放（可选） ===
-        tf2::Quaternion scaled_quat = compensated_quat;
-        if (rotation_scale_ != 1.0) {
-            tf2::Vector3 axis = compensated_quat.getAxis();
-            double angle = compensated_quat.getAngle() * rotation_scale_;
-            scaled_quat.setRotation(axis, angle);
-            scaled_quat.normalize();
+
+        // === 0.5 若刚接合：记录VR原点 & 目标原点（用“上一次发布的目标”作为robot_origin替代） ===
+        if (hs.just_engaged) {
+            hs.vr_origin_pos = vr_pos;
+            hs.vr_origin_quat = compensated_quat;
+            hs.have_vr_origin = true;
+
+            // target_origin：优先使用最后一次发布的目标（实现“松开保持、再接合从当前位置继续增量”）
+            if (hs.have_last_target) {
+                hs.target_origin_pos = hs.last_target_pos;
+                hs.target_origin_quat = hs.last_target_quat;
+                hs.have_target_origin = true;
+            } else {
+                // 第一次接合没有历史目标：退化为绝对映射的当前值，避免跳变
+                hs.target_origin_pos = (vr_pos * position_scale_);
+                hs.target_origin_quat = compensated_quat;
+                hs.have_target_origin = true;
+
+                hs.last_target_pos = hs.target_origin_pos;
+                hs.last_target_quat = hs.target_origin_quat;
+                hs.have_last_target = true;
+            }
+
+            // 让滤波器从当前目标起步，避免接合瞬间的“突变”
+            prev_pos = hs.target_origin_pos;
+            prev_quat = hs.target_origin_quat;
+            hs.have_prev = true;
+
+            hs.just_engaged = false;
+        }
+
+        // 安全：没有原点/目标原点时不计算
+        if (!hs.have_vr_origin || !hs.have_target_origin) {
+            return;
         }
         
-        // === 4. 低通滤波 ===
-        if (prev_pos.length() > 0) {  // 有历史数据
+        // === 1. 增量：基于“接合瞬间原点”计算VR位移/旋转变化 ===
+        // 位置：delta = (vr_pos - vr_origin_pos) * scale
+        tf2::Vector3 delta_pos = (vr_pos - hs.vr_origin_pos) * position_scale_;
+
+        // 姿态：vr_delta = vr_origin^{-1} * vr_current
+        tf2::Quaternion vr_delta_quat = hs.vr_origin_quat.inverse() * compensated_quat;
+        vr_delta_quat.normalize();
+
+        // 旋转缩放（可选）
+        if (rotation_scale_ != 1.0) {
+            tf2::Vector3 axis = vr_delta_quat.getAxis();
+            double angle = vr_delta_quat.getAngle() * rotation_scale_;
+            vr_delta_quat.setRotation(axis, angle);
+            vr_delta_quat.normalize();
+        }
+
+        // 应用到“目标原点”上：target = target_origin (+ delta)
+        tf2::Vector3 scaled_pos = hs.target_origin_pos + delta_pos;
+        tf2::Quaternion scaled_quat = hs.target_origin_quat * vr_delta_quat;
+        scaled_quat.normalize();
+        
+        // === 2. 低通滤波（在目标空间平滑，不破坏增量语义） ===
+        if (hs.have_prev) {
             // 位置滤波
             tf2::Vector3 filtered_pos = prev_pos.lerp(scaled_pos, filter_alpha_);
             
@@ -205,6 +272,12 @@ private:
         // 更新历史
         prev_pos = scaled_pos;
         prev_quat = scaled_quat;
+        hs.have_prev = true;
+
+        // 更新最后目标（用于松开保持/再次接合）
+        hs.last_target_pos = scaled_pos;
+        hs.last_target_quat = scaled_quat;
+        hs.have_last_target = true;
         
         // === 5. 发布 TF: vr_*_controller → human_*_hand ===
         geometry_msgs::msg::TransformStamped human_tf;
@@ -254,11 +327,35 @@ private:
     double filter_alpha_;
     double max_position_delta_;
     double max_rotation_delta_;
-    double grip_threshold_;
+    double grip_engage_threshold_;
+    double grip_release_threshold_;
+    double grip_threshold_;  // legacy
     
     // Grip state
     double left_grip_ = 0.0;
     double right_grip_ = 0.0;
+
+    struct HandState {
+        bool engaged = false;
+        bool just_engaged = false;
+
+        bool have_vr_origin = false;
+        tf2::Vector3 vr_origin_pos;
+        tf2::Quaternion vr_origin_quat;
+
+        bool have_target_origin = false;
+        tf2::Vector3 target_origin_pos;
+        tf2::Quaternion target_origin_quat;
+
+        bool have_prev = false;
+
+        bool have_last_target = false;
+        tf2::Vector3 last_target_pos;
+        tf2::Quaternion last_target_quat;
+    };
+
+    HandState left_hand_state_;
+    HandState right_hand_state_;
     
     // Grip compensation
     tf2::Quaternion grip_offset_quat_;
