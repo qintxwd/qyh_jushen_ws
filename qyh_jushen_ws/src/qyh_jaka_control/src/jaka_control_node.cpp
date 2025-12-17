@@ -415,6 +415,8 @@ public:
 
         if (auto_connect_) {
             if (jaka_interface_.connect(robot_ip_)) {
+                // 连接后，需要等待5秒钟让机器人初始化完成
+                std::this_thread::sleep_for(std::chrono::seconds(5));
                 connected_ = true;
                 RCLCPP_INFO(get_logger(), "✓ Connected to robot at %s", robot_ip_.c_str());
                 
