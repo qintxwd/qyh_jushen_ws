@@ -297,17 +297,23 @@ ros2 run tf2_ros tf2_echo base_link teleop_base
 # ✅ 通过: 有输出
 ```
 
-**1.2.3 测试Clutch机制**
+**1.2.3 测试Clutch机制（增量模式）**
 ```bash
 # 监听左手目标位姿
 ros2 topic echo /teleop/left_hand/target
 
-# 测试步骤:
+# 测试步骤（⭐ 关键：验证增量跟踪，非绝对位置）:
 # 1. 不按grip按钮 → 应该无输出 ☐
-# 2. 按下grip按钮 → 开始输出位姿 ☐
-# 3. 松开grip按钮 → 停止输出 ☐
+# 2. 按下grip按钮（记录原点）→ 开始输出位姿 ☐
+# 3. 移动VR手柄5cm → 目标位姿相应变化 ☐
+# 4. 松开grip按钮 → 停止输出（目标位姿保持最后值）☐
+# 5. 移动VR手柄到其他位置（不按grip）→ 仍无输出 ☐
+# 6. 再次按下grip → 从步骤4的位置继续增量（不跳变）☐
 
-# ✅ 通过: clutch机制正常工作
+# ✅ 通过标准:
+# - 松开grip后目标位姿"冻结"在最后值
+# - 再次按grip不会跳变到VR手柄的绝对位置
+# - 增量累积正确（多次clutch后总位移 = 各段VR位移之和）
 ```
 
 **1.2.4 验证坐标映射**
@@ -630,11 +636,17 @@ ros2 topic echo /left_arm/joint_command
 
 编辑 `~/qyh_jushen_ws/src/qyh_dual_arm_teleop/config/teleop_params.yaml`:
 ```yaml
-coordinate_mapper:
-  position_scale: 0.5      # 🔧 降低到0.5（原本2.0）
-  max_linear_velocity: 0.1  # 🔧 降低到0.1 m/s（原本0.5）
-  max_angular_velocity: 0.3 # 🔧 降低到0.3 rad/s（原本1.0）
-  filter_alpha: 0.2         # 🔧 增加滤波（原本0.3）
+/**:
+  ros__parameters:
+    # Clutch阈值（滞回，防抖）
+    grip_engage_threshold: 0.8    # 保持默认
+    grip_release_threshold: 0.2   # 保持默认
+    
+    # 降低速度和缩放用于首次测试
+    position_scale: 0.5      # 🔧 降低到0.5（原本2.0）
+    max_position_delta: 0.02 # 🔧 降低到0.02 m（原本0.05）
+    max_rotation_delta: 0.05 # 🔧 降低到0.05 rad（原本0.1）
+    filter_alpha: 0.2        # 🔧 增加滤波（原本0.3）
 ```
 
 **4.2.2 启动所有节点**
@@ -663,22 +675,34 @@ ros2 launch qyh_dual_arm_ik_solver ik_solver.launch.py
 2. 右手不按grip按钮（右臂不动）
 3. 操作人员站在急停按钮旁
 
-**步骤**:
+**步骤（⭐ 重点验证增量跟踪）**:
 ```
-1. 左手按下grip按钮（开始遥操作）
+1. 左手按下grip按钮（记录VR原点和机械臂原点）
 2. 非常缓慢地向前移动手柄 5cm
-3. 观察左臂运动
-4. 松开grip按钮（停止遥操作）
+3. 观察左臂运动（应同向移动约10cm，因position_scale=0.5时为5cm×2=10cm）
+4. 松开grip按钮（机械臂应立即停止并保持当前位置）
+5. 将VR手柄移回原位（机械臂不应动）
+6. 再次按下grip → 机械臂保持不动（建立新原点）
+7. 再次向前移动手柄5cm → 机械臂从当前位置继续前移
 
 记录:
-☐ 机械臂向前移动（与手柄方向一致）
+☐ 步骤3: 机械臂向前移动（与手柄方向一致，无跳变）
+☐ 步骤4: 松开grip后机械臂立即"冻结"位置
+☐ 步骤5: 移动VR手柄时机械臂保持不动
+☐ 步骤6-7: 再次接合时从当前位置继续，不跳回手柄绝对位置
 ☐ 运动平滑无抖动
-☐ 停止及时（松开grip后立即停止）
 ☐ 无异常声音
 ☐ 无碰撞或意外运动
 
-✅ 通过: 运动方向正确、平滑、安全
-❌ 失败: 立即按急停，检查坐标系配置
+✅ 通过标准:
+- 增量跟踪正确（移动多少，机械臂就移动多少×scale）
+- 松开保持最后位置（不漂移）
+- 再次接合无跳变（从当前位置继续）
+
+❌ 失败情况:
+- 机械臂突然跳到VR手柄绝对位置 → 增量逻辑未生效
+- 松开grip后机械臂继续漂移 → 下游节点未正确处理
+- 立即按急停，检查coordinate_mapper_node日志
 ```
 
 **4.2.4 方向验证测试**
@@ -751,11 +775,12 @@ ros2 launch qyh_dual_arm_ik_solver ik_solver.launch.py
 
 编辑 `teleop_params.yaml`:
 ```yaml
-coordinate_mapper:
-  position_scale: 1.0      # 🔧 恢复到1.0
-  max_linear_velocity: 0.3 # 🔧 增加到0.3 m/s
-  max_angular_velocity: 0.5 # 🔧 增加到0.5 rad/s
-  filter_alpha: 0.3        # 🔧 恢复默认值
+/**:
+  ros__parameters:
+    position_scale: 1.0           # 🔧 恢复到1.0
+    max_position_delta: 0.03      # 🔧 增加到0.03 m
+    max_rotation_delta: 0.08      # 🔧 增加到0.08 rad
+    filter_alpha: 0.3             # 🔧 恢复默认值
 ```
 
 **5.2.2 双臂独立运动测试**
@@ -779,15 +804,45 @@ coordinate_mapper:
 ✅ 通过: 双臂协调运动正常
 ```
 
-**5.2.4 Clutch机制测试**
+**5.2.4 Clutch增量机制测试（⭐ 核心功能）**
 ```
-测试场景:
-1. 运动中松开grip → 立即停止 ☐
-2. 调整VR位置（不按grip）→ 机械臂不动 ☐
-3. 重新按grip → 从新位置继续 ☐
-4. 多次clutch操作 → 累积正确 ☐
+测试场景（验证基于原点的增量跟踪）:
 
-✅ 通过: Clutch机制工作正常
+场景1: 基本增量
+1. 机械臂在位置A，按下grip（记录VR原点P1，目标原点A）
+2. VR手柄前移10cm → 机械臂应移到 A + 10cm×scale
+3. 松开grip → 机械臂停在位置B
+4. 将VR手柄移回P1位置（不按grip）→ 机械臂保持在B ☐
+
+场景2: 多次累积（验证无跳变）
+5. 按下grip（记录新VR原点P2=当前手柄位置，目标原点B）
+6. VR手柄再前移5cm → 机械臂应从B移到 B + 5cm×scale（位置C）
+7. 松开grip → 机械臂停在C ☐
+8. 总位移验证: C = A + (10+5)cm×scale ☐
+
+场景3: 任意位置重新接合
+9. 将VR手柄移到房间另一侧位置P3（距离P1很远）
+10. 按下grip → 机械臂应保持在C，不跳变 ☐
+11. VR手柄左移8cm → 机械臂从C左移 8cm×scale
+12. 验证: 机械臂最终位置 ≠ P3的绝对映射位置 ☐
+
+场景4: 姿态增量（同样逻辑）
+13. 按下grip，记录VR姿态Q1和目标姿态R1
+14. 旋转VR手柄30° → 机械臂末端应旋转 30°×rotation_scale
+15. 松开grip，移动手柄到其他姿态Q2
+16. 再按grip → 机械臂姿态保持，不跳到Q2对应的绝对姿态 ☐
+
+场景5: 快速连续clutch（压力测试）
+17. 快速多次 "按grip-移动5cm-松grip-移动手柄-再按grip" ☐
+18. 验证每次增量都正确累加，无跳变或丢失 ☐
+
+✅ 通过标准:
+- 所有场景中机械臂位置/姿态 = 初始 + Σ(各段VR增量×scale)
+- 松开grip时目标"冻结"（下游IK节点继续用最后目标解算）
+- 再次按grip从"冻结位置"继续，不跳到VR绝对位置
+- 与旧版Python vr_clutch_controller.py行为一致
+
+❌ 失败: 若出现跳变或增量丢失，检查coordinate_mapper_node的HandState逻辑
 ```
 
 **5.2.5 长时间运行测试**
@@ -817,11 +872,12 @@ coordinate_mapper:
 
 编辑 `teleop_params.yaml`:
 ```yaml
-coordinate_mapper:
-  position_scale: 2.0      # 🔧 恢复到2.0（完整缩放）
-  max_linear_velocity: 0.5 # 🔧 恢复到0.5 m/s
-  max_angular_velocity: 1.0 # 🔧 恢复到1.0 rad/s
-  filter_alpha: 0.3        # 🔧 默认值
+/**:
+  ros__parameters:
+    position_scale: 2.0           # 🔧 恢复到2.0（完整缩放）
+    max_position_delta: 0.05      # 🔧 恢复到0.05 m（单帧最大位移）
+    max_rotation_delta: 0.1       # 🔧 恢复到0.1 rad（单帧最大旋转）
+    filter_alpha: 0.3             # 🔧 默认值
 ```
 
 ### 6.2 完整功能测试
@@ -996,6 +1052,31 @@ IK成功率             >90%        _____%      ☐
 2. 限制VR工作空间范围 ☐
 3. 调整初始机械臂位置 ☐
 4. 检查关节限位是否配置错误 ☐
+
+### 问题7: 再次按grip时机械臂跳变
+
+**症状**: 松开grip后，再按grip时机械臂突然跳到VR手柄的绝对位置
+
+**原因**: 增量跟踪逻辑未生效，退化为绝对位置映射
+
+**排查步骤**:
+1. 检查coordinate_mapper_node是否使用更新后的代码 ☐
+2. 查看节点日志，确认"Clutch thresholds: engage=0.8 release=0.2" ☐
+3. 检查HandState结构体是否正确维护 have_last_target 标志 ☐
+4. 调试输出: 在engage时打印 vr_origin_pos 和 target_origin_pos ☐
+5. 验证公式: target = target_origin + (vr_pos - vr_origin) * scale ☐
+
+### 问题8: 松开grip后机械臂继续漂移
+
+**症状**: 松开grip后目标位姿停止发布，但机械臂仍在运动
+
+**原因**: 下游节点（IK solver/controller）未正确处理"无新目标"状态
+
+**排查步骤**:
+1. 监听 /teleop/left_hand/target，确认松开grip后无新消息 ☐
+2. 检查IK solver是否在无新目标时保持最后IK结果 ☐
+3. 检查伺服控制器是否有超时停止机制 ☐
+4. 临时方案: coordinate_mapper在松开时继续发布最后目标 ☐
 
 ---
 
