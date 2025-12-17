@@ -44,7 +44,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='teleop_base_publisher',
         arguments=[
-            '0.5', '0.0', '0.0',     # xyz: 人在机器人前方0.5米
+            '0.3', '0.0', '0.0',     # xyz: 人在机器人前方0.5米
             '0.0', '0.0', '0.0',     # rpy: 无旋转
             'base_link',             # parent_frame
             'teleop_base'            # child_frame

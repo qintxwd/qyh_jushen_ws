@@ -23,6 +23,10 @@
     # 速度限制：单帧最大变化量（安全保护）
     max_position_delta: 0.05      # 单帧最大位移 (m)
     max_rotation_delta: 0.1       # 单帧最大旋转 (rad ≈ 5.7°)
+
+    # Coordinate Mapper 也使用同一套Clutch阈值（带滞回）
+    # 与旧版Python离合逻辑一致：按下建立原点，松开保持最后目标
+    # （注意：本文件是 /**: 作用域，会同时注入 teleop_manager_node 和 coordinate_mapper_node）
     
     # 更新频率
     update_rate: 100.0            # Hz (与VR数据频率匹配)
