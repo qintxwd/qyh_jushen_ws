@@ -12,4 +12,5 @@
     # ⭐ 必须使用TF查询进行坐标系转换
     # coordinate_mapper发布的是vr_origin坐标系，需要转换到base_link_left/right
     # 完整TF链: vr_origin → teleop_base → base_link → base_link_left/right
-    use_tf_lookup: true  # 必须为true
+    publish_debug_tf: true  # 必须为true
+    target_x_left: true  # 发给我们的目标是否时x轴向左的，默认发给我们的是x轴向前的，我们需要旋转，所以默认false，如果发给我们的是x轴向左的，就改成true

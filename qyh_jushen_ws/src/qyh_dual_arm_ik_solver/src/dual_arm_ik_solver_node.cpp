@@ -21,6 +21,7 @@
 #include <chrono>
 #include <memory>
 #include <array>
+#include <cmath>
 
 using namespace std::chrono_literals;
 
@@ -45,6 +46,32 @@ const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
 const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
 const double SAFETY_MARGIN_VEL = 0.8;     // 速度降到80%
 
+// # left joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+// # right joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+// # left pos = -0.626130, 989.737160, 219.885132, 1.572874, -0.000000, -3.141593
+// # right pos = -0.679880, -989.449941, 217.950931, 1.574990, 0.000000, 0.000000
+// //定义一个最初的参考的关节位置结构体
+// std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_LEFT =
+// {
+//     0.268,-59.017,0.195,-80.121,-0.109,80.051,0.014 //单位为度
+// };
+// std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT =
+// {
+//     -0.089,-65.010,-0.34,-79.964,0.263,-99.974,-0.016 //单位为度
+// };
+
+//定义一个最初的参考的关节位置结构体
+std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_LEFT =
+{
+    0.,0.,0.,0.,0.,0.,0., //单位为度
+};
+std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT =
+{
+    0.,0.,0.,0.,0.,0.,0., //单位为度
+};
+
+static inline double deg2rad(double d) { return d * M_PI / 180.0; }
+
 class DualArmIKSolverNode : public rclcpp::Node
 {
 public:
@@ -56,21 +83,20 @@ public:
         declare_parameter<bool>("auto_connect", true);
         // ⭐ 必须使用TF查询，因为coordinate_mapper发布的是vr_origin坐标系
         // 需要转换到base_link_left/right才能调用JAKA IK
-        declare_parameter<bool>("use_tf_lookup", true);  // 默认启用TF查询
         declare_parameter<bool>("publish_debug_tf", true);  // 发布调试TF
+        declare_parameter<bool>("target_x_left", false);  // 发给我们的目标是否x轴向左的，默认发给我们的是x轴向前的，我们需要旋转，所以默认false，如果发给我们的是x轴向左的，就改成true
         
         robot_ip_ = get_parameter("robot_ip").as_string();
         ik_rate_ = get_parameter("ik_rate").as_double();
         auto_connect_ = get_parameter("auto_connect").as_bool();
-        use_tf_lookup_ = get_parameter("use_tf_lookup").as_bool();
         publish_debug_tf_ = get_parameter("publish_debug_tf").as_bool();
+        target_x_left_ = get_parameter("target_x_left").as_bool();
         
         RCLCPP_INFO(get_logger(), "===========================================");
         RCLCPP_INFO(get_logger(), "  双臂IK求解节点启动");
         RCLCPP_INFO(get_logger(), "===========================================");
         RCLCPP_INFO(get_logger(), "控制器IP: %s", robot_ip_.c_str());
         RCLCPP_INFO(get_logger(), "IK求解频率: %.1f Hz", ik_rate_);
-        RCLCPP_INFO(get_logger(), "使用TF查询: %s", use_tf_lookup_ ? "是" : "否");
         RCLCPP_INFO(get_logger(), "发布调试TF: %s", publish_debug_tf_ ? "是" : "否");
         
         // 初始化JAKA SDK
@@ -85,12 +111,7 @@ public:
         if (publish_debug_tf_) {
             tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         }
-        
-        if (!use_tf_lookup_) {
-            RCLCPP_WARN(get_logger(), "⚠️ use_tf_lookup=false 不推荐！");
-            RCLCPP_WARN(get_logger(), "coordinate_mapper发布vr_origin坐标系，必须使用TF转换");
-        }
-        
+                
         // 订阅VR目标位姿
         left_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
             "/teleop/left_hand/target", 10,
@@ -161,16 +182,13 @@ private:
     
     void initReferenceJoints()
     {
-        // 左右臂零位参考（全零或张开姿态）
+        // 使用默认参考关节（从度转换为弧度）
         for (int i = 0; i < 7; i++) {
-            ref_left_joints_.jVal[i] = 0.0;
-            ref_right_joints_.jVal[i] = 0.0;
+            ref_left_joints_.jVal[i] = deg2rad(JAKA_ZU7_REF_DEFAULT_JOINT_LEFT[i]);
+            ref_right_joints_.jVal[i] = deg2rad(JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT[i]);
         }
-        // 可选：使用张开姿态作为参考
-        ref_left_joints_.jVal[1] = -1.0472;  // -60度
-        ref_right_joints_.jVal[1] = -1.0472;
-        
-        RCLCPP_INFO(get_logger(), "✓ 参考关节位置初始化完成");
+
+        RCLCPP_INFO(get_logger(), "✓ 参考关节位置已设置为默认值（度->弧度）");
     }
     
     void leftTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -206,6 +224,11 @@ private:
     void ikSolverCallback()
     {
         if (!connected_) {
+            return;
+        }
+
+        if(!has_left_target_ && !has_right_target_) {
+            // 没有目标位姿，跳过求解
             return;
         }
         
@@ -299,6 +322,15 @@ private:
             0.0,  0.0,  1.0,   // 第2行: lt.Y = human.Z (上→上)
             1.0,  0.0,  0.0    // 第3行: lt.Z = human.X (前→前) ✅
         );
+
+        if(target_x_left_) {
+            // 如果目标本来就是x轴向左的，则不需要旋转，使用单位矩阵
+            R_correction = tf2::Matrix3x3(
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0
+            );
+        }
         
         // 从旋转矩阵提取四元数
         tf2::Quaternion q_correction;
@@ -445,6 +477,15 @@ private:
             0.0,  0.0,  1.0,
             1.0,  0.0,  0.0   // rt.Z = human.X (前→前) ✅
         );
+
+        if(target_x_left_) {
+            // 如果目标本来就是x轴向左的，则不需要旋转，使用单位矩阵
+            R_correction = tf2::Matrix3x3(
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0
+            );
+        }
         
         tf2::Quaternion q_correction;
         R_correction.getRotation(q_correction);
@@ -649,8 +690,8 @@ private:
     
     // 配置
     double ik_rate_;
-    bool use_tf_lookup_;
     bool publish_debug_tf_;
+    bool target_x_left_;  // 目标是否为x轴向左的
     
     // 统计
     int solve_count_{0};

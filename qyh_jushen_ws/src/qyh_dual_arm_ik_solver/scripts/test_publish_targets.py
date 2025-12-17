@@ -7,6 +7,11 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 import math
 
+# left joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+# right joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+# left pos = -0.626130, 989.737160, 219.885132, 1.572874, -0.000000, -3.141593
+# right pos = -0.679880, -989.449941, 217.950931, 1.574990, 0.000000, 0.000000
+
 class IKTestPublisher(Node):
     def __init__(self):
         super().__init__('ik_test_publisher')
@@ -28,29 +33,57 @@ class IKTestPublisher(Node):
     def publish_test_poses(self):
         self.t += 0.1
         
-        # 左臂测试位姿（基于实测零位）
+        # 左臂测试位姿（已知：全0关节对应的正解位姿）
+        # left joint = 0,0,0,0,0,0,0
+        # left pos = -0.626130, 989.737160, 219.885132, 1.572874, -0.000000, -3.141593
         left_pose = PoseStamped()
         left_pose.header.stamp = self.get_clock().now().to_msg()
         left_pose.header.frame_id = 'base_link_left'
-        left_pose.pose.position.x = 0.0
-        left_pose.pose.position.y = 0.500  # 500mm (修改为可达范围内的值，原992mm超出Zu7范围)
-        left_pose.pose.position.z = 0.220 + 0.01 * math.sin(self.t)  # ±10mm
-        left_pose.pose.orientation.x = 0.0
-        left_pose.pose.orientation.y = 0.0
-        left_pose.pose.orientation.z = 0.0
-        left_pose.pose.orientation.w = 1.0
+        left_pose.pose.position.x = -0.626130 / 1000.0
+        left_pose.pose.position.y = 989.737160 / 1000.0
+        left_pose.pose.position.z = 219.885132 / 1000.0
         
-        # 右臂测试位姿（镜像对称）
+        left_roll = 1.572874
+        left_pitch = 0.0
+        left_yaw = -3.141593
+        # 将 RPY 转为四元数
+        cr = math.cos(left_roll * 0.5)
+        sr = math.sin(left_roll * 0.5)
+        cp = math.cos(left_pitch * 0.5)
+        sp = math.sin(left_pitch * 0.5)
+        cy = math.cos(left_yaw * 0.5)
+        sy = math.sin(left_yaw * 0.5)
+
+        left_pose.pose.orientation.x = sr * cp * cy - cr * sp * sy
+        left_pose.pose.orientation.y = cr * sp * cy + sr * cp * sy
+        left_pose.pose.orientation.z = cr * cp * sy - sr * sp * cy
+        left_pose.pose.orientation.w = cr * cp * cy + sr * sp * sy
+        
+        # 右臂测试位姿（已知：全0关节对应的正解位姿）
+        # right joint = 0,0,0,0,0,0,0
+        # right pos = -0.679880, -989.449941, 217.950931, 1.574990, 0.000000, 0.000000
         right_pose = PoseStamped()
         right_pose.header.stamp = self.get_clock().now().to_msg()
         right_pose.header.frame_id = 'base_link_right'
-        right_pose.pose.position.x = 0.0
-        right_pose.pose.position.y = -0.500 # -500mm
-        right_pose.pose.position.z = 0.220 + 0.01 * math.sin(self.t + math.pi)
-        right_pose.pose.orientation.x = 0.0
-        right_pose.pose.orientation.y = 0.0
-        right_pose.pose.orientation.z = 0.0
-        right_pose.pose.orientation.w = 1.0
+        right_pose.pose.position.x = -0.679880 / 1000.0
+        right_pose.pose.position.y = -989.449941 / 1000.0
+        right_pose.pose.position.z = 217.950931 / 1000.0
+        
+        right_roll = 1.574990
+        right_pitch = 0.0
+        right_yaw = 0.0
+        # 将 RPY 转为四元数
+        cr = math.cos(right_roll * 0.5)
+        sr = math.sin(right_roll * 0.5)
+        cp = math.cos(right_pitch * 0.5)
+        sp = math.sin(right_pitch * 0.5)
+        cy = math.cos(right_yaw * 0.5)
+        sy = math.sin(right_yaw * 0.5)
+
+        right_pose.pose.orientation.x = sr * cp * cy - cr * sp * sy
+        right_pose.pose.orientation.y = cr * sp * cy + sr * cp * sy
+        right_pose.pose.orientation.z = cr * cp * sy - sr * sp * cy
+        right_pose.pose.orientation.w = cr * cp * cy + sr * sp * sy
         
         self.left_pub.publish(left_pose)
         self.right_pub.publish(right_pose)
