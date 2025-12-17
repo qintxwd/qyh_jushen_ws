@@ -14,3 +14,6 @@
     # 完整TF链: vr_origin → teleop_base → base_link → base_link_left/right
     publish_debug_tf: true  # 必须为true
     target_x_left: true  # 发给我们的目标是否时x轴向左的，默认发给我们的是x轴向前的，我们需要旋转，所以默认false，如果发给我们的是x轴向左的，就改成true
+    has_z_offset: false  # 是否有Z轴偏移
+    left_z_offset: 0.219885132
+    right_z_offset: 0.217950931

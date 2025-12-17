@@ -85,12 +85,18 @@ public:
         // 需要转换到base_link_left/right才能调用JAKA IK
         declare_parameter<bool>("publish_debug_tf", true);  // 发布调试TF
         declare_parameter<bool>("target_x_left", false);  // 发给我们的目标是否x轴向左的，默认发给我们的是x轴向前的，我们需要旋转，所以默认false，如果发给我们的是x轴向左的，就改成true
-        
+        declare_parameter<bool>("has_z_offset", true);  // 是否有Z轴偏移
+        declare_parameter<double>("left_z_offset", 0.219885132);  // 左臂Z轴偏移
+        declare_parameter<double>("right_z_offset", 0.217950931); // 右臂Z轴偏移
+
         robot_ip_ = get_parameter("robot_ip").as_string();
         ik_rate_ = get_parameter("ik_rate").as_double();
         auto_connect_ = get_parameter("auto_connect").as_bool();
         publish_debug_tf_ = get_parameter("publish_debug_tf").as_bool();
         target_x_left_ = get_parameter("target_x_left").as_bool();
+        has_z_offset_ = get_parameter("has_z_offset").as_bool();
+        left_z_offset_ = get_parameter("left_z_offset").as_double();
+        right_z_offset_ = get_parameter("right_z_offset").as_double();
         
         RCLCPP_INFO(get_logger(), "===========================================");
         RCLCPP_INFO(get_logger(), "  双臂IK求解节点启动");
@@ -304,6 +310,11 @@ private:
             target_in_base_left.pose.position.y,
             target_in_base_left.pose.position.z
         );
+
+        // 如果有Z轴偏移，应用偏移
+        if(has_z_offset_) {
+            pos_base_left.setZ(pos_base_left.z() + left_z_offset_);
+        }
         
         // === 步骤2: 应用末端坐标系校正 ⚠️ 关键 ===
         // human_hand坐标系: [X前, Y左, Z上] (人手语义)
@@ -459,6 +470,11 @@ private:
             target_in_base_right.pose.position.y,
             target_in_base_right.pose.position.z
         );
+
+        // 如果有Z轴偏移，应用偏移
+        if(has_z_offset_) {
+            pos_base_right.setZ(pos_base_right.z() + right_z_offset_);
+        }
         
         // === 步骤2: 应用末端坐标系校正 ⚠️ 关键 ===
         // human_hand坐标系: [X前, Y左, Z上]
@@ -692,6 +708,9 @@ private:
     double ik_rate_;
     bool publish_debug_tf_;
     bool target_x_left_;  // 目标是否为x轴向左的
+    bool has_z_offset_;
+    double left_z_offset_;
+    double right_z_offset_;
     
     // 统计
     int solve_count_{0};
