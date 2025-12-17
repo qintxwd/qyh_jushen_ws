@@ -57,7 +57,8 @@ def generate_launch_description():
 
     # RViz2 node
     rviz_node = Node(
-        package='rviz2',
+        package='rviz2
+        ',
         executable='rviz2',
         name='rviz2',
         output='screen',
@@ -73,6 +74,6 @@ def generate_launch_description():
         ),
         # force_j4_zero_node,
         robot_state_publisher_node,
-        joint_state_publisher_gui_node,
+        # joint_state_publisher_gui_node,
         rviz_node
     ])

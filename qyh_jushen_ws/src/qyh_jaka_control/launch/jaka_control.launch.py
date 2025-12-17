@@ -46,6 +46,7 @@ def generate_launch_description():
         ),
 
         # JAKA完整控制节点（基础+伺服+VR）
+        # remapping： /joint_states  ==> /joint_states_raw
         Node(
             package='qyh_jaka_control',
             executable='jaka_control_node',
@@ -60,6 +61,9 @@ def generate_launch_description():
                     'buffer_size': LaunchConfiguration('buffer_size'),
                     'interpolation_weight': LaunchConfiguration('interpolation_weight')
                 }
+            ],
+            remappings=[
+                ('/joint_states', '/joint_states_raw')
             ]
         )
     ])
