@@ -990,7 +990,7 @@
   <!-- This frame is aligned with VR controller convention: -->
   <!-- X: Right, Y: Up, Z: Backward (relative to base_link viewing direction) -->
   <!-- Transformation verified: VR_X(right)=base_link_-Y, VR_Y(up)=base_link_Z, VR_Z(back)=base_link_-X -->
-  <link name="base_vr">
+  <!-- <link name="base_vr">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.001" />
@@ -1002,5 +1002,5 @@
     <origin xyz="0 0 0" rpy="1.5708 0 -1.5708" />
     <parent link="base_link" />
     <child link="base_vr" />
-  </joint>
+  </joint> -->
 </robot>
