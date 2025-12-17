@@ -12,6 +12,14 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('qyh_jaka_control')
     config_file = os.path.join(pkg_share, 'config', 'robot_config.yaml')
     
+    # 获取URDF文件（用于robot_state_publisher）
+    urdf_pkg_share = get_package_share_directory('qyh_dual_arms_description')
+    urdf_file = os.path.join(urdf_pkg_share, 'urdf', 'dual_arms.urdf')
+    
+    # 读取URDF内容
+    with open(urdf_file, 'r') as f:
+        robot_description = f.read()
+    
     return LaunchDescription([
         # 声明参数
         DeclareLaunchArgument(
@@ -65,5 +73,31 @@ def generate_launch_description():
             remappings=[
                 ('/joint_states', '/joint_states_raw')
             ]
+        ),
+        
+        # 关节名称适配器节点
+        # 功能: 将 JAKA 驱动的关节名称格式转换为 URDF 格式
+        # 输入: /joint_states_raw (left_jointN / right_jointN 或其他格式)
+        # 输出: /joint_states (l-jN / r-jN, 匹配URDF)
+        Node(
+            package='qyh_jaka_control',
+            executable='qyh_jaka_joint_adapter_node.py',
+            name='qyh_jaka_joint_adapter',
+            output='screen'
+        ),
+        
+        # Robot State Publisher节点
+        # 功能: 根据 joint_states 和 URDF 发布 TF 变换
+        # 订阅: /joint_states (来自适配器，关节名称已匹配URDF)
+        # 发布: /tf, /tf_static (完整的机械臂 TF 树)
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='screen',
+            parameters=[{
+                'robot_description': robot_description,
+                'use_sim_time': False
+            }]
         )
     ])

@@ -112,6 +112,12 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
+# Install Python scripts (including joint adapter)
+install(PROGRAMS
+  scripts/qyh_jaka_joint_adapter_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 # Install JAKA API shared library
 install(FILES
   ${JAKA_API_LIB}
