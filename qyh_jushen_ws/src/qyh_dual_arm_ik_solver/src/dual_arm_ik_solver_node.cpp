@@ -47,7 +47,7 @@ const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
 }};
 
 const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
-const double SAFETY_MARGIN_VEL = 0.8;     // 速度降到80%
+const double SAFETY_MARGIN_VEL = 1.2;     // 允许超过标称速度20%（考虑IK求解的突变）
 
 // # left joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
 // # right joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
@@ -332,11 +332,22 @@ private:
         
         geometry_msgs::msg::PoseStamped target_in_base_left;
         
+        // 检查消息新鲜度（避免使用过期的VR目标）
+        auto msg_age = (now() - left_target_->header.stamp).seconds();
+        if (msg_age > 1.0) {
+            // 消息超过1秒，可能是clutch已松开或VR断开
+            // 重置标志位，避免反复处理过期消息
+            has_left_target_ = false;
+            return false;
+        }
+        
         try {
-            // 使用TF转换到base_link_left坐标系
+            // 使用最新的TF变换（而不是消息时间戳对应的变换）
+            // 这样即使消息稍旧，也能用当前TF树进行转换
             target_in_base_left = tf_buffer_->transform(
                 *left_target_, 
                 "base_link_left",
+                tf2::TimePointZero,  // 使用最新可用的TF
                 tf2::durationFromSec(0.1)  // 100ms超时
             );
         } catch (const tf2::TransformException& ex) {
@@ -456,19 +467,15 @@ private:
                 return false;
             }
             
-            // 检查关节速度
-            if (has_prev_left_) {
+            // 检查关节速度（相对于当前机器人真实位置）
+            if (has_current_left_) {
                 double dt = (now() - last_solve_time_).seconds();
-                if (!checkJointVelocity(ik_result, prev_left_joints_, dt, "左臂")) {
+                if (dt > 0.0 && !checkJointVelocity(ik_result, current_left_joints_, dt, "左臂")) {
                     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                         "左臂关节速度超限，跳过本次指令");
                     return false;
                 }
             }
-            
-            // 记录当前关节值供下次速度检查
-            prev_left_joints_ = ik_result;
-            has_prev_left_ = true;
             
             // 注意: 不再更新ref_joints，因为使用实际joint_states作为参考
             
@@ -591,11 +598,20 @@ private:
         
         geometry_msgs::msg::PoseStamped target_in_base_right;
         
+        // 检查消息新鲜度
+        auto msg_age = (now() - right_target_->header.stamp).seconds();
+        if (msg_age > 1.0) {
+            // 重置标志位，避免反复处理过期消息
+            has_right_target_ = false;
+            return false;
+        }
+        
         try {
-            // 使用TF转换到base_link_right坐标系
+            // 使用最新的TF变换
             target_in_base_right = tf_buffer_->transform(
                 *right_target_, 
                 "base_link_right",
+                tf2::TimePointZero,  // 使用最新可用的TF
                 tf2::durationFromSec(0.1)  // 100ms超时
             );
         } catch (const tf2::TransformException& ex) {
@@ -714,19 +730,15 @@ private:
                 return false;
             }
             
-            // 检查关节速度
-            if (has_prev_right_) {
+            // 检查关节速度（相对于当前机器人真实位置）
+            if (has_current_right_) {
                 double dt = (now() - last_solve_time_).seconds();
-                if (!checkJointVelocity(ik_result, prev_right_joints_, dt, "右臂")) {
+                if (dt > 0.0 && !checkJointVelocity(ik_result, current_right_joints_, dt, "右臂")) {
                     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                         "右臂关节速度超限，跳过本次指令");
                     return false;
                 }
             }
-            
-            // 记录当前关节值供下次速度检查
-            prev_right_joints_ = ik_result;
-            has_prev_right_ = true;
             
             // 注意: 不再更新ref_joints，因为使用实际joint_states作为参考
             
@@ -883,8 +895,8 @@ private:
             
             if (vel > max_safe_vel) {
                 RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
-                    "⚠️ %s 关节%d 超速: %.3f rad/s (限制: %.3f rad/s)",
-                    arm_name.c_str(), i+1, vel, max_safe_vel);
+                    "⚠️ %s 关节%d 超速: %.3f rad/s (限制: %.3f rad/s), dt=%.3f s, joint_delta=%.3f rad",
+                    arm_name.c_str(), i+1, vel, max_safe_vel, dt, std::abs(joints.jVal[i] - prev_joints.jVal[i]));
                 safe = false;
             }
         }

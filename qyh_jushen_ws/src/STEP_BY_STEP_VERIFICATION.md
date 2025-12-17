@@ -394,6 +394,9 @@ ros2 node info /dual_arm_ik_solver
 # - /teleop/left_hand/target ✅
 # - /teleop/right_hand/target ✅
 # - /joint_states ✅ (用于IK参考)
+
+# ⚠️ 注意: 此阶段不启动jaka_control，所以没有真实的joint_states数据
+# IK solver 在没有 joint_states 时会使用默认参考位置（零位或配置的初始值）
 ```
 
 **1.3.4 检查发布的Topic**
@@ -442,26 +445,66 @@ ros2 topic echo /left_arm/joint_command
 ### 2.2 启动机械臂控制节点（仅读取状态）
 
 ```bash
-# 终端1: 启动jaka_control (应包含robot_state_publisher)
+# 终端1: 启动jaka_control（现已集成关节名称适配器和robot_state_publisher）
+# ⚠️ 注意: 只启动jaka_control.launch.py，不要启动display.launch.py
+# display.launch.py是用于仿真可视化的，会启动joint_state_publisher_gui造成冲突
 ros2 launch qyh_jaka_control jaka_control.launch.py
 ```
 
 #### 验证步骤
 
-**2.2.0 检查robot_state_publisher启动 ⭐ 关键**
+**2.2.0 检查节点启动状态 ⭐ 关键**
 ```bash
 # 检查节点列表
-ros2 node list | grep robot_state_publisher
+ros2 node list
 
-# 预期输出: /robot_state_publisher
-# ✅ 通过: robot_state_publisher正在运行
-# ❌ 失败: 需要在launch文件中添加robot_state_publisher节点
+# 预期输出（真机模式，已更新）:
+# /jaka_control_node           ← 真机控制节点
+# /qyh_jaka_joint_adapter      ← 关节名称适配器（新增）
+# /robot_state_publisher       ← TF发布节点（已集成到launch）
+# 
+# ⚠️ 不应该看到: /joint_state_publisher_gui （这是仿真用的）
 
-# 检查URDF是否加载
+# 如果看到joint_state_publisher_gui，说明误启动了display.launch.py
+# 需要停止所有节点，只启动jaka_control.launch.py
+
+# 检查URDF是否加载到robot_state_publisher
 ros2 param get /robot_state_publisher robot_description | head -20
 
-# 预期输出: URDF XML内容
+# 预期输出: URDF XML内容（<robot name="qyh_dual_arms_description">）
 # ✅ 通过: URDF已加载
+# ❌ 失败: robot_state_publisher未启动，检查launch文件配置
+```
+
+**2.2.0.5 验证关节名称适配器工作 ⭐ 新增验证**
+```bash
+# 检查原始关节数据（来自JAKA控制器）
+ros2 topic echo /joint_states_raw --once
+
+# 预期输出: 关节名称可能是以下格式之一
+# 格式1: r-j1, r-j2, ..., l-j1, l-j2, ...
+# 格式2: left_joint1, left_joint2, ..., right_joint1, ...
+# 格式3: l1, l2, ..., r1, r2, ...
+
+# 检查适配后的关节数据（用于robot_state_publisher）
+ros2 topic echo /joint_states --once
+
+# 预期输出: 关节名称已转换为URDF标准格式
+# name: ['l-j1', 'l-j2', 'l-j3', 'l-j4', 'l-j5', 'l-j6', 'l-j7',
+#        'r-j1', 'r-j2', 'r-j3', 'r-j4', 'r-j5', 'r-j6', 'r-j7']
+
+# ✅ 通过: 关节名称为 l-jN / r-jN 格式，匹配URDF
+# ❌ 失败: 关节名称格式不正确，检查适配器日志
+
+# 运行适配器测试脚本（可选，详细验证）
+cd ~/qyh_jushen_ws/src/qyh_jaka_control/scripts
+python3 test_joint_adapter.py
+
+# 预期输出: 
+# ✅ Joint names correctly converted to URDF format
+# ✅ Joint count correct (14 joints)
+# ✅ Position data preserved
+# 🎉 ADAPTER WORKING CORRECTLY!
 ```
 
 **2.2.1 检查连接状态**
@@ -479,20 +522,40 @@ ros2 param get /robot_state_publisher robot_description | head -20
 ros2 topic echo /joint_states
 
 # 预期输出: 14个关节的位置、速度、力矩
-# name: ['l1', 'l2', ..., 'l7', 'r1', ..., 'r7']
+# frame_id: '' (空字符串) 或 'world'
+# name: ['r-j1', 'r-j2', ..., 'r-j7', 'l-j1', 'l-j2', ..., 'l-j7']
 # position: [rad × 14]
-# velocity: [rad/s × 14]
-# effort: [Nm × 14]
+# velocity: [] (可能为空，取决于JAKA SDK返回)
+# effort: [] (可能为空)
 
-# ✅ 通过: 数据正常更新
+# ⚠️ 重要检查: 确认只有一个发布源
+# 如果看到两种不同的关节名称格式（r-j1 和 right_joint1），
+# 说明有多个节点在发布joint_states，需要停止display.launch.py
+
+# ✅ 通过: 数据正常更新，关节名称一致
+# ❌ 失败: 关节名称混乱或无数据
 ```
 
 **2.2.3 检查发布频率**
 ```bash
+# 检查适配后的关节状态频率（用于robot_state_publisher）
 ros2 topic hz /joint_states
 
-# 预期输出: 125 Hz
-# ✅ 通过: 频率稳定
+# 预期输出: 10-125 Hz (取决于JAKA控制器配置)
+# 常见值: 
+# - 20Hz: JAKA默认状态查询频率（非伺服模式）
+# - 125Hz: 伺服模式下的频率
+# 
+# ✅ 通过: 频率稳定在10Hz以上
+# ⚠️ 注意: 此时频率通常是20Hz，启动伺服控制后会提升到125Hz
+
+# （可选）同时检查原始数据频率，验证适配器无延迟
+ros2 topic hz /joint_states_raw
+# 预期: 与 /joint_states 频率一致（适配器实时转换，无缓冲）
+
+# （可选）验证适配器延迟
+ros2 topic delay /joint_states --field header.stamp
+# 预期: 延迟<5ms（适配器处理开销极小）
 ```
 
 **2.2.4 验证TF发布 ⭐ 关键**
@@ -500,11 +563,14 @@ ros2 topic hz /joint_states
 # 首先检查基础TF（静态变换，由URDF定义）
 ros2 run tf2_ros tf2_echo base_link base_link_left
 
-# 预期输出: 
-# Translation: [-0.0004, 0.08522, 0.0030]
-# Rotation: 绕Z轴-30° (包含校准偏移)
-# ✅ 通过: 输出正确的静态变换
-# ❌ 失败: robot_state_publisher未启动或URDF未加载
+# 预期输出 (根据实际URDF): 
+# Translation: [-0.000, 0.085, 0.003]  # X≈0, Y≈0.085m, Z≈0.003m
+# Rotation: 绕Z轴-30° (RPY: [0.000, 0.000, -30.000])
+# 
+# ✅ 通过: 输出静态变换，Y轴偏移约0.085m，Z轴旋转约-30°
+# ❌ 失败: 
+#   - "Invalid frame ID" → robot_state_publisher未启动或URDF未加载
+#   - 数值差异过大 → 检查URDF中的base_link_left定义
 
 ros2 run tf2_ros tf2_echo base_link base_link_right
 # 预期: 输出右臂安装点变换 (y=-0.08395, rz=30°)
@@ -603,7 +669,19 @@ ros2 topic echo /left_arm/joint_command
 # 检查: IK求解是否从当前位置出发（而非上次结果）
 # 方法: 观察joint_command的值应该接近当前joint_states
 
-# ✅ 通过: IK参考使用实际关节位置
+# 验证步骤:
+# 1. 监听当前关节位置（已通过适配器转换为URDF格式）
+ros2 topic echo /joint_states --once
+
+# 2. 按下VR手柄grip，移动手柄
+# 3. 查看IK输出的关节指令
+ros2 topic echo /left_arm/joint_command --once
+
+# 4. 比较: joint_command 的起始值应该接近 joint_states 的当前值
+#    （说明IK使用了真实关节位置作为参考，而非固定零位）
+
+# ✅ 通过: IK参考使用实际关节位置（通过适配器获取的URDF格式数据）
+# ⚠️ 注意: joint_states 已经是经过适配器转换的URDF格式（l-jN, r-jN）
 ```
 
 **✅ 阶段3验证完成**: IK求解正常，安全检查有效 ☐
@@ -1077,6 +1155,88 @@ IK成功率             >90%        _____%      ☐
 2. 检查IK solver是否在无新目标时保持最后IK结果 ☐
 3. 检查伺服控制器是否有超时停止机制 ☐
 4. 临时方案: coordinate_mapper在松开时继续发布最后目标 ☐
+
+### 问题9: joint_states出现两种不同的关节名称
+
+**症状**: 
+- `/joint_states`中看到`r-j1, l-j1`和`right_joint1, left_joint1`两种名称
+- 或者频率异常低/高
+- 或者frame_id在空字符串和'world'之间跳变
+
+**原因**: 同时运行了多个发布joint_states的节点
+
+**排查步骤**:
+1. 检查节点列表: `ros2 node list` ☐
+2. 确认是否同时运行了:
+   - jaka_control.launch.py (真机控制) ☐
+   - display.launch.py (仿真可视化) ☐
+3. 检查是否有joint_state_publisher_gui节点 ☐
+4. 解决方案:
+   - **真机测试**: 只运行jaka_control.launch.py ☐
+   - **仿真测试**: 只运行display.launch.py ☐
+   - 停止多余节点: Ctrl+C 停止display.launch.py ☐
+5. 重新验证: `ros2 topic echo /joint_states` 应只看到一种名称格式 ☐
+
+### 问题10: 关节名称适配器未正确转换
+
+**症状**: 
+- robot_state_publisher报错: "Could not find joint 'left_joint1' in robot model"
+- 或者: "Could not find joint 'l1' in robot model"
+- TF树不完整，缺少机械臂链条
+
+**原因**: 适配器未正确检测或转换关节名称格式
+
+**排查步骤**:
+1. 确认适配器节点正在运行 ☐
+   ```bash
+   ros2 node list | grep adapter
+   # 应该看到: /qyh_jaka_joint_adapter
+   ```
+
+2. 检查适配器日志，确认格式检测 ☐
+   ```bash
+   ros2 node info /qyh_jaka_joint_adapter
+   # 查看 "Detected format" 消息
+   ```
+
+3. 手动验证输入输出 ☐
+   ```bash
+   # 输入 (来自jaka_control)
+   ros2 topic echo /joint_states_raw --once | grep -A 14 "name:"
+   
+   # 输出 (发往robot_state_publisher)
+   ros2 topic echo /joint_states --once | grep -A 14 "name:"
+   
+   # 对比: 输出应该是 l-jN / r-jN 格式
+   ```
+
+4. 检查URDF中的关节名称定义 ☐
+   ```bash
+   grep "joint name=" ~/qyh_jushen_ws/src/qyh_dual_arms_description/urdf/dual_arms.urdf | grep -E "(l-j|r-j)"
+   # 应该看到: l-j1 到 l-j7, r-j1 到 r-j7
+   ```
+
+5. 重启适配器节点 ☐
+   ```bash
+   # 先停止所有节点
+   # 重新编译并启动
+   cd ~/qyh_jushen_ws
+   colcon build --packages-select qyh_jaka_control --symlink-install
+   source install/setup.bash
+   ros2 launch qyh_jaka_control jaka_control.launch.py
+   ```
+
+6. 运行适配器测试脚本 ☐
+   ```bash
+   cd ~/qyh_jushen_ws/src/qyh_jaka_control/scripts
+   python3 test_joint_adapter.py
+   # 应该显示: 🎉 ADAPTER WORKING CORRECTLY!
+   ```
+
+7. 如果适配器仍然失败，检查源代码 ☐
+   - 文件: `qyh_jaka_control/scripts/qyh_jaka_joint_adapter_node.py`
+   - 确认映射字典包含所有可能的输入格式
+   - 添加调试输出: 打印检测到的格式和转换结果
 
 ---
 
