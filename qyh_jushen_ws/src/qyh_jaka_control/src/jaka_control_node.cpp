@@ -3,9 +3,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <qyh_jaka_control_msgs/msg/jaka_dual_joint_servo.hpp>
-#include <qyh_jaka_control_msgs/msg/jaka_dual_cartesian_servo.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_servo_status.hpp>
 #include <qyh_jaka_control_msgs/msg/robot_state.hpp>
 #include <deque>
@@ -30,10 +27,6 @@
 #include <map>
 #include <array>
 #include <cmath>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_ros/static_transform_broadcaster.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using namespace std::chrono_literals;
 
@@ -177,7 +170,6 @@ public:
         // 参数声明
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
         declare_parameter<double>("cycle_time_ms", 8.0); // 默认 125Hz
-        declare_parameter<bool>("use_cartesian", false);
         declare_parameter<bool>("auto_connect", true);
         declare_parameter<bool>("auto_power_on", false);
         declare_parameter<bool>("auto_enable", false);
@@ -193,7 +185,6 @@ public:
         // 获取参数
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
-        use_cartesian_ = get_parameter("use_cartesian").as_bool();
         auto_connect_ = get_parameter("auto_connect").as_bool();
         auto_power_on_ = get_parameter("auto_power_on").as_bool();
         auto_enable_ = get_parameter("auto_enable").as_bool();
@@ -222,16 +213,7 @@ public:
         robot_state_pub_ = create_publisher<qyh_jaka_control_msgs::msg::RobotState>("/jaka/robot_state", 10);
         joint_states_pub_ = create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
 
-        // Subscribers (Standard)
-        joint_sub_ = create_subscription<qyh_jaka_control_msgs::msg::JakaDualJointServo>(
-            "/jaka/servo/joint_cmd", rclcpp::SensorDataQoS(),
-            std::bind(&JakaControlNode::jointCmdCallback, this, std::placeholders::_1));
-            
-        cartesian_sub_ = create_subscription<qyh_jaka_control_msgs::msg::JakaDualCartesianServo>(
-            "/jaka/servo/cartesian_cmd", rclcpp::SensorDataQoS(),
-            std::bind(&JakaControlNode::cartesianCmdCallback, this, std::placeholders::_1));
-
-        // Subscribers (Bridge)
+        // Subscribers (Bridge模式 - 标准ROS接口，支持独立单臂控制)
         auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
         left_bridge_sub_ = create_subscription<sensor_msgs::msg::JointState>(
             "/left_arm/joint_command", qos,
@@ -240,83 +222,6 @@ public:
         right_bridge_sub_ = create_subscription<sensor_msgs::msg::JointState>(
             "/right_arm/joint_command", qos,
             std::bind(&JakaControlNode::rightBridgeCallback, this, std::placeholders::_1));
-
-        // Subscribers (Cartesian Teleoperation - 方案C: VR位姿 → JAKA IK → 平滑 → Servo)
-        // 直接订阅 vr_clutch_node 发布的位姿，跳过 teleoperation_controller
-        left_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-            "/vr/left_target_pose", qos,
-            std::bind(&JakaControlNode::leftPoseCallback, this, std::placeholders::_1));
-            
-        right_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-            "/vr/right_target_pose", qos,
-            std::bind(&JakaControlNode::rightPoseCallback, this, std::placeholders::_1));
-
-        // 初始化 TF 监听器（用于坐标转换）
-        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-        
-        // 发布fake官方base坐标系（Jaka SDK期望的参考系）
-        // 验证URDF中定义了 fake_base_link→l1 和 fake_base_link→r1 的变换
-        // 这里直接使用验证URDF的定义，然后inverse得到 l1/r1→fake_base
-        tf_static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
-        
-        // 左臂：base→l1 = xyz(0, 0.015, 0.217) + rpy(1.5708, 0, -3.1416)
-        tf2::Transform tf_base_to_l1;
-        tf_base_to_l1.setOrigin(tf2::Vector3(0.0, 0.015, 0.217));
-        tf2::Quaternion q_left;
-        q_left.setRPY(1.5708, 0, -3.1416);
-        tf_base_to_l1.setRotation(q_left);
-        
-        // 求逆：l1→fake_base
-        tf2::Transform tf_l1_to_base = tf_base_to_l1.inverse();
-        geometry_msgs::msg::TransformStamped fake_left_base;
-        fake_left_base.header.stamp = this->now();
-        fake_left_base.header.frame_id = "left_link1";
-        fake_left_base.child_frame_id = "fake_left_official_base";
-        fake_left_base.transform.translation.x = tf_l1_to_base.getOrigin().x();
-        fake_left_base.transform.translation.y = tf_l1_to_base.getOrigin().y();
-        fake_left_base.transform.translation.z = tf_l1_to_base.getOrigin().z();
-        fake_left_base.transform.rotation.x = tf_l1_to_base.getRotation().x();
-        fake_left_base.transform.rotation.y = tf_l1_to_base.getRotation().y();
-        fake_left_base.transform.rotation.z = tf_l1_to_base.getRotation().z();
-        fake_left_base.transform.rotation.w = tf_l1_to_base.getRotation().w();
-        
-        // 右臂：base→r1 = xyz(0, -0.015, 0.217) + rpy(1.5708, 0, 0)
-        tf2::Transform tf_base_to_r1;
-        tf_base_to_r1.setOrigin(tf2::Vector3(0.0, -0.015, 0.217));
-        tf2::Quaternion q_right;
-        q_right.setRPY(1.5708, 0, 0);
-        tf_base_to_r1.setRotation(q_right);
-        
-        // 求逆：r1→fake_base
-        tf2::Transform tf_r1_to_base = tf_base_to_r1.inverse();
-        geometry_msgs::msg::TransformStamped fake_right_base;
-        fake_right_base.header.stamp = this->now();
-        fake_right_base.header.frame_id = "right_link1";
-        fake_right_base.child_frame_id = "fake_right_official_base";
-        fake_right_base.transform.translation.x = tf_r1_to_base.getOrigin().x();
-        fake_right_base.transform.translation.y = tf_r1_to_base.getOrigin().y();
-        fake_right_base.transform.translation.z = tf_r1_to_base.getOrigin().z();
-        fake_right_base.transform.rotation.x = tf_r1_to_base.getRotation().x();
-        fake_right_base.transform.rotation.y = tf_r1_to_base.getRotation().y();
-        fake_right_base.transform.rotation.z = tf_r1_to_base.getRotation().z();
-        fake_right_base.transform.rotation.w = tf_r1_to_base.getRotation().w();
-        
-        tf_static_broadcaster_->sendTransform({fake_left_base, fake_right_base});
-        
-        RCLCPP_INFO(get_logger(), "Published fake official base frames for Jaka SDK coordinate reference");
-        RCLCPP_INFO(get_logger(), "  - fake_left_official_base: 0.217m below left_link1");
-        RCLCPP_INFO(get_logger(), "  - fake_right_official_base: 0.217m below right_link1");
-        
-        // 初始化笛卡尔遥操作平滑器 (完整版：速度+加速度+Jerk+低通滤波)
-        SimpleJointSmoother::Limits smoother_limits;
-        smoother_limits.max_velocity = 1.0;           // rad/s - 保守的速度限制
-        smoother_limits.max_acceleration = 2.0;       // rad/s² - 适中的加速能力
-        smoother_limits.max_jerk = 10.0;              // rad/s³ - 保证平滑，无顿挫
-        smoother_limits.low_pass_cutoff = 8.0;        // Hz - 滤除人手8-12Hz抖动
-        smoother_limits.max_position_delta = 0.05;    // rad (~3度/步) - 防止IK跳变
-        left_pose_smoother_ = std::make_unique<SimpleJointSmoother>(7, smoother_limits);
-        right_pose_smoother_ = std::make_unique<SimpleJointSmoother>(7, smoother_limits);
 
         // Services (Basic Control)
         srv_power_on_ = create_service<std_srvs::srv::Trigger>(
@@ -456,54 +361,38 @@ private:
 
         auto start = std::chrono::high_resolution_clock::now();
         
-        // 1. 检查 Bridge 指令 (VR遥操作) - 允许单臂控制
+        // Bridge模式：从缓冲区获取插值后的指令
         std::vector<double> left_cmd, right_cmd;
         bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
         bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
-        bool bridge_active = has_left || has_right;
         
-        if (bridge_active) {
+        if (has_left || has_right) {
             bool success = true;
             
-            // 分别发送有效的指令
+            // 独立发送左臂指令
             if (has_left) {
                 auto jv = convertToJointValue(left_cmd);
-                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, 
-                    "[SERVO] Left cmd: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
+                    "[Bridge] Left: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
                     jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
                 success &= jaka_interface_.edgServoJ(0, jv, true);
             }
+            
+            // 独立发送右臂指令
             if (has_right) {
                 auto jv = convertToJointValue(right_cmd);
-                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, 
-                    "[SERVO] Right cmd: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
+                    "[Bridge] Right: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
                     jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
                 success &= jaka_interface_.edgServoJ(1, jv, true);
             }
             
+            // 统一发送，保证双臂同步（这是JakaDualJointServo的优点，已融入）
             success &= jaka_interface_.edgSend();
             
             if (!success) {
-                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000, "Failed to send bridge servo commands");
-            }
-        }
-        
-        // 2. 如果没有 Bridge 指令，检查标准指令
-        if (!bridge_active) {
-            std::lock_guard<std::mutex> lock(cmd_mutex_);
-            auto now = this->now();
-            
-            // 超时保护 (500ms)
-            if (last_cmd_time_.seconds() > 0 && (now - last_cmd_time_).seconds() < 0.5) {
-                if (last_joint_cmd_) {
-                    std::vector<double> positions(last_joint_cmd_->positions.begin(), 
-                                                 last_joint_cmd_->positions.end());
-                    jaka_interface_.servoJ(-1, positions, last_joint_cmd_->is_abs);
-                    jaka_interface_.edgSend();
-                }
-                else if (last_cartesian_cmd_) {
-                    // 笛卡尔控制暂未实现
-                }
+                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
+                    "[Bridge] Failed to send servo commands");
             }
         }
         
@@ -516,7 +405,7 @@ private:
         // 伺服状态
         auto servo_msg = qyh_jaka_control_msgs::msg::JakaServoStatus();
         if (servo_running_) {
-            servo_msg.mode = use_cartesian_ ? "cartesian" : "joint";
+            servo_msg.mode = "bridge_joint";  // Bridge模式，关节空间控制
         } else {
             servo_msg.mode = "idle";
         }
@@ -604,130 +493,46 @@ private:
         joint_states_pub_->publish(joint_state_msg);
     }
 
-    // ==================== 回调函数 ====================
-    void jointCmdCallback(const qyh_jaka_control_msgs::msg::JakaDualJointServo::SharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(cmd_mutex_);
-        last_joint_cmd_ = msg;
-        last_cmd_time_ = this->now();
-    }
-
-    void cartesianCmdCallback(const qyh_jaka_control_msgs::msg::JakaDualCartesianServo::SharedPtr msg)
-    {
-        std::lock_guard<std::mutex> lock(cmd_mutex_);
-        last_cartesian_cmd_ = msg;
-        last_cmd_time_ = this->now();
-    }
-    
+    // ==================== Bridge回调函数 ====================
     void leftBridgeCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
             "leftBridgeCallback: servo_running=%d, positions=%zu", 
             servo_running_.load(), msg->position.size());
         if (servo_running_ && msg->position.size() >= 7) {
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
+            
+            // ⭐ 智能重新同步：如果Bridge空闲后收到新指令，从当前位置重新初始化
+            if (left_bridge_->isEmpty()) {
+                JointValue current_pos;
+                if (jaka_interface_.getJointPositions(0, current_pos)) {
+                    std::vector<double> current_joints(7);
+                    for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
+                    left_bridge_->initializeFromCurrent(current_joints);
+                    RCLCPP_INFO(get_logger(), "[Left] Re-synced from current position after idle");
+                }
+            }
+            
             left_bridge_->addCommand(positions);
-            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, 
-                "Left arm command added: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                positions[0], positions[1], positions[2], positions[3], 
-                positions[4], positions[5], positions[6]);
         }
     }
     
     void rightBridgeCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
         if (servo_running_ && msg->position.size() >= 7) {
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
+            
+            // ⭐ 智能重新同步：如果Bridge空闲后收到新指令，从当前位置重新初始化
+            if (right_bridge_->isEmpty()) {
+                JointValue current_pos;
+                if (jaka_interface_.getJointPositions(1, current_pos)) {
+                    std::vector<double> current_joints(7);
+                    for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
+                    right_bridge_->initializeFromCurrent(current_joints);
+                    RCLCPP_INFO(get_logger(), "[Right] Re-synced from current position after idle");
+                }
+            }
+            
             right_bridge_->addCommand(positions);
         }
-    }
-
-    // ==================== 笛卡尔遥操作回调 (方案C) ====================
-    /**
-     * @brief 处理单臂笛卡尔位姿回调
-     * @param robot_id 0=左臂, 1=右臂
-     * @param pose 目标位姿
-     * @param smoother 对应的平滑器
-     */
-    void processPoseCommand(int robot_id, const geometry_msgs::msg::Pose& pose, 
-                           SimpleJointSmoother* smoother) {
-        if (!servo_running_) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, 
-                "[PoseCmd] Servo not running, ignoring pose command");
-            return;
-        }
-
-        // 1. **关键修复**: 将 base_link 坐标系的位姿转换到Jaka SDK期望的官方参考系
-        //    VR 发送的是相对 base_link，但 JAKA SDK IK 需要相对官方标准base
-        //    使用 fake_official_base 确保与SDK内部运动学模型的坐标系一致
-        geometry_msgs::msg::PoseStamped pose_in_base, pose_in_official_base;
-        pose_in_base.header.frame_id = "base_link";
-        pose_in_base.header.stamp = rclcpp::Time(0);  // 使用Time(0)表示"最新可用"，避免静态TF时间戳问题
-        pose_in_base.pose = pose;
-        
-        // 使用fake官方base而不是left_base_link（fake base到link1距离0.217m，符合SDK期望）
-        std::string target_frame = (robot_id == 0) ? "fake_left_official_base" : "fake_right_official_base";
-        
-        try {
-            pose_in_official_base = tf_buffer_->transform(pose_in_base, target_frame, tf2::durationFromSec(0.1));
-        } catch (const tf2::TransformException& ex) {
-            RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000,
-                "[PoseCmd] TF transform failed (base_link → %s): %s", target_frame.c_str(), ex.what());
-            return;
-        }
-
-        // 2. 获取当前关节位置作为 IK 参考
-        JointValue current_joints;
-        if (!jaka_interface_.getJointPositions(robot_id, current_joints)) {
-            RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000,
-                "[PoseCmd] Failed to get current joint positions for robot %d", robot_id);
-            return;
-        }
-
-        // 3. 转换位姿格式 (使用转换后的位姿，现在是相对官方base的)
-        CartesianPose target_pose = jaka_interface_.rosPoseToJaka(pose_in_official_base.pose);
-
-        // 3. 调用 JAKA IK
-        JointValue ik_result;
-        if (!jaka_interface_.kineInverse(robot_id, current_joints, target_pose, ik_result)) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
-                "[PoseCmd] IK failed for robot %d, target=[%.1f,%.1f,%.1f]mm",
-                robot_id, target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
-            return;
-        }
-
-        // 4. 转换为 vector
-        std::vector<double> ik_joints(7);
-        std::vector<double> curr_joints(7);
-        for (size_t i = 0; i < 7; ++i) {
-            ik_joints[i] = ik_result.jVal[i];
-            curr_joints[i] = current_joints.jVal[i];
-        }
-
-        // ★★★ 关键修复：用当前关节位置初始化平滑器（避免首次调用跳变）★★★
-        smoother->initializeWith(curr_joints);
-
-        // 5. 轨迹平滑
-        double dt = cycle_time_ms_ / 1000.0;  // 8ms = 0.008s
-        std::vector<double> smoothed = smoother->smooth(ik_joints, dt);
-
-        // 6. 发送到 bridge (由 mainLoop 发送 servo 指令)
-        if (robot_id == 0) {
-            left_bridge_->addCommand(smoothed);
-        } else {
-            right_bridge_->addCommand(smoothed);
-        }
-
-        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 500,
-            "[PoseCmd] robot=%d, IK=[%.3f,%.3f,%.3f,...], smoothed=[%.3f,%.3f,%.3f,...]",
-            robot_id, ik_joints[0], ik_joints[1], ik_joints[2],
-            smoothed[0], smoothed[1], smoothed[2]);
-    }
-
-    void leftPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-        processPoseCommand(0, msg->pose, left_pose_smoother_.get());
-    }
-
-    void rightPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-        processPoseCommand(1, msg->pose, right_pose_smoother_.get());
     }
 
     // ==================== 基础控制服务 ====================
@@ -823,6 +628,27 @@ private:
         
         if (success) {
             servo_running_ = true;
+            
+            // ★★★ 关键改进：从当前机械臂位置初始化Bridge，避免启动跳变 ★★★
+            JointValue left_pos, right_pos;
+            if (jaka_interface_.getJointPositions(0, left_pos)) {
+                std::vector<double> left_joints(7);
+                for (size_t i = 0; i < 7; ++i) left_joints[i] = left_pos.jVal[i];
+                left_bridge_->initializeFromCurrent(left_joints);
+                RCLCPP_INFO(get_logger(), "[Servo] Left bridge initialized from current position");
+            } else {
+                RCLCPP_WARN(get_logger(), "[Servo] Failed to get left arm position for initialization");
+            }
+            
+            if (jaka_interface_.getJointPositions(1, right_pos)) {
+                std::vector<double> right_joints(7);
+                for (size_t i = 0; i < 7; ++i) right_joints[i] = right_pos.jVal[i];
+                right_bridge_->initializeFromCurrent(right_joints);
+                RCLCPP_INFO(get_logger(), "[Servo] Right bridge initialized from current position");
+            } else {
+                RCLCPP_WARN(get_logger(), "[Servo] Failed to get right arm position for initialization");
+            }
+            
             return true;
         }
         // 如果失败，尝试回滚
@@ -1047,14 +873,9 @@ private:
     std::unique_ptr<qyh_jaka_control::SmoothServoBridge> left_bridge_;
     std::unique_ptr<qyh_jaka_control::SmoothServoBridge> right_bridge_;
     
-    // 笛卡尔遥操作平滑器 (方案C)
-    std::unique_ptr<SimpleJointSmoother> left_pose_smoother_;
-    std::unique_ptr<SimpleJointSmoother> right_pose_smoother_;
-    
     // 参数
     std::string robot_ip_;
     double cycle_time_ms_;
-    bool use_cartesian_;
     bool auto_connect_;
     bool auto_power_on_;
     bool auto_enable_;
@@ -1066,25 +887,13 @@ private:
     std::atomic<bool> servo_running_;
     int64_t last_cycle_duration_us_ = 0;
 
-    // 指令缓存
-    std::mutex cmd_mutex_;
-    qyh_jaka_control_msgs::msg::JakaDualJointServo::SharedPtr last_joint_cmd_;
-    qyh_jaka_control_msgs::msg::JakaDualCartesianServo::SharedPtr last_cartesian_cmd_;
-    rclcpp::Time last_cmd_time_;
-
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::RobotState>::SharedPtr robot_state_pub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_states_pub_;
     
-    rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualJointServo>::SharedPtr joint_sub_;
-    rclcpp::Subscription<qyh_jaka_control_msgs::msg::JakaDualCartesianServo>::SharedPtr cartesian_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_bridge_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr right_bridge_sub_;
-    
-    // 笛卡尔遥操作订阅 (方案C)
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_pose_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_pose_sub_;
 
     // 服务
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_on_;
@@ -1114,11 +923,6 @@ private:
 
     rclcpp::TimerBase::SharedPtr main_timer_;
     rclcpp::TimerBase::SharedPtr status_timer_;
-    
-    // TF 监听器和广播器（用于坐标转换）
-    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_static_broadcaster_;
 };
 
 int main(int argc, char** argv)

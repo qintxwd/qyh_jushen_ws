@@ -17,6 +17,7 @@ SmoothServoBridge::SmoothServoBridge(
       interpolation_enabled_(true),
       interpolation_weight_(0.5),
       has_last_output_(false),
+      command_timeout_sec_(0.5),  // 默认500ms无指令则失效
       last_command_time_(std::chrono::steady_clock::now()),
       last_output_time_(std::chrono::steady_clock::now())
 {
@@ -25,6 +26,7 @@ SmoothServoBridge::SmoothServoBridge(
     RCLCPP_INFO(logger_, "  Target frequency: %.1f Hz", target_frequency_hz_);
     RCLCPP_INFO(logger_, "  Target period: %.2f ms", target_period_ms_);
     RCLCPP_INFO(logger_, "  Interpolation: %s", interpolation_enabled_ ? "enabled" : "disabled");
+    RCLCPP_INFO(logger_, "  Command timeout: %.1f sec (auto re-sync on idle)", command_timeout_sec_);
 }
 
 bool SmoothServoBridge::addCommand(const std::vector<double>& joint_positions)
@@ -58,6 +60,19 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
 {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     
+    // ⭐ 超时检测：如果长时间没有新指令，失效last_output状态
+    auto now = std::chrono::steady_clock::now();
+    auto time_since_last_cmd = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - last_command_time_).count() / 1000.0;
+    
+    if (has_last_output_ && time_since_last_cmd > command_timeout_sec_) {
+        // 超时：下次收到新指令时会重新从当前位置开始（在jaka_control_node中处理）
+        RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::SharedPtr(new rclcpp::Clock()), 2000,
+            "Command timeout (%.1fs > %.1fs), will re-sync on next command",
+            time_since_last_cmd, command_timeout_sec_);
+        has_last_output_ = false;
+    }
+    
     if (command_buffer_.empty()) {
         // 如果缓冲器为空，使用上一次的输出（保持不动）
         if (has_last_output_) {
@@ -67,13 +82,16 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
         return false;
     }
     
-    auto now = std::chrono::steady_clock::now();
-    
     // 获取最新的命令
     const JointCommand& latest_command = command_buffer_.back();
     
     if (!interpolation_enabled_ || !has_last_output_) {
         // 不插值，直接使用最新命令
+        // （如果has_last_output_为false，说明是超时后第一个指令，需要重新同步）
+        if (!has_last_output_) {
+            RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::SharedPtr(new rclcpp::Clock()), 2000,
+                "Re-syncing: using latest command directly after timeout/init");
+        }
         interpolated_positions = latest_command.positions;
         last_output_command_ = latest_command;
         has_last_output_ = true;
@@ -149,6 +167,32 @@ void SmoothServoBridge::enableInterpolation(bool enable)
 {
     interpolation_enabled_ = enable;
     RCLCPP_INFO(logger_, "Interpolation %s", enable ? "enabled" : "disabled");
+}
+
+bool SmoothServoBridge::initializeFromCurrent(const std::vector<double>& current_positions)
+{
+    if (current_positions.size() != 7) {
+        RCLCPP_ERROR(logger_, "Invalid current positions size: %zu (expected 7)", 
+                     current_positions.size());
+        return false;
+    }
+    
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    
+    // 初始化last_output_command_为当前机械臂位置
+    last_output_command_.positions = current_positions;
+    last_output_command_.timestamp = std::chrono::steady_clock::now();
+    has_last_output_ = true;
+    
+    // 清空缓冲区，确保从干净状态开始
+    command_buffer_.clear();
+    
+    RCLCPP_INFO(logger_, "Bridge initialized from current position: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                current_positions[0], current_positions[1], current_positions[2],
+                current_positions[3], current_positions[4], current_positions[5],
+                current_positions[6]);
+    
+    return true;
 }
 
 std::vector<double> SmoothServoBridge::interpolate(

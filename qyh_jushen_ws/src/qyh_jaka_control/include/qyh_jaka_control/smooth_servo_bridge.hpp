@@ -130,6 +130,14 @@ public:
      * @param enable true=插值，false=直接使用最新命令
      */
     void enableInterpolation(bool enable);
+    
+    /**
+     * @brief 从当前机械臂位置初始化，避免启动时的跳变
+     * 应在startServo后、发送第一个命令前调用
+     * @param current_positions 当前机械臂的关节位置 (7 DOF)
+     * @return true if successful
+     */
+    bool initializeFromCurrent(const std::vector<double>& current_positions);
 
 private:
     rclcpp::Logger logger_;
@@ -150,6 +158,9 @@ private:
     // 上一次输出的命令（用于插值）
     JointCommand last_output_command_;
     bool has_last_output_;
+    
+    // 超时重新同步设置
+    double command_timeout_sec_;  // 无指令超时时间（秒），超时后自动失效last_output
     
     // 性能统计
     ServoPerformanceStats stats_;
