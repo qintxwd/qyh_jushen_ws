@@ -87,6 +87,13 @@ std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT =
 
 static inline double deg2rad(double d) { return d * M_PI / 180.0; }
 
+// 归一化角度到[-π, π]范围
+static inline double normalizeAngle(double angle) {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
+
 class DualArmIKSolverNode : public rclcpp::Node
 {
 public:
@@ -480,29 +487,62 @@ private:
                 }
                 
                 // 输出目标位姿
-                RCLCPP_WARN(get_logger(), "目标位姿 (target_pose):");
+                tf2::Quaternion q_target;
+                q_target.setRPY(target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                RCLCPP_WARN(get_logger(), "目标位姿 (target_pose, 在lt坐标系):");
                 RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
                     target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
-                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
+                RCLCPP_WARN(get_logger(), "  姿态RPY: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
                     target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                RCLCPP_WARN(get_logger(), "  姿态Quat: [%.4f, %.4f, %.4f, %.4f]",
+                    q_target.x(), q_target.y(), q_target.z(), q_target.w());
                 
                 // 输出真实位姿并计算偏差
                 if (has_left_real_pose_) {
-                    // 将四元数转换为RPY
-                    tf2::Quaternion q(
+                    // real_pose原始四元数（可能在base_link_left坐标系）
+                    tf2::Quaternion q_real_raw(
                         left_real_pose_.orientation.x,
                         left_real_pose_.orientation.y,
                         left_real_pose_.orientation.z,
                         left_real_pose_.orientation.w
                     );
-                    tf2::Matrix3x3 m(q);
-                    double real_roll, real_pitch, real_yaw;
-                    m.getRPY(real_roll, real_pitch, real_yaw);
                     
-                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose):");
+                    // ⚠️ 关键：应用R_correction变换到lt坐标系
+                    // real_pose_lt = real_pose_base * R_correction^T
+                    tf2::Matrix3x3 R_correction_left(
+                        0.0,  1.0,  0.0,
+                        0.0,  0.0,  1.0,
+                        1.0,  0.0,  0.0
+                    );
+                    if(target_x_left_) {
+                        R_correction_left = tf2::Matrix3x3(
+                            1.0, 0.0, 0.0,
+                            0.0, 1.0, 0.0,
+                            0.0, 0.0, 1.0
+                        );
+                    }
+                    tf2::Matrix3x3 R_real_raw(q_real_raw);
+                    tf2::Matrix3x3 R_real_corrected = R_real_raw * R_correction_left.transpose();
+                    tf2::Quaternion q_real;
+                    R_real_corrected.getRotation(q_real);
+                    q_real.normalize();
+                    
+                    tf2::Matrix3x3 m_real(q_real);
+                    double real_roll, real_pitch, real_yaw;
+                    m_real.getRPY(real_roll, real_pitch, real_yaw);
+                    
+                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose, 原始):");
                     RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
                         left_real_pose_.position.x * 1000.0, left_real_pose_.position.y * 1000.0, left_real_pose_.position.z * 1000.0);
-                    RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
+                    double raw_roll, raw_pitch, raw_yaw;
+                    tf2::Matrix3x3(q_real_raw).getRPY(raw_roll, raw_pitch, raw_yaw);
+                    RCLCPP_WARN(get_logger(), "  姿态Quat(原始): [%.4f, %.4f, %.4f, %.4f]",
+                        q_real_raw.x(), q_real_raw.y(), q_real_raw.z(), q_real_raw.w());
+                    RCLCPP_WARN(get_logger(), "  姿态RPY(原始): rx=%.4f, ry=%.4f, rz=%.4f rad", raw_roll, raw_pitch, raw_yaw);
+                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose, 变换到lt坐标系后):");
+                    RCLCPP_WARN(get_logger(), "  姿态Quat(lt): [%.4f, %.4f, %.4f, %.4f]",
+                        q_real.x(), q_real.y(), q_real.z(), q_real.w());
+                    RCLCPP_WARN(get_logger(), "  姿态RPY(lt): rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
                         real_roll, real_pitch, real_yaw);
                     
                     // 计算位置偏差（real_pose单位是m，target_pose单位是mm）
@@ -511,16 +551,30 @@ private:
                     double dz = target_pose.tran.z - left_real_pose_.position.z * 1000.0;
                     double pos_error = std::sqrt(dx*dx + dy*dy + dz*dz);
                     
-                    // 计算姿态偏差
-                    double drx = std::abs(target_pose.rpy.rx - real_roll);
-                    double dry = std::abs(target_pose.rpy.ry - real_pitch);
-                    double drz = std::abs(target_pose.rpy.rz - real_yaw);
+                    // 计算RPY姿态偏差（归一化到[-π,π]）
+                    double drx_norm = normalizeAngle(target_pose.rpy.rx - real_roll);
+                    double dry_norm = normalizeAngle(target_pose.rpy.ry - real_pitch);
+                    double drz_norm = normalizeAngle(target_pose.rpy.rz - real_yaw);
+                    
+                    // 计算四元数旋转误差（更准确）
+                    tf2::Quaternion q_target;
+                    q_target.setRPY(target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                    tf2::Quaternion q_error = q_real.inverse() * q_target;
+                    q_error.normalize();
+                    double error_angle = 2.0 * std::acos(std::min(1.0, std::abs(q_error.w())));
+                    tf2::Vector3 error_axis(q_error.x(), q_error.y(), q_error.z());
+                    double axis_len = error_axis.length();
+                    if (axis_len > 1e-6) {
+                        error_axis /= axis_len;
+                    }
                     
                     RCLCPP_WARN(get_logger(), "位姿偏差:");
                     RCLCPP_WARN(get_logger(), "  位置偏差: dx=%.2f mm, dy=%.2f mm, dz=%.2f mm, 总偏差=%.2f mm", 
                         dx, dy, dz, pos_error);
-                    RCLCPP_WARN(get_logger(), "  姿态偏差: drx=%.4f rad (%.2f°), dry=%.4f rad (%.2f°), drz=%.4f rad (%.2f°)", 
-                        drx, drx*180.0/M_PI, dry, dry*180.0/M_PI, drz, drz*180.0/M_PI);
+                    RCLCPP_WARN(get_logger(), "  RPY偏差(归一化): drx=%.4f rad (%.2f°), dry=%.4f rad (%.2f°), drz=%.4f rad (%.2f°)", 
+                        drx_norm, drx_norm*180.0/M_PI, dry_norm, dry_norm*180.0/M_PI, drz_norm, drz_norm*180.0/M_PI);
+                    RCLCPP_WARN(get_logger(), "  四元数旋转误差: %.4f rad (%.2f°), 旋转轴=[%.3f, %.3f, %.3f]",
+                        error_angle, error_angle*180.0/M_PI, error_axis.x(), error_axis.y(), error_axis.z());
                 } else {
                     RCLCPP_WARN(get_logger(), "⚠️  未收到机械臂真实位姿数据");
                 }
@@ -691,29 +745,62 @@ private:
                 }
                 
                 // 输出目标位姿
-                RCLCPP_WARN(get_logger(), "目标位姿 (target_pose):");
+                tf2::Quaternion q_target_right;
+                q_target_right.setRPY(target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                RCLCPP_WARN(get_logger(), "目标位姿 (target_pose, 在rt坐标系):");
                 RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
                     target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
-                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
+                RCLCPP_WARN(get_logger(), "  姿态RPY: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
                     target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                RCLCPP_WARN(get_logger(), "  姿态Quat: [%.4f, %.4f, %.4f, %.4f]",
+                    q_target_right.x(), q_target_right.y(), q_target_right.z(), q_target_right.w());
                 
                 // 输出真实位姿并计算偏差
                 if (has_right_real_pose_) {
-                    // 将四元数转换为RPY
-                    tf2::Quaternion q(
+                    // real_pose原始四元数（可能在base_link_right坐标系）
+                    tf2::Quaternion q_real_raw(
                         right_real_pose_.orientation.x,
                         right_real_pose_.orientation.y,
                         right_real_pose_.orientation.z,
                         right_real_pose_.orientation.w
                     );
-                    tf2::Matrix3x3 m(q);
-                    double real_roll, real_pitch, real_yaw;
-                    m.getRPY(real_roll, real_pitch, real_yaw);
                     
-                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose):");
+                    // ⚠️ 关键：应用R_correction变换到rt坐标系
+                    // real_pose_rt = real_pose_base * R_correction^T
+                    tf2::Matrix3x3 R_correction_right(
+                        0.0,  1.0,  0.0,
+                        0.0,  0.0,  1.0,
+                        1.0,  0.0,  0.0
+                    );
+                    if(target_x_left_) {
+                        R_correction_right = tf2::Matrix3x3(
+                            1.0, 0.0, 0.0,
+                            0.0, 1.0, 0.0,
+                            0.0, 0.0, 1.0
+                        );
+                    }
+                    tf2::Matrix3x3 R_real_raw(q_real_raw);
+                    tf2::Matrix3x3 R_real_corrected = R_real_raw * R_correction_right.transpose();
+                    tf2::Quaternion q_real;
+                    R_real_corrected.getRotation(q_real);
+                    q_real.normalize();
+                    
+                    tf2::Matrix3x3 m_real(q_real);
+                    double real_roll, real_pitch, real_yaw;
+                    m_real.getRPY(real_roll, real_pitch, real_yaw);
+                    
+                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose, 原始):");
                     RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
                         right_real_pose_.position.x * 1000.0, right_real_pose_.position.y * 1000.0, right_real_pose_.position.z * 1000.0);
-                    RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
+                    double raw_roll, raw_pitch, raw_yaw;
+                    tf2::Matrix3x3(q_real_raw).getRPY(raw_roll, raw_pitch, raw_yaw);
+                    RCLCPP_WARN(get_logger(), "  姿态Quat(原始): [%.4f, %.4f, %.4f, %.4f]",
+                        q_real_raw.x(), q_real_raw.y(), q_real_raw.z(), q_real_raw.w());
+                    RCLCPP_WARN(get_logger(), "  姿态RPY(原始): rx=%.4f, ry=%.4f, rz=%.4f rad", raw_roll, raw_pitch, raw_yaw);
+                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose, 变换到rt坐标系后):");
+                    RCLCPP_WARN(get_logger(), "  姿态Quat(rt): [%.4f, %.4f, %.4f, %.4f]",
+                        q_real.x(), q_real.y(), q_real.z(), q_real.w());
+                    RCLCPP_WARN(get_logger(), "  姿态RPY(rt): rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
                         real_roll, real_pitch, real_yaw);
                     
                     // 计算位置偏差（real_pose单位是m，target_pose单位是mm）
@@ -722,16 +809,28 @@ private:
                     double dz = target_pose.tran.z - right_real_pose_.position.z * 1000.0;
                     double pos_error = std::sqrt(dx*dx + dy*dy + dz*dz);
                     
-                    // 计算姿态偏差
-                    double drx = std::abs(target_pose.rpy.rx - real_roll);
-                    double dry = std::abs(target_pose.rpy.ry - real_pitch);
-                    double drz = std::abs(target_pose.rpy.rz - real_yaw);
+                    // 计算RPY姿态偏差（归一化到[-π,π]）
+                    double drx_norm = normalizeAngle(target_pose.rpy.rx - real_roll);
+                    double dry_norm = normalizeAngle(target_pose.rpy.ry - real_pitch);
+                    double drz_norm = normalizeAngle(target_pose.rpy.rz - real_yaw);
+                    
+                    // 计算四元数旋转误差（更准确，现在都在rt坐标系）
+                    tf2::Quaternion q_error = q_real.inverse() * q_target_right;
+                    q_error.normalize();
+                    double error_angle = 2.0 * std::acos(std::min(1.0, std::abs(q_error.w())));
+                    tf2::Vector3 error_axis(q_error.x(), q_error.y(), q_error.z());
+                    double axis_len = error_axis.length();
+                    if (axis_len > 1e-6) {
+                        error_axis /= axis_len;
+                    }
                     
                     RCLCPP_WARN(get_logger(), "位姿偏差:");
                     RCLCPP_WARN(get_logger(), "  位置偏差: dx=%.2f mm, dy=%.2f mm, dz=%.2f mm, 总偏差=%.2f mm", 
                         dx, dy, dz, pos_error);
-                    RCLCPP_WARN(get_logger(), "  姿态偏差: drx=%.4f rad (%.2f°), dry=%.4f rad (%.2f°), drz=%.4f rad (%.2f°)", 
-                        drx, drx*180.0/M_PI, dry, dry*180.0/M_PI, drz, drz*180.0/M_PI);
+                    RCLCPP_WARN(get_logger(), "  RPY偏差(归一化): drx=%.4f rad (%.2f°), dry=%.4f rad (%.2f°), drz=%.4f rad (%.2f°)", 
+                        drx_norm, drx_norm*180.0/M_PI, dry_norm, dry_norm*180.0/M_PI, drz_norm, drz_norm*180.0/M_PI);
+                    RCLCPP_WARN(get_logger(), "  四元数旋转误差: %.4f rad (%.2f°), 旋转轴=[%.3f, %.3f, %.3f]",
+                        error_angle, error_angle*180.0/M_PI, error_axis.x(), error_axis.y(), error_axis.z());
                 } else {
                     RCLCPP_WARN(get_logger(), "⚠️  未收到机械臂真实位姿数据");
                 }
