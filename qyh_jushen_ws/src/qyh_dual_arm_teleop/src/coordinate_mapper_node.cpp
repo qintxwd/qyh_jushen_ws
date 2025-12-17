@@ -31,10 +31,12 @@ using namespace std::chrono_literals;
  * 坐标系说明：
  *   输入: vr_*_controller (ROS标准坐标系: X前 Y左 Z上)
  *   输出: human_*_hand (人手语义: X手指向前 Y左 Z上)
+ *   机器人TCP: forward_lt/forward_rt (ROS标准坐标系: X前 Y左 Z上，与VR对齐)
  *   
  *   目前vr_bridge已经做了PICO→ROS对齐，所以这里主要做：
  *   - 握持补偿（绕Y轴pitch旋转）
  *   - 缩放和滤波
+ *   - 增量控制（基于机器人当前TCP位置）
  */
 
 class CoordinateMapperNode : public rclcpp::Node
@@ -189,21 +191,39 @@ private:
             hs.vr_origin_quat = compensated_quat;
             hs.have_vr_origin = true;
 
-            // target_origin：优先使用最后一次发布的目标（实现“松开保持、再接合从当前位置继续增量”）
-            if (hs.have_last_target) {
-                hs.target_origin_pos = hs.last_target_pos;
-                hs.target_origin_quat = hs.last_target_quat;
-                hs.have_target_origin = true;
-            } else {
-                // 第一次接合没有历史目标：退化为绝对映射的当前值，避免跳变
-                hs.target_origin_pos = (vr_pos * position_scale_);
-                hs.target_origin_quat = compensated_quat;
-                hs.have_target_origin = true;
+            // target_origin：每次接合都从机械臂当前真实TCP位置开始（forward_lt/forward_rt）
+            std::string tcp_frame = (hand_name == "left") ? "forward_lt" : "forward_rt";
+                try {
+                    auto tcp_transform = tf_buffer_->lookupTransform(
+                        "vr_origin", tcp_frame, tf2::TimePointZero);
+                    
+                    hs.target_origin_pos = tf2::Vector3(
+                        tcp_transform.transform.translation.x,
+                        tcp_transform.transform.translation.y,
+                        tcp_transform.transform.translation.z);
+                    hs.target_origin_quat = tf2::Quaternion(
+                        tcp_transform.transform.rotation.x,
+                        tcp_transform.transform.rotation.y,
+                        tcp_transform.transform.rotation.z,
+                        tcp_transform.transform.rotation.w);
+                    hs.have_target_origin = true;
+                    
+                    RCLCPP_INFO(this->get_logger(), 
+                        "[%s] Clutch engaged: robot TCP at [%.3f, %.3f, %.3f]",
+                        hand_name.c_str(), 
+                        hs.target_origin_pos.x(), 
+                        hs.target_origin_pos.y(), 
+                        hs.target_origin_pos.z());
+                } catch (const tf2::TransformException& ex) {
+                    // 如果查询失败，回退到VR位置计算（避免系统崩溃）
+                    RCLCPP_WARN(this->get_logger(), 
+                        "[%s] Cannot query TCP from TF (%s), fallback to VR-based calculation",
+                        hand_name.c_str(), ex.what());
+                    hs.target_origin_pos = (vr_pos * position_scale_);
+                    hs.target_origin_quat = compensated_quat;
+                    hs.have_target_origin = true;
+                }
 
-                hs.last_target_pos = hs.target_origin_pos;
-                hs.last_target_quat = hs.target_origin_quat;
-                hs.have_last_target = true;
-            }
 
             // 让滤波器从当前目标起步，避免接合瞬间的“突变”
             prev_pos = hs.target_origin_pos;
@@ -273,11 +293,6 @@ private:
         prev_pos = scaled_pos;
         prev_quat = scaled_quat;
         hs.have_prev = true;
-
-        // 更新最后目标（用于松开保持/再次接合）
-        hs.last_target_pos = scaled_pos;
-        hs.last_target_quat = scaled_quat;
-        hs.have_last_target = true;
         
         // === 5. 发布 TF: vr_*_controller → human_*_hand ===
         geometry_msgs::msg::TransformStamped human_tf;
@@ -348,10 +363,6 @@ private:
         tf2::Quaternion target_origin_quat;
 
         bool have_prev = false;
-
-        bool have_last_target = false;
-        tf2::Vector3 last_target_pos;
-        tf2::Quaternion last_target_quat;
     };
 
     HandState left_hand_state_;

@@ -509,6 +509,22 @@
       xyz="0 0 0" />
   </joint>
   
+  <!-- Forward-aligned coordinate frame for right end-effector -->
+  <!-- Rotates rt frame so that X-axis points forward (aligned with VR) instead of left -->
+  <link name="forward_rt">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  
+  <joint name="rt_to_forward" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -1.5708 -1.5708" />
+    <parent link="rt" />
+    <child link="forward_rt" />
+  </joint>
+  
   <!-- Calibration offset link for left arm -->
   <!-- Compensates for difference between URDF calculation and real robot -->
   <!-- Offset based on zero-position measurement: xyz=[-0.0004, 0.0022, 0.0030] -->
@@ -984,6 +1000,22 @@
       link="lt" />
     <axis
       xyz="0 0 0" />
+  </joint>
+  
+  <!-- Forward-aligned coordinate frame for left end-effector -->
+  <!-- Rotates lt frame so that X-axis points forward (aligned with VR) instead of left -->
+  <link name="forward_lt">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.001" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+    </inertial>
+  </link>
+  
+  <joint name="lt_to_forward" type="fixed">
+    <origin xyz="0 0 0" rpy="0 -1.5708 -1.5708" />
+    <parent link="lt" />
+    <child link="forward_lt" />
   </joint>
   
   <!-- VR coordinate frame for teleoperation -->

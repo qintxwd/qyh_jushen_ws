@@ -431,7 +431,7 @@ public:
         // Timers
         auto period = std::chrono::microseconds(static_cast<int>(cycle_time_ms_ * 1000));
         main_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::mainLoop, this));
-        status_timer_ = create_wall_timer(100ms, std::bind(&JakaControlNode::publishStatus, this));
+        status_timer_ = create_wall_timer(33ms, std::bind(&JakaControlNode::publishStatus, this));
         
         RCLCPP_INFO(get_logger(), "=== JAKA Unified Control Node Initialized ===");
     }
