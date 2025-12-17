@@ -13,10 +13,13 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <qyh_jaka_control_msgs/msg/robot_state.hpp>
 #include <JAKAZuRobot.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <chrono>
 #include <memory>
@@ -155,6 +158,11 @@ public:
             "/joint_states", 10,
             std::bind(&DualArmIKSolverNode::jointStatesCallback, this, std::placeholders::_1));
         
+        // 订阅机械臂真实位姿状态
+        robot_state_sub_ = create_subscription<qyh_jaka_control_msgs::msg::RobotState>(
+            "/jaka/robot_state", 10,
+            std::bind(&DualArmIKSolverNode::robotStateCallback, this, std::placeholders::_1));
+        
         // 自动连接
         if (auto_connect_) {
             connectToRobot();
@@ -227,6 +235,15 @@ private:
     {
         right_target_ = msg;
         has_right_target_ = true;
+    }
+    
+    void robotStateCallback(const qyh_jaka_control_msgs::msg::RobotState::SharedPtr msg)
+    {
+        // 更新机械臂真实位姿
+        left_real_pose_ = msg->left_cartesian_pose;
+        right_real_pose_ = msg->right_cartesian_pose;
+        has_left_real_pose_ = true;
+        has_right_real_pose_ = true;
     }
     
     void jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
@@ -455,16 +472,58 @@ private:
             if (left_error_count_++ % 100 == 0) {
                 RCLCPP_WARN(get_logger(), "左臂IK失败 (错误计数: %d, 错误码: %d)", 
                     left_error_count_, ret);
-                    //输出一下当前的ref_joints_值，以及target_pose值，方便调试
+                
+                // 输出参考关节位置
                 RCLCPP_WARN(get_logger(), "当前参考关节位置:");
                 for(int i=0; i<7; i++) {
-                    RCLCPP_WARN(get_logger(), "  关节 %d: %.4f", i+1, ref_joints->jVal[i]);
+                    RCLCPP_WARN(get_logger(), "  关节 %d: %.4f rad", i+1, ref_joints->jVal[i]);
                 }
-                RCLCPP_WARN(get_logger(), "目标位姿 (mm, rad):");
-                RCLCPP_WARN(get_logger(), "  位置: x=%.2f, y=%.2f, z=%.2f", 
+                
+                // 输出目标位姿
+                RCLCPP_WARN(get_logger(), "目标位姿 (target_pose):");
+                RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
                     target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
-                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f, ry=%.4f, rz=%.4f", 
+                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
                     target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                
+                // 输出真实位姿并计算偏差
+                if (has_left_real_pose_) {
+                    // 将四元数转换为RPY
+                    tf2::Quaternion q(
+                        left_real_pose_.orientation.x,
+                        left_real_pose_.orientation.y,
+                        left_real_pose_.orientation.z,
+                        left_real_pose_.orientation.w
+                    );
+                    tf2::Matrix3x3 m(q);
+                    double real_roll, real_pitch, real_yaw;
+                    m.getRPY(real_roll, real_pitch, real_yaw);
+                    
+                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose):");
+                    RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
+                        left_real_pose_.position.x * 1000.0, left_real_pose_.position.y * 1000.0, left_real_pose_.position.z * 1000.0);
+                    RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
+                        real_roll, real_pitch, real_yaw);
+                    
+                    // 计算位置偏差（real_pose单位是m，target_pose单位是mm）
+                    double dx = target_pose.tran.x - left_real_pose_.position.x * 1000.0;
+                    double dy = target_pose.tran.y - left_real_pose_.position.y * 1000.0;
+                    double dz = target_pose.tran.z - left_real_pose_.position.z * 1000.0;
+                    double pos_error = std::sqrt(dx*dx + dy*dy + dz*dz);
+                    
+                    // 计算姿态偏差
+                    double drx = std::abs(target_pose.rpy.rx - real_roll);
+                    double dry = std::abs(target_pose.rpy.ry - real_pitch);
+                    double drz = std::abs(target_pose.rpy.rz - real_yaw);
+                    
+                    RCLCPP_WARN(get_logger(), "位姿偏差:");
+                    RCLCPP_WARN(get_logger(), "  位置偏差: dx=%.2f mm, dy=%.2f mm, dz=%.2f mm, 总偏差=%.2f mm", 
+                        dx, dy, dz, pos_error);
+                    RCLCPP_WARN(get_logger(), "  姿态偏差: drx=%.4f rad (%.2f°), dry=%.4f rad (%.2f°), drz=%.4f rad (%.2f°)", 
+                        drx, drx*180.0/M_PI, dry, dry*180.0/M_PI, drz, drz*180.0/M_PI);
+                } else {
+                    RCLCPP_WARN(get_logger(), "⚠️  未收到机械臂真实位姿数据");
+                }
             }
             return false;
         }
@@ -624,15 +683,58 @@ private:
             if (right_error_count_++ % 100 == 0) {
                 RCLCPP_WARN(get_logger(), "右臂IK失败 (错误计数: %d, 错误码: %d)", 
                     right_error_count_, ret);
+                
+                // 输出参考关节位置
                 RCLCPP_WARN(get_logger(), "当前参考关节位置:");
                 for(int i=0; i<7; i++) {
-                    RCLCPP_WARN(get_logger(), "  关节 %d: %.4f", i+1, ref_joints->jVal[i]);
+                    RCLCPP_WARN(get_logger(), "  关节 %d: %.4f rad", i+1, ref_joints->jVal[i]);
                 }
-                RCLCPP_WARN(get_logger(), "目标位姿 (mm, rad):");
-                RCLCPP_WARN(get_logger(), "  位置: x=%.2f, y=%.2f, z=%.2f", 
+                
+                // 输出目标位姿
+                RCLCPP_WARN(get_logger(), "目标位姿 (target_pose):");
+                RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
                     target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
-                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f, ry=%.4f, rz=%.4f", 
+                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
                     target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
+                
+                // 输出真实位姿并计算偏差
+                if (has_right_real_pose_) {
+                    // 将四元数转换为RPY
+                    tf2::Quaternion q(
+                        right_real_pose_.orientation.x,
+                        right_real_pose_.orientation.y,
+                        right_real_pose_.orientation.z,
+                        right_real_pose_.orientation.w
+                    );
+                    tf2::Matrix3x3 m(q);
+                    double real_roll, real_pitch, real_yaw;
+                    m.getRPY(real_roll, real_pitch, real_yaw);
+                    
+                    RCLCPP_WARN(get_logger(), "机械臂真实位姿 (real_pose):");
+                    RCLCPP_WARN(get_logger(), "  位置: x=%.2f mm, y=%.2f mm, z=%.2f mm", 
+                        right_real_pose_.position.x * 1000.0, right_real_pose_.position.y * 1000.0, right_real_pose_.position.z * 1000.0);
+                    RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f rad, ry=%.4f rad, rz=%.4f rad", 
+                        real_roll, real_pitch, real_yaw);
+                    
+                    // 计算位置偏差（real_pose单位是m，target_pose单位是mm）
+                    double dx = target_pose.tran.x - right_real_pose_.position.x * 1000.0;
+                    double dy = target_pose.tran.y - right_real_pose_.position.y * 1000.0;
+                    double dz = target_pose.tran.z - right_real_pose_.position.z * 1000.0;
+                    double pos_error = std::sqrt(dx*dx + dy*dy + dz*dz);
+                    
+                    // 计算姿态偏差
+                    double drx = std::abs(target_pose.rpy.rx - real_roll);
+                    double dry = std::abs(target_pose.rpy.ry - real_pitch);
+                    double drz = std::abs(target_pose.rpy.rz - real_yaw);
+                    
+                    RCLCPP_WARN(get_logger(), "位姿偏差:");
+                    RCLCPP_WARN(get_logger(), "  位置偏差: dx=%.2f mm, dy=%.2f mm, dz=%.2f mm, 总偏差=%.2f mm", 
+                        dx, dy, dz, pos_error);
+                    RCLCPP_WARN(get_logger(), "  姿态偏差: drx=%.4f rad (%.2f°), dry=%.4f rad (%.2f°), drz=%.4f rad (%.2f°)", 
+                        drx, drx*180.0/M_PI, dry, dry*180.0/M_PI, drz, drz*180.0/M_PI);
+                } else {
+                    RCLCPP_WARN(get_logger(), "⚠️  未收到机械臂真实位姿数据");
+                }
             }
             return false;
         }
@@ -709,6 +811,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_target_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_target_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;  // 订阅实际关节状态
+    rclcpp::Subscription<qyh_jaka_control_msgs::msg::RobotState>::SharedPtr robot_state_sub_;  // 订阅机械臂真实位姿
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_joint_pub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr right_joint_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ik_status_pub_;
@@ -739,6 +842,12 @@ private:
     JointValue current_right_joints_;
     bool has_current_left_{false};
     bool has_current_right_{false};
+    
+    // 机械臂真实位姿（从/jaka/robot_state获取）
+    geometry_msgs::msg::Pose left_real_pose_;
+    geometry_msgs::msg::Pose right_real_pose_;
+    bool has_left_real_pose_{false};
+    bool has_right_real_pose_{false};
     
     // 上次关节位置（用于速度检查）
     JointValue prev_left_joints_;

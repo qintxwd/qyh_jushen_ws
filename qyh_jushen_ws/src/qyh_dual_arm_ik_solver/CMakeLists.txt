@@ -17,6 +17,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(qyh_jaka_control_msgs REQUIRED)
 
 # Include directories
 include_directories(
@@ -44,6 +45,7 @@ ament_target_dependencies(dual_arm_ik_solver_node
   tf2
   tf2_ros
   tf2_geometry_msgs
+  qyh_jaka_control_msgs
 )
 target_link_libraries(dual_arm_ik_solver_node
   ${JAKA_API_LIB}
