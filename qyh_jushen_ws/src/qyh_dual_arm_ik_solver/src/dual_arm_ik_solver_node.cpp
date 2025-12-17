@@ -60,14 +60,26 @@ const double SAFETY_MARGIN_VEL = 0.8;     // 速度降到80%
 //     -0.089,-65.010,-0.34,-79.964,0.263,-99.974,-0.016 //单位为度
 // };
 
+// //定义一个最初的参考的关节位置结构体
+// std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_LEFT =
+// {
+//     0.,0.,0.,0.,0.,0.,0., //单位为弧度
+// };
+// std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT =
+// {
+//     0.,0.,0.,0.,0.,0.,0., //单位为弧度
+// };
+
 //定义一个最初的参考的关节位置结构体
+// # left joint = 0.004677, -1.030041, 0.003351, -1.398358, -0.001902, 1.397188, 0.000262
+// # right joint = -0.001571, -1.134639, -0.005952, -1.395653, 0.004590, -1.744875, -0.000279
 std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_LEFT =
 {
-    0.,0.,0.,0.,0.,0.,0., //单位为度
+    0.004677, -1.030041, 0.003351, -1.398358, -0.001902, 1.397188, 0.000262, //单位为弧度
 };
 std::array<double, 7> JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT =
 {
-    0.,0.,0.,0.,0.,0.,0., //单位为度
+    -0.001571, -1.134639, -0.005952, -1.395653, 0.004590, -1.744875, -0.000279, //单位为弧度
 };
 
 static inline double deg2rad(double d) { return d * M_PI / 180.0; }
@@ -190,11 +202,19 @@ private:
     {
         // 使用默认参考关节（从度转换为弧度）
         for (int i = 0; i < 7; i++) {
-            ref_left_joints_.jVal[i] = deg2rad(JAKA_ZU7_REF_DEFAULT_JOINT_LEFT[i]);
-            ref_right_joints_.jVal[i] = deg2rad(JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT[i]);
+            ref_left_joints_.jVal[i] = JAKA_ZU7_REF_DEFAULT_JOINT_LEFT[i];//deg2rad(JAKA_ZU7_REF_DEFAULT_JOINT_LEFT[i]);
+            ref_right_joints_.jVal[i] = JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT[i];//deg2rad(JAKA_ZU7_REF_DEFAULT_JOINT_RIGHT[i]);
         }
 
         RCLCPP_INFO(get_logger(), "✓ 参考关节位置已设置为默认值（度->弧度）");
+        RCLCPP_INFO(get_logger(), "  左臂参考关节位置:");
+        for (int i = 0; i < 7; i++) {
+            RCLCPP_INFO(get_logger(), "    关节 %d: %.4f rad", i + 1, ref_left_joints_.jVal[i]);
+        }
+        RCLCPP_INFO(get_logger(), "  右臂参考关节位置:");
+        for (int i = 0; i < 7; i++) {
+            RCLCPP_INFO(get_logger(), "    关节 %d: %.4f rad", i + 1, ref_right_joints_.jVal[i]);
+        }
     }
     
     void leftTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -224,6 +244,10 @@ private:
                 current_right_joints_.jVal[i] = msg->position[i + 7];
             }
             has_current_right_ = true;
+
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                "✓ 接收到当前关节状态 (左臂第1关节: %.3f rad, 右臂第1关节: %.3f rad)",
+                current_left_joints_.jVal[0], current_right_joints_.jVal[0]);
         }
     }
     
@@ -431,6 +455,16 @@ private:
             if (left_error_count_++ % 100 == 0) {
                 RCLCPP_WARN(get_logger(), "左臂IK失败 (错误计数: %d, 错误码: %d)", 
                     left_error_count_, ret);
+                    //输出一下当前的ref_joints_值，以及target_pose值，方便调试
+                RCLCPP_WARN(get_logger(), "当前参考关节位置:");
+                for(int i=0; i<7; i++) {
+                    RCLCPP_WARN(get_logger(), "  关节 %d: %.4f", i+1, ref_joints->jVal[i]);
+                }
+                RCLCPP_WARN(get_logger(), "目标位姿 (mm, rad):");
+                RCLCPP_WARN(get_logger(), "  位置: x=%.2f, y=%.2f, z=%.2f", 
+                    target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
+                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f, ry=%.4f, rz=%.4f", 
+                    target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
             }
             return false;
         }
@@ -590,6 +624,15 @@ private:
             if (right_error_count_++ % 100 == 0) {
                 RCLCPP_WARN(get_logger(), "右臂IK失败 (错误计数: %d, 错误码: %d)", 
                     right_error_count_, ret);
+                RCLCPP_WARN(get_logger(), "当前参考关节位置:");
+                for(int i=0; i<7; i++) {
+                    RCLCPP_WARN(get_logger(), "  关节 %d: %.4f", i+1, ref_joints->jVal[i]);
+                }
+                RCLCPP_WARN(get_logger(), "目标位姿 (mm, rad):");
+                RCLCPP_WARN(get_logger(), "  位置: x=%.2f, y=%.2f, z=%.2f", 
+                    target_pose.tran.x, target_pose.tran.y, target_pose.tran.z);
+                RCLCPP_WARN(get_logger(), "  姿态: rx=%.4f, ry=%.4f, rz=%.4f", 
+                    target_pose.rpy.rx, target_pose.rpy.ry, target_pose.rpy.rz);
             }
             return false;
         }

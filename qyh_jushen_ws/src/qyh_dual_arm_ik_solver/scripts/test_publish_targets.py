@@ -7,11 +7,31 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 import math
 
+# 第一套，机械臂完全伸直，所有关节角度为0时的正解位姿（单位mm和rad）：
 # left joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
 # right joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
 # left pos = -0.626130, 989.737160, 219.885132, 1.572874, -0.000000, -3.141593
 # right pos = -0.679880, -989.449941, 217.950931, 1.574990, 0.000000, 0.000000
 
+# 第二套，机械臂类似人将双手向前合并的样子
+# left pos = 608.320432, 323.753614, 215.913915, 90.447975, -0.399704, 120.914392
+# right pos = 574.599277, -318.357499, 216.269154, 90.406400, 0.482981, 45.002262
+# left joint = 0.004677, -1.030041, 0.003351, -1.398358, -0.001902, 1.397188, 0.000262
+# right joint = -0.001571, -1.134639, -0.005952, -1.395653, 0.004590, -1.744875, -0.000279
+presets = [
+    {
+        'left_pos': [-0.626130, 989.737160, 219.885132, 1.572874, 0.0, -3.141593],
+        'right_pos': [-0.679880, -989.449941, 217.950931, 1.574990, 0.0, 0.0],
+        'left_joint': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        'right_joint': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    },
+    {
+        'left_pos': [608.320432, 323.753614, 215.913915, 1.579447975, -0.006976, 2.110914392],
+        'right_pos': [574.599277, -318.357499, 216.269154, 1.579406400, 0.008426, 0.785002262],
+        'left_joint': [0.004677, -1.030041, 0.003351, -1.398358, -0.001902, 1.397188, 0.000262],
+        'right_joint': [-0.001571, -1.134639, -0.005952, -1.395653, 0.004590, -1.744875, -0.000279],
+    },
+]
 class IKTestPublisher(Node):
     def __init__(self):
         super().__init__('ik_test_publisher')
@@ -21,6 +41,9 @@ class IKTestPublisher(Node):
             PoseStamped, '/teleop/left_hand/target', 10)
         self.right_pub = self.create_publisher(
             PoseStamped, '/teleop/right_hand/target', 10)
+        
+        # 使用第几套预设
+        self.preset_index = 1
         
         # 定时发布（10Hz）
         self.timer = self.create_timer(0.1, self.publish_test_poses)
@@ -39,13 +62,13 @@ class IKTestPublisher(Node):
         left_pose = PoseStamped()
         left_pose.header.stamp = self.get_clock().now().to_msg()
         left_pose.header.frame_id = 'base_link_left'
-        left_pose.pose.position.x = -0.626130 / 1000.0
-        left_pose.pose.position.y = 989.737160 / 1000.0
-        left_pose.pose.position.z = 219.885132 / 1000.0
+        left_pose.pose.position.x = presets[self.preset_index]['left_pos'][0] / 1000.0
+        left_pose.pose.position.y = presets[self.preset_index]['left_pos'][1] / 1000.0 +  self.preset_index * 0.02 * math.sin(self.t + math.pi)
+        left_pose.pose.position.z = presets[self.preset_index]['left_pos'][2] / 1000.0 + self.preset_index * 0.02 * math.sin(self.t)
         
-        left_roll = 1.572874
-        left_pitch = 0.0
-        left_yaw = -3.141593
+        left_roll = presets[self.preset_index]['left_pos'][3]
+        left_pitch = presets[self.preset_index]['left_pos'][4]
+        left_yaw = presets[self.preset_index]['left_pos'][5]
         # 将 RPY 转为四元数
         cr = math.cos(left_roll * 0.5)
         sr = math.sin(left_roll * 0.5)
@@ -65,13 +88,13 @@ class IKTestPublisher(Node):
         right_pose = PoseStamped()
         right_pose.header.stamp = self.get_clock().now().to_msg()
         right_pose.header.frame_id = 'base_link_right'
-        right_pose.pose.position.x = -0.679880 / 1000.0
-        right_pose.pose.position.y = -989.449941 / 1000.0
-        right_pose.pose.position.z = 217.950931 / 1000.0
+        right_pose.pose.position.x = presets[self.preset_index]['right_pos'][0] / 1000.0
+        right_pose.pose.position.y = presets[self.preset_index]['right_pos'][1] / 1000.0 + self.preset_index * 0.02 * math.sin(self.t + math.pi)
+        right_pose.pose.position.z = presets[self.preset_index]['right_pos'][2] / 1000.0 + self.preset_index * 0.02 * math.sin(self.t)
         
-        right_roll = 1.574990
-        right_pitch = 0.0
-        right_yaw = 0.0
+        right_roll = presets[self.preset_index]['right_pos'][3]
+        right_pitch = presets[self.preset_index]['right_pos'][4]
+        right_yaw = presets[self.preset_index]['right_pos'][5]
         # 将 RPY 转为四元数
         cr = math.cos(right_roll * 0.5)
         sr = math.sin(right_roll * 0.5)
