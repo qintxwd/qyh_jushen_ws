@@ -62,5 +62,13 @@
     collision_enabled: true
     collision_level: 2  # 0-5, higher = more sensitive
 
+    # IK求解器参数 (VR遥操作模式)
+    ik_solver:
+      enabled: false  # true: 启用IK模式(订阅VR位姿), false: 标准Bridge模式(订阅关节指令)
+      target_x_left: false  # false: 目标坐标系X轴向前, true: X轴向左
+      has_z_offset: true  # 是否应用Z轴偏移补偿
+      left_z_offset: 0.219885132  # 左臂零位Z偏移(m)
+      right_z_offset: 0.217950931  # 右臂零位Z偏移(m)
+
   
   

@@ -18,6 +18,10 @@ SmoothServoBridge::SmoothServoBridge(
       interpolation_weight_(0.5),
       has_last_output_(false),
       command_timeout_sec_(0.5),  // 默认500ms无指令则失效
+      stale_threshold_sec_(0.05),  // 50ms后缓存过期，使用current_position
+      velocity_limits_(7, 2.0),  // 默认2.0 rad/s
+      velocity_safety_factor_(0.8),  // 默认80%安全速度
+      cycle_time_sec_(1.0 / target_frequency_hz),
       last_command_time_(std::chrono::steady_clock::now()),
       last_output_time_(std::chrono::steady_clock::now())
 {
@@ -25,11 +29,14 @@ SmoothServoBridge::SmoothServoBridge(
     RCLCPP_INFO(logger_, "  Buffer size: %zu", buffer_size_);
     RCLCPP_INFO(logger_, "  Target frequency: %.1f Hz", target_frequency_hz_);
     RCLCPP_INFO(logger_, "  Target period: %.2f ms", target_period_ms_);
+    RCLCPP_INFO(logger_, "  Cycle time: %.1f ms", cycle_time_sec_ * 1000.0);
     RCLCPP_INFO(logger_, "  Interpolation: %s", interpolation_enabled_ ? "enabled" : "disabled");
+    RCLCPP_INFO(logger_, "  Velocity safety factor: %.1f%%", velocity_safety_factor_ * 100.0);
     RCLCPP_INFO(logger_, "  Command timeout: %.1f sec (auto re-sync on idle)", command_timeout_sec_);
 }
 
-bool SmoothServoBridge::addCommand(const std::vector<double>& joint_positions)
+bool SmoothServoBridge::addCommand(const std::vector<double>& joint_positions,
+                                    const std::vector<double>& current_position)
 {
     if (joint_positions.size() != 7) {
         RCLCPP_ERROR(logger_,
@@ -37,26 +44,108 @@ bool SmoothServoBridge::addCommand(const std::vector<double>& joint_positions)
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (!current_position.empty() && current_position.size() != 7) {
+        RCLCPP_ERROR(logger_,
+            "Invalid current position size: %zu (expected 7)", current_position.size());
+        return false;
+    }
     
-    // 检查缓冲器是否已满
-    if (command_buffer_.size() >= buffer_size_) {
-        // 移除最旧的命令
-        command_buffer_.pop_front();
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    auto now = std::chrono::steady_clock::now();
+    
+    // 智能选择起始位置
+    std::vector<double> from_position;
+    bool using_current = false;
+    
+    if (!command_buffer_.empty()) {
+        // Buffer非空，检查最后一个命令的时间戳
+        const auto& last_cmd = command_buffer_.back();
+        auto time_since_last = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - last_cmd.timestamp
+        ).count() / 1000000.0;
         
+        if (time_since_last > stale_threshold_sec_ && !current_position.empty()) {
+            // 缓存过期且有当前位置，使用当前真实位置
+            from_position = current_position;
+            using_current = true;
+            RCLCPP_INFO(logger_, "[Bridge] Using current position (last_cmd %.1fms ago > %.1fms threshold)",
+                        time_since_last * 1000.0, stale_threshold_sec_ * 1000.0);
+        } else {
+            // 缓存新鲜，使用buffer最后一个命令
+            from_position = last_cmd.positions;
+        }
+    } else if (has_last_output_) {
+        // Buffer为空，检查last_output的时间戳
+        auto time_since_output = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - last_output_command_.timestamp
+        ).count() / 1000000.0;
+        
+        if (time_since_output > stale_threshold_sec_ && !current_position.empty()) {
+            // 缓存过期且有当前位置，使用当前真实位置
+            from_position = current_position;
+            using_current = true;
+            RCLCPP_INFO(logger_, "[Bridge] Using current position (last_output %.1fms ago > %.1fms threshold)",
+                        time_since_output * 1000.0, stale_threshold_sec_ * 1000.0);
+        } else {
+            // 缓存新鲜，使用last_output
+            from_position = last_output_command_.positions;
+        }
+    } else {
+        // 还没有初始化
+        if (!current_position.empty()) {
+            from_position = current_position;
+            using_current = true;
+            RCLCPP_INFO(logger_, "[Bridge] First command, using current position");
+        } else {
+            // 没有current_position，直接添加
+            command_buffer_.emplace_back(joint_positions);
+            last_command_time_ = now;
+            RCLCPP_INFO(logger_, "[Bridge] First command added (no interpolation): [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                        joint_positions[0], joint_positions[1], joint_positions[2],
+                        joint_positions[3], joint_positions[4], joint_positions[5],
+                        joint_positions[6]);
+            return true;
+        }
+    }
+    
+    // 计算需要的时间（基于速度限制）
+    double required_time = calculateRequiredTime(from_position, joint_positions);
+    
+    // 如果需要的时间超过两倍周期，需要插入中间点
+    if (required_time > 2.0 * cycle_time_sec_) {
+        std::vector<std::vector<double>> intermediate_points;
+        insertIntermediatePoints(from_position, joint_positions, intermediate_points);
+        
+        // 添加中间点
+        for (const auto& point : intermediate_points) {
+            if (command_buffer_.size() >= buffer_size_) {
+                command_buffer_.pop_front();
+                std::lock_guard<std::mutex> stats_lock(stats_mutex_);
+                stats_.buffer_overflow_count++;
+            }
+            command_buffer_.emplace_back(point);
+        }
+        
+        RCLCPP_INFO(logger_, "[Bridge] Inserted %zu intermediate points (required_time=%.1fms, cycle=%.1fms)%s",
+                    intermediate_points.size(), required_time * 1000.0, cycle_time_sec_ * 1000.0,
+                    using_current ? " [from current pos]" : "");
+    }
+    
+    // 添加最终目标
+    if (command_buffer_.size() >= buffer_size_) {
+        command_buffer_.pop_front();
         std::lock_guard<std::mutex> stats_lock(stats_mutex_);
         stats_.buffer_overflow_count++;
     }
-    
-    // 添加新命令
     command_buffer_.emplace_back(joint_positions);
     
-    last_command_time_ = std::chrono::steady_clock::now();
+    last_command_time_ = now;
     
-    RCLCPP_INFO(logger_, "[Bridge] Command added: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f], buffer_size=%zu",
+    RCLCPP_INFO(logger_, "[Bridge] Command added: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f], buffer_size=%zu%s",
                 joint_positions[0], joint_positions[1], joint_positions[2],
                 joint_positions[3], joint_positions[4], joint_positions[5],
-                joint_positions[6], command_buffer_.size());
+                joint_positions[6], command_buffer_.size(),
+                using_current ? " [from current pos]" : "");
     
     return true;
 }
@@ -275,6 +364,77 @@ void SmoothServoBridge::updatePerformanceStats(bool success, double latency_ms)
         stats_.command_count = 0;
         stats_.last_update_time = now;
     }
+}
+
+void SmoothServoBridge::setVelocityLimits(const std::vector<double>& velocity_limits)
+{
+    if (velocity_limits.size() != 7) {
+        RCLCPP_ERROR(logger_, "Invalid velocity limits size: %zu (expected 7)", 
+                     velocity_limits.size());
+        return;
+    }
+    velocity_limits_ = velocity_limits;
+    RCLCPP_INFO(logger_, "Velocity limits updated: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f] rad/s",
+                velocity_limits[0], velocity_limits[1], velocity_limits[2],
+                velocity_limits[3], velocity_limits[4], velocity_limits[5],
+                velocity_limits[6]);
+}
+
+void SmoothServoBridge::setVelocitySafetyFactor(double factor)
+{
+    velocity_safety_factor_ = std::clamp(factor, 0.1, 1.0);
+    RCLCPP_INFO(logger_, "Velocity safety factor set to: %.1f%%", velocity_safety_factor_ * 100.0);
+}
+
+double SmoothServoBridge::calculateRequiredTime(
+    const std::vector<double>& from,
+    const std::vector<double>& to
+) const
+{
+    double max_time = 0.0;
+    
+    for (size_t i = 0; i < 7; ++i) {
+        double delta = std::abs(to[i] - from[i]);
+        double max_velocity = velocity_limits_[i] * velocity_safety_factor_;
+        double required_time = delta / max_velocity;
+        max_time = std::max(max_time, required_time);
+    }
+    
+    return max_time;
+}
+
+void SmoothServoBridge::insertIntermediatePoints(
+    const std::vector<double>& from,
+    const std::vector<double>& to,
+    std::vector<std::vector<double>>& intermediate_points
+) const
+{
+    intermediate_points.clear();
+    
+    // 计算需要的时间
+    double required_time = calculateRequiredTime(from, to);
+    
+    // 计算需要的周期数（向上取整）
+    int num_cycles = static_cast<int>(std::ceil(required_time / cycle_time_sec_));
+    
+    // 如果只需要1个周期，不需要插入中间点
+    if (num_cycles <= 1) {
+        return;
+    }
+    
+    // 插入 num_cycles-1 个中间点
+    // 例如：num_cycles=3，需要2个中间点：I1(1/3), I2(2/3)
+    for (int i = 1; i < num_cycles; ++i) {
+        double t = static_cast<double>(i) / static_cast<double>(num_cycles);
+        std::vector<double> point(7);
+        for (size_t j = 0; j < 7; ++j) {
+            point[j] = from[j] + t * (to[j] - from[j]);
+        }
+        intermediate_points.push_back(point);
+    }
+    
+    RCLCPP_DEBUG(logger_, "[Bridge] Inserted %d intermediate points for %d cycles (%.1fms total)",
+                 num_cycles - 1, num_cycles, required_time * 1000.0);
 }
 
 } // namespace qyh_jaka_control

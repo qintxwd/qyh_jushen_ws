@@ -3,6 +3,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <qyh_jaka_control_msgs/msg/jaka_servo_status.hpp>
 #include <qyh_jaka_control_msgs/msg/robot_state.hpp>
 #include <deque>
@@ -20,6 +21,11 @@
 #include <qyh_jaka_control_msgs/srv/set_payload.hpp>
 #include <qyh_jaka_control_msgs/srv/get_payload.hpp>
 #include <qyh_jaka_control_msgs/srv/compute_ik.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -29,6 +35,34 @@
 #include <cmath>
 
 using namespace std::chrono_literals;
+
+// ==================== IK求解相关定义 ====================
+// JAKA Zu7 关节限位和速度限制
+struct JointLimits {
+    double pos_min;  // 负限位（弧度）
+    double pos_max;  // 正限位（弧度）
+    double vel_max;  // 速度限制（弧度/秒）
+};
+
+const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
+    {-6.2832, 6.2832, 1.5708},   // 关节1: ±360°, 90°/s
+    {-1.8326, 1.8326, 1.5708},   // 关节2: ±105°, 90°/s
+    {-6.2832, 6.2832, 2.0944},   // 关节3: ±360°, 120°/s
+    {-2.5307, 0.5236, 2.0944},   // 关节4: -145°~30°, 120°/s
+    {-6.2832, 6.2832, 2.6180},   // 关节5: ±360°, 150°/s
+    {-1.8326, 1.8326, 2.6180},   // 关节6: ±105°, 150°/s
+    {-6.2832, 6.2832, 2.6180}    // 关节7: ±360°, 150°/s
+}};
+
+const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
+const double SAFETY_MARGIN_VEL = 0.8;     // 允许超过标称速度20%
+
+// 归一化角度到[-π, π]范围
+static inline double normalizeAngle(double angle) {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
 
 // ==================== 完整轨迹平滑器 ====================
 /**
@@ -198,6 +232,16 @@ public:
         left_bridge_->enableInterpolation(enable_interp);
         right_bridge_->setInterpolationWeight(interp_weight);
         right_bridge_->enableInterpolation(enable_interp);
+        
+        // 设置JAKA Zu7的速度限制（从关节限位常量中提取）
+        std::vector<double> velocity_limits(7);
+        for (size_t i = 0; i < 7; ++i) {
+            velocity_limits[i] = JAKA_ZU7_LIMITS[i].vel_max;
+        }
+        left_bridge_->setVelocityLimits(velocity_limits);
+        right_bridge_->setVelocityLimits(velocity_limits);
+        left_bridge_->setVelocitySafetyFactor(SAFETY_MARGIN_VEL);
+        right_bridge_->setVelocitySafetyFactor(SAFETY_MARGIN_VEL);
 
         // Publishers
         status_pub_ = create_publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>("/jaka/servo/status", 10);
@@ -213,6 +257,45 @@ public:
         right_bridge_sub_ = create_subscription<sensor_msgs::msg::JointState>(
             "/right_arm/joint_command", qos,
             std::bind(&JakaControlNode::rightBridgeCallback, this, std::placeholders::_1));
+
+        // IK求解模式参数
+        declare_parameter<bool>("ik_solver.enabled", false);
+        declare_parameter<bool>("ik_solver.target_x_left", false);
+        declare_parameter<bool>("ik_solver.has_z_offset", true);
+        declare_parameter<double>("ik_solver.left_z_offset", 0.219885132);
+        declare_parameter<double>("ik_solver.right_z_offset", 0.217950931);
+        
+        ik_enabled_ = get_parameter("ik_solver.enabled").as_bool();
+        target_x_left_ = get_parameter("ik_solver.target_x_left").as_bool();
+        has_z_offset_ = get_parameter("ik_solver.has_z_offset").as_bool();
+        left_z_offset_ = get_parameter("ik_solver.left_z_offset").as_double();
+        right_z_offset_ = get_parameter("ik_solver.right_z_offset").as_double();
+        
+        // IK模式：订阅VR目标位姿
+        if (ik_enabled_) {
+            RCLCPP_INFO(get_logger(), "🎯 IK求解模式已启用");
+            RCLCPP_INFO(get_logger(), "  target_x_left=%s, has_z_offset=%s", 
+                target_x_left_ ? "true" : "false", 
+                has_z_offset_ ? "true" : "false");
+            
+            // 初始化TF监听器
+            tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+            tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+            
+            // 订阅VR目标位姿
+            left_vr_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+                "/teleop/left_hand/target", qos,
+                std::bind(&JakaControlNode::leftVRTargetCallback, this, std::placeholders::_1));
+            
+            right_vr_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+                "/teleop/right_hand/target", qos,
+                std::bind(&JakaControlNode::rightVRTargetCallback, this, std::placeholders::_1));
+            
+            RCLCPP_INFO(get_logger(), "  ✓ TF监听器已初始化");
+            RCLCPP_INFO(get_logger(), "  ✓ 订阅VR目标位姿话题");
+        } else {
+            RCLCPP_INFO(get_logger(), "📋 使用标准Bridge模式（关节空间指令）");
+        }
 
         // Services (Basic Control)
         srv_power_on_ = create_service<std_srvs::srv::Trigger>(
@@ -575,20 +658,15 @@ private:
             RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
-            // ⭐ 智能重新同步：只在长时间空闲（5秒+）后才从当前位置重新初始化
-            // 这样避免单次命令的回弹，同时保证长时间空闲后的安全性
-            auto idle_time = left_bridge_->getIdleTime();
-            if (left_bridge_->isEmpty() && idle_time > 5.0) {
-                JointValue current_pos;
-                if (jaka_interface_.getJointPositions(0, current_pos)) {
-                    std::vector<double> current_joints(7);
-                    for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
-                    left_bridge_->initializeFromCurrent(current_joints);
-                    RCLCPP_INFO(get_logger(), "[Left] Re-synced from current position after %.1fs idle", idle_time);
-                }
+            // 获取当前真实位置传给Bridge，由Bridge智能决定是否使用
+            std::vector<double> current_joints(7);
+            JointValue current_pos;
+            if (jaka_interface_.getJointPositions(0, current_pos)) {
+                for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
+                left_bridge_->addCommand(positions, current_joints);
+            } else {
+                left_bridge_->addCommand(positions);
             }
-            
-            left_bridge_->addCommand(positions);
         } else {
             RCLCPP_WARN(get_logger(), "[Callback] Command rejected: servo_running=%d, size=%zu (need: true & >=7)", 
                         servo_running_.load(), msg->position.size());
@@ -603,23 +681,259 @@ private:
             RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
-            // ⭐ 智能重新同步：只在长时间空闲（5秒+）后才从当前位置重新初始化
-            auto idle_time = right_bridge_->getIdleTime();
-            if (right_bridge_->isEmpty() && idle_time > 5.0) {
-                JointValue current_pos;
-                if (jaka_interface_.getJointPositions(1, current_pos)) {
-                    std::vector<double> current_joints(7);
-                    for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
-                    right_bridge_->initializeFromCurrent(current_joints);
-                    RCLCPP_INFO(get_logger(), "[Right] Re-synced from current position after %.1fs idle", idle_time);
-                }
+            // 获取当前真实位置传给Bridge，由Bridge智能决定是否使用
+            std::vector<double> current_joints(7);
+            JointValue current_pos;
+            if (jaka_interface_.getJointPositions(1, current_pos)) {
+                for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
+                right_bridge_->addCommand(positions, current_joints);
+            } else {
+                right_bridge_->addCommand(positions);
             }
-            
-            right_bridge_->addCommand(positions);
         } else {
             RCLCPP_WARN(get_logger(), "[Callback] Command rejected: servo_running=%d, size=%zu (need: true & >=7)", 
                         servo_running_.load(), msg->position.size());
         }
+    }
+
+    // ==================== IK求解回调函数 ====================
+    void leftVRTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+        left_target_ = msg;
+        has_left_target_ = true;
+        
+        if (servo_running_) {
+            solveLeftArmIK();
+        }
+    }
+    
+    void rightVRTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+        right_target_ = msg;
+        has_right_target_ = true;
+        
+        if (servo_running_) {
+            solveRightArmIK();
+        }
+    }
+
+    // ==================== IK求解函数 ====================
+    bool solveLeftArmIK() {
+        if (!has_left_target_ || !servo_running_) return false;
+        
+        // 检查消息新鲜度
+        auto msg_age = (now() - left_target_->header.stamp).seconds();
+        if (msg_age > 1.0) {
+            has_left_target_ = false;
+            return false;
+        }
+        
+        // TF坐标系转换
+        geometry_msgs::msg::PoseStamped target_in_base_left;
+        try {
+            geometry_msgs::msg::PoseStamped input_pose = *left_target_;
+            input_pose.header.stamp = rclcpp::Time(0);
+            target_in_base_left = tf_buffer_->transform(
+                input_pose, "base_link_left", tf2::durationFromSec(0.1));
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                "左臂TF转换失败: %s", ex.what());
+            return false;
+        }
+        
+        // 提取位姿
+        tf2::Quaternion q_base_left(
+            target_in_base_left.pose.orientation.x,
+            target_in_base_left.pose.orientation.y,
+            target_in_base_left.pose.orientation.z,
+            target_in_base_left.pose.orientation.w);
+        
+        tf2::Vector3 pos_base_left(
+            target_in_base_left.pose.position.x,
+            target_in_base_left.pose.position.y,
+            target_in_base_left.pose.position.z);
+        
+        // Z轴偏移
+        if (has_z_offset_) {
+            pos_base_left.setZ(pos_base_left.z() + left_z_offset_);
+        }
+        
+        // 末端坐标系校正
+        tf2::Matrix3x3 R_correction(
+            0.0,  1.0,  0.0,
+            0.0,  0.0,  1.0,
+            1.0,  0.0,  0.0);
+        
+        if (target_x_left_) {
+            R_correction = tf2::Matrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+        }
+        
+        tf2::Matrix3x3 R_base_left(q_base_left);
+        tf2::Matrix3x3 R_corrected = R_base_left * R_correction.transpose();
+        
+        tf2::Quaternion q_corrected;
+        R_corrected.getRotation(q_corrected);
+        q_corrected.normalize();
+        
+        // 转换到JAKA格式
+        CartesianPose target_pose;
+        target_pose.tran.x = pos_base_left.x() * 1000.0;  // m -> mm
+        target_pose.tran.y = pos_base_left.y() * 1000.0;
+        target_pose.tran.z = pos_base_left.z() * 1000.0;
+        
+        tf2::Matrix3x3 m(q_corrected);
+        double roll, pitch, yaw;
+        m.getRPY(roll, pitch, yaw);
+        
+        target_pose.rpy.rx = roll;
+        target_pose.rpy.ry = pitch;
+        target_pose.rpy.rz = yaw;
+        
+        // 直接获取当前真实关节角度作为IK参考
+        JointValue ref_joints;
+        jaka_interface_.get_joint_position(0, ref_joints);
+        
+        // 调用IK求解
+        JointValue ik_result;
+        if (jaka_interface_.kineInverse(0, ref_joints, target_pose, ik_result)) {
+            // 安全检查
+            if (!checkJointLimits(ik_result, "左臂")) {
+                return false;
+            }
+            
+            // 直接添加到Bridge，传入当前位置（ref_joints就是刚获取的当前位置）
+            std::vector<double> positions(7);
+            std::vector<double> current_joints(7);
+            for (size_t i = 0; i < 7; ++i) {
+                positions[i] = ik_result.jVal[i];
+                current_joints[i] = ref_joints.jVal[i];
+            }
+            
+            left_bridge_->addCommand(positions, current_joints);
+            ik_left_success_count_++;
+            return true;
+        } else {
+            ik_left_error_count_++;
+            if (ik_left_error_count_ % 100 == 0) {
+                RCLCPP_WARN(get_logger(), "[IK] 左臂IK失败 (错误计数: %d)", ik_left_error_count_);
+            }
+            return false;
+        }
+    }
+    
+    bool solveRightArmIK() {
+        if (!has_right_target_ || !servo_running_) return false;
+        
+        // 检查消息新鲜度
+        auto msg_age = (now() - right_target_->header.stamp).seconds();
+        if (msg_age > 1.0) {
+            has_right_target_ = false;
+            return false;
+        }
+        
+        // TF坐标系转换
+        geometry_msgs::msg::PoseStamped target_in_base_right;
+        try {
+            geometry_msgs::msg::PoseStamped input_pose = *right_target_;
+            input_pose.header.stamp = rclcpp::Time(0);
+            target_in_base_right = tf_buffer_->transform(
+                input_pose, "base_link_right", tf2::durationFromSec(0.1));
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                "右臂TF转换失败: %s", ex.what());
+            return false;
+        }
+        
+        // 提取位姿
+        tf2::Quaternion q_base_right(
+            target_in_base_right.pose.orientation.x,
+            target_in_base_right.pose.orientation.y,
+            target_in_base_right.pose.orientation.z,
+            target_in_base_right.pose.orientation.w);
+        
+        tf2::Vector3 pos_base_right(
+            target_in_base_right.pose.position.x,
+            target_in_base_right.pose.position.y,
+            target_in_base_right.pose.position.z);
+        
+        // Z轴偏移
+        if (has_z_offset_) {
+            pos_base_right.setZ(pos_base_right.z() + right_z_offset_);
+        }
+        
+        // 末端坐标系校正
+        tf2::Matrix3x3 R_correction(
+            0.0,  1.0,  0.0,
+            0.0,  0.0,  1.0,
+            1.0,  0.0,  0.0);
+        
+        if (target_x_left_) {
+            R_correction = tf2::Matrix3x3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+        }
+        
+        tf2::Matrix3x3 R_base_right(q_base_right);
+        tf2::Matrix3x3 R_corrected = R_base_right * R_correction.transpose();
+        
+        tf2::Quaternion q_corrected;
+        R_corrected.getRotation(q_corrected);
+        q_corrected.normalize();
+        
+        // 转换到JAKA格式
+        CartesianPose target_pose;
+        target_pose.tran.x = pos_base_right.x() * 1000.0;  // m -> mm
+        target_pose.tran.y = pos_base_right.y() * 1000.0;
+        target_pose.tran.z = pos_base_right.z() * 1000.0;
+        
+        tf2::Matrix3x3 m(q_corrected);
+        double roll, pitch, yaw;
+        m.getRPY(roll, pitch, yaw);
+        
+        target_pose.rpy.rx = roll;
+        target_pose.rpy.ry = pitch;
+        target_pose.rpy.rz = yaw;
+        
+        // 直接获取当前真实关节角度作为IK参考
+        JointValue ref_joints;
+        jaka_interface_.get_joint_position(1, ref_joints);
+        
+        // 调用IK求解
+        JointValue ik_result;
+        if (jaka_interface_.kineInverse(1, ref_joints, target_pose, ik_result)) {
+            // 安全检查
+            if (!checkJointLimits(ik_result, "右臂")) {
+                return false;
+            }
+            
+            // 直接添加到Bridge，传入当前位置（ref_joints就是刚获取的当前位置）
+            std::vector<double> positions(7);
+            std::vector<double> current_joints(7);
+            for (size_t i = 0; i < 7; ++i) {
+                positions[i] = ik_result.jVal[i];
+                current_joints[i] = ref_joints.jVal[i];
+            }
+            
+            right_bridge_->addCommand(positions, current_joints);
+            ik_right_success_count_++;
+            return true;
+        } else {
+            ik_right_error_count_++;
+            if (ik_right_error_count_ % 100 == 0) {
+                RCLCPP_WARN(get_logger(), "[IK] 右臂IK失败 (错误计数: %d)", ik_right_error_count_);
+            }
+            return false;
+        }
+    }
+    
+    bool checkJointLimits(const JointValue& joints, const std::string& arm_name) {
+        for (int i = 0; i < 7; ++i) {
+            if (joints.jVal[i] < JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS ||
+                joints.jVal[i] > JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                    "[IK] %s 关节%d超出限位: %.3f (限位: %.3f ~ %.3f)",
+                    arm_name.c_str(), i+1, joints.jVal[i],
+                    JAKA_ZU7_LIMITS[i].pos_min, JAKA_ZU7_LIMITS[i].pos_max);
+                return false;
+            }
+        }
+        return true;
     }
 
     // ==================== 基础控制服务 ====================
@@ -1002,6 +1316,27 @@ private:
     int64_t last_cycle_duration_us_ = 0;
     uint32_t cmd_index_ = 0;
 
+    // IK求解相关
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
+    bool ik_enabled_{false};
+    bool target_x_left_{false};
+    bool has_z_offset_{true};
+    double left_z_offset_{0.219885132};
+    double right_z_offset_{0.217950931};
+    
+    // IK目标位姿
+    geometry_msgs::msg::PoseStamped::SharedPtr left_target_;
+    geometry_msgs::msg::PoseStamped::SharedPtr right_target_;
+    bool has_left_target_{false};
+    bool has_right_target_{false};
+    
+    // IK统计
+    int ik_left_success_count_{0};
+    int ik_right_success_count_{0};
+    int ik_left_error_count_{0};
+    int ik_right_error_count_{0};
+
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::RobotState>::SharedPtr robot_state_pub_;
@@ -1009,6 +1344,10 @@ private:
     
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_bridge_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr right_bridge_sub_;
+    
+    // IK模式订阅
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_vr_target_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_vr_target_sub_;
 
     // 服务
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_on_;

@@ -81,9 +81,11 @@ public:
     /**
      * @brief 添加新的关节命令到缓冲器
      * @param joint_positions 7 DOF关节位置
+     * @param current_position 当前机械臂真实位置（可选）
      * @return true if successful
      */
-    bool addCommand(const std::vector<double>& joint_positions);
+    bool addCommand(const std::vector<double>& joint_positions,
+                    const std::vector<double>& current_position = std::vector<double>());
     
     /**
      * @brief 获取插值后的关节命令（用于125Hz定时器）
@@ -143,6 +145,18 @@ public:
      * @return true if successful
      */
     bool initializeFromCurrent(const std::vector<double>& current_positions);
+    
+    /**
+     * @brief 设置关节速度限制（rad/s）
+     * @param velocity_limits 7个关节的最大速度限制
+     */
+    void setVelocityLimits(const std::vector<double>& velocity_limits);
+    
+    /**
+     * @brief 设置速度安全系数
+     * @param factor 安全系数（例如0.8表示使用80%的最大速度）
+     */
+    void setVelocitySafetyFactor(double factor);
 
 private:
     rclcpp::Logger logger_;
@@ -166,6 +180,12 @@ private:
     
     // 超时重新同步设置
     double command_timeout_sec_;  // 无指令超时时间（秒），超时后自动失效last_output
+    double stale_threshold_sec_;  // 缓存过期阈值（秒），超过此时间使用current_position而非缓存
+    
+    // 速度限制
+    std::vector<double> velocity_limits_;  // 每个关节的最大速度 (rad/s)
+    double velocity_safety_factor_;  // 速度安全系数
+    double cycle_time_sec_;  // 控制周期（秒）
     
     // 性能统计
     ServoPerformanceStats stats_;
@@ -183,6 +203,27 @@ private:
         const std::vector<double>& from,
         const std::vector<double>& to,
         double weight
+    ) const;
+    
+    /**
+     * @brief 计算从from到to需要的时间（基于速度限制）
+     * @return 需要的时间（秒）
+     */
+    double calculateRequiredTime(
+        const std::vector<double>& from,
+        const std::vector<double>& to
+    ) const;
+    
+    /**
+     * @brief 在两个位置之间插入中间点（满足速度限制）
+     * @param from 起始位置
+     * @param to 目标位置
+     * @param intermediate_points 输出：中间点列表
+     */
+    void insertIntermediatePoints(
+        const std::vector<double>& from,
+        const std::vector<double>& to,
+        std::vector<std::vector<double>>& intermediate_points
     ) const;
     
     /**
