@@ -469,8 +469,8 @@ private:
         // 无论servo是否运行，都需要更新状态缓存供publishStatus使用
         jaka_interface_.getJointPositions(0, cached_left_joints_);
         jaka_interface_.getJointPositions(1, cached_right_joints_);
-        jaka_interface_.getCartesianPosition(0, cached_left_pose_);
-        jaka_interface_.getCartesianPosition(1, cached_right_pose_);
+        jaka_interface_.getCartesianPose(0, cached_left_pose_);
+        jaka_interface_.getCartesianPose(1, cached_right_pose_);
         has_cached_state_ = true;
 
         // 如果伺服未运行，只更新状态缓存，不执行伺服命令
@@ -579,34 +579,27 @@ private:
             robot_state_msg.enabled = enabled_;
             
             // 关节位置
-            robot_state_msg.left_joint_positions.resize(7);
-            robot_state_msg.right_joint_positions.resize(7);
             for (size_t i = 0; i < 7; ++i) {
                 robot_state_msg.left_joint_positions[i] = cached_left_joints_.jVal[i];
                 robot_state_msg.right_joint_positions[i] = cached_right_joints_.jVal[i];
             }
             
             // TCP位姿
-            robot_state_msg.left_tcp_position = {
-                cached_left_pose_.tran.x, 
-                cached_left_pose_.tran.y, 
-                cached_left_pose_.tran.z
-            };
-            robot_state_msg.left_tcp_orientation = {
-                cached_left_pose_.rpy.rx, 
-                cached_left_pose_.rpy.ry, 
-                cached_left_pose_.rpy.rz
-            };
-            robot_state_msg.right_tcp_position = {
-                cached_right_pose_.tran.x, 
-                cached_right_pose_.tran.y, 
-                cached_right_pose_.tran.z
-            };
-            robot_state_msg.right_tcp_orientation = {
-                cached_right_pose_.rpy.rx, 
-                cached_right_pose_.rpy.ry, 
-                cached_right_pose_.rpy.rz
-            };
+            robot_state_msg.left_cartesian_pose.position.x = cached_left_pose_.tran.x;
+            robot_state_msg.left_cartesian_pose.position.y = cached_left_pose_.tran.y;
+            robot_state_msg.left_cartesian_pose.position.z = cached_left_pose_.tran.z;
+
+            tf2::Quaternion q_left;
+            q_left.setRPY(cached_left_pose_.rpy.rx, cached_left_pose_.rpy.ry, cached_left_pose_.rpy.rz);
+            robot_state_msg.left_cartesian_pose.orientation = tf2::toMsg(q_left);
+
+            robot_state_msg.right_cartesian_pose.position.x = cached_right_pose_.tran.x;
+            robot_state_msg.right_cartesian_pose.position.y = cached_right_pose_.tran.y;
+            robot_state_msg.right_cartesian_pose.position.z = cached_right_pose_.tran.z;
+
+            tf2::Quaternion q_right;
+            q_right.setRPY(cached_right_pose_.rpy.rx, cached_right_pose_.rpy.ry, cached_right_pose_.rpy.rz);
+            robot_state_msg.right_cartesian_pose.orientation = tf2::toMsg(q_right);
             
             // 检查错误状态
             int error[2] = {0, 0};
