@@ -52,9 +52,14 @@ def generate_launch_description():
             default_value='0.5',
             description='Smooth servo bridge interpolation weight'
         ),
+        DeclareLaunchArgument(
+            'visualization_only',
+            default_value='false',
+            description='Visualization mode: publish to RViz only, do not send to real robot'
+        ),
 
         # JAKA完整控制节点（基础+伺服+VR）
-        # remapping： /joint_states  ==> /joint_states_raw
+        # remapping： /joint_states  ==> /joint_states_raw (仅在非可视化模式)
         Node(
             package='qyh_jaka_control',
             executable='jaka_control_node',
@@ -67,10 +72,13 @@ def generate_launch_description():
                     'auto_initialize': LaunchConfiguration('auto_initialize'),
                     'cycle_time_ms': LaunchConfiguration('cycle_time_ms'),
                     'buffer_size': LaunchConfiguration('buffer_size'),
-                    'interpolation_weight': LaunchConfiguration('interpolation_weight')
+                    'interpolation_weight': LaunchConfiguration('interpolation_weight'),
+                    'visualization_only': LaunchConfiguration('visualization_only')
                 }
             ],
             remappings=[
+                # 注意：可视化模式下直接发布到/joint_states，无需remap
+                # 非可视化模式才remap到/joint_states_raw让adapter处理
                 ('/joint_states', '/joint_states_raw')
             ]
         ),

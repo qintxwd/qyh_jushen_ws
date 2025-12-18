@@ -204,6 +204,7 @@ public:
         // 参数声明
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
         declare_parameter<double>("cycle_time_ms", 8.0); // 默认 125Hz
+        declare_parameter<bool>("visualization_only", false); // 仅可视化模式，不发送给真实机器人
         
         // Bridge 参数
         declare_parameter<int>("buffer_size", 10);
@@ -213,6 +214,15 @@ public:
         // 获取参数
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
+        visualization_only_ = get_parameter("visualization_only").as_bool();
+        
+        if (visualization_only_) {
+            RCLCPP_WARN(get_logger(), "========================================");
+            RCLCPP_WARN(get_logger(), "  VISUALIZATION ONLY MODE ENABLED");
+            RCLCPP_WARN(get_logger(), "  Commands will NOT be sent to real robot");
+            RCLCPP_WARN(get_logger(), "  Only publishing to /joint_states for RViz");
+            RCLCPP_WARN(get_logger(), "========================================");
+        }
         
         // 初始化 Bridge
         size_t buffer_size = static_cast<size_t>(get_parameter("buffer_size").as_int());
@@ -492,44 +502,82 @@ private:
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] has_left=%d, has_right=%d", has_left, has_right);
         
         if (has_left || has_right) {
-            bool success = true;
-            
-            // 独立发送左臂指令
-            if (has_left) {
-                RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First left command - preparing edgServoJ");
-                auto jv = convertToJointValue(left_cmd);
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
-                    "[Bridge] Left: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                    jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgServoJ(0)...");
-                success &= jaka_interface_.edgServoJ(0, jv, true);
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(0) returned");
+            // ========== 可视化模式：发布joint_states到RViz ==========
+            if (visualization_only_) {
+                auto joint_state_msg = sensor_msgs::msg::JointState();
+                joint_state_msg.header.stamp = now();
+                joint_state_msg.header.frame_id = "world";
+                
+                // 关节名称
+                for (int i = 1; i <= 7; ++i) {
+                    joint_state_msg.name.push_back("left_joint" + std::to_string(i));
+                }
+                for (int i = 1; i <= 7; ++i) {
+                    joint_state_msg.name.push_back("right_joint" + std::to_string(i));
+                }
+                
+                // 关节位置（使用伺服指令）
+                if (has_left) {
+                    joint_state_msg.position.insert(joint_state_msg.position.end(), 
+                                                     left_cmd.begin(), left_cmd.end());
+                } else {
+                    // 左臂无新指令，使用零位或上次位置
+                    joint_state_msg.position.insert(joint_state_msg.position.end(), 7, 0.0);
+                }
+                
+                if (has_right) {
+                    joint_state_msg.position.insert(joint_state_msg.position.end(), 
+                                                     right_cmd.begin(), right_cmd.end());
+                } else {
+                    // 右臂无新指令，使用零位或上次位置
+                    joint_state_msg.position.insert(joint_state_msg.position.end(), 7, 0.0);
+                }
+                
+                joint_states_pub_->publish(joint_state_msg);
+                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, 
+                    "[Visualization] Published joint_states to RViz (L:%d R:%d)", has_left, has_right);
             }
-            
-            // 独立发送右臂指令
-            if (has_right) {
-                RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First right command - preparing edgServoJ");
-                auto jv = convertToJointValue(right_cmd);
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
-                    "[Bridge] Right: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-                    jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgServoJ(1)...");
-                success &= jaka_interface_.edgServoJ(1, jv, true);
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(1) returned");
-            }
-            
-            // 统一发送，保证双臂同步（这是JakaDualJointServo的优点，已融入）
-            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
-            success &= jaka_interface_.edgSend(&cmd_index_);
-            cmd_index_++;
-            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u, success=%d", cmd_index_, success);
-            
-            if (!success) {
-                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
-                    "[Bridge] Failed to send servo commands");
-            } else {
-                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 3000, 
-                    "[MainLoop] Servo commands sent successfully (L:%d R:%d)", has_left, has_right);
+            // ========== 真实机器人模式：发送指令 ==========
+            else {
+                bool success = true;
+                
+                // 独立发送左臂指令
+                if (has_left) {
+                    RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First left command - preparing edgServoJ");
+                    auto jv = convertToJointValue(left_cmd);
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
+                        "[Bridge] Left: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                        jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgServoJ(0)...");
+                    success &= jaka_interface_.edgServoJ(0, jv, true);
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(0) returned");
+                }
+                
+                // 独立发送右臂指令
+                if (has_right) {
+                    RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First right command - preparing edgServoJ");
+                    auto jv = convertToJointValue(right_cmd);
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
+                        "[Bridge] Right: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                        jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgServoJ(1)...");
+                    success &= jaka_interface_.edgServoJ(1, jv, true);
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(1) returned");
+                }
+                
+                // 统一发送，保证双臂同步
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
+                success &= jaka_interface_.edgSend(&cmd_index_);
+                cmd_index_++;
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u, success=%d", cmd_index_, success);
+                
+                if (!success) {
+                    RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
+                        "[Bridge] Failed to send servo commands");
+                } else {
+                    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 3000, 
+                        "[MainLoop] Servo commands sent successfully (L:%d R:%d)", has_left, has_right);
+                }
             }
         }
         
@@ -620,30 +668,33 @@ private:
         robot_state_pub_->publish(robot_state_msg);
 
         // ==================== 3. 标准JointState消息 ====================
-        auto joint_state_msg = sensor_msgs::msg::JointState();
-        joint_state_msg.header.stamp = now;
-        joint_state_msg.header.frame_id = "world";
-        
-        // 关节名称
-        joint_state_msg.name.reserve(14);
-        for (int i = 1; i <= 7; ++i) {
-            joint_state_msg.name.push_back("left_joint" + std::to_string(i));
+        // 注意：仅在真实模式下发布，可视化模式由mainLoop发布伺服指令
+        if (!visualization_only_) {
+            auto joint_state_msg = sensor_msgs::msg::JointState();
+            joint_state_msg.header.stamp = now;
+            joint_state_msg.header.frame_id = "world";
+            
+            // 关节名称
+            joint_state_msg.name.reserve(14);
+            for (int i = 1; i <= 7; ++i) {
+                joint_state_msg.name.push_back("left_joint" + std::to_string(i));
+            }
+            for (int i = 1; i <= 7; ++i) {
+                joint_state_msg.name.push_back("right_joint" + std::to_string(i));
+            }
+            
+            // 关节位置（从robot_state_msg复用）
+            joint_state_msg.position.reserve(14);
+            joint_state_msg.position.assign(
+                robot_state_msg.left_joint_positions.begin(),
+                robot_state_msg.left_joint_positions.end());
+            joint_state_msg.position.insert(
+                joint_state_msg.position.end(),
+                robot_state_msg.right_joint_positions.begin(),
+                robot_state_msg.right_joint_positions.end());
+            
+            joint_states_pub_->publish(joint_state_msg);
         }
-        for (int i = 1; i <= 7; ++i) {
-            joint_state_msg.name.push_back("right_joint" + std::to_string(i));
-        }
-        
-        // 关节位置（从robot_state_msg复用）
-        joint_state_msg.position.reserve(14);
-        joint_state_msg.position.assign(
-            robot_state_msg.left_joint_positions.begin(),
-            robot_state_msg.left_joint_positions.end());
-        joint_state_msg.position.insert(
-            joint_state_msg.position.end(),
-            robot_state_msg.right_joint_positions.begin(),
-            robot_state_msg.right_joint_positions.end());
-        
-        joint_states_pub_->publish(joint_state_msg);
         
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000,
             "[Status] Published all states (powered:%d, enabled:%d, servo:%d, joints:%zu)",
@@ -1307,6 +1358,7 @@ private:
     // 参数
     std::string robot_ip_;
     double cycle_time_ms_;
+    bool visualization_only_;  // 仅可视化模式，不发送给真实机器人
 
     // 状态
     std::atomic<bool> connected_;
