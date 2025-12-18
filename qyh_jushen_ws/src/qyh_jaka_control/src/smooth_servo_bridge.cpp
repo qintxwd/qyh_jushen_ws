@@ -49,6 +49,27 @@ bool SmoothServoBridge::addCommand(const std::vector<double>& joint_positions,
             "Invalid current position size: %zu (expected 7)", current_position.size());
         return false;
     }
+
+    //输出一下日志，显示添加的命令和当前位置，以及他们之间的差异
+    RCLCPP_INFO(logger_,
+        "[Bridge] Adding command: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+        joint_positions[0], joint_positions[1], joint_positions[2],
+        joint_positions[3], joint_positions[4], joint_positions[5],
+        joint_positions[6]);
+    if (!current_position.empty()) {
+        RCLCPP_INFO(logger_,
+            "[Bridge] Current position: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+            current_position[0], current_position[1], current_position[2],
+            current_position[3], current_position[4], current_position[5],
+            current_position[6]);
+        RCLCPP_INFO(logger_,
+            "[Bridge] Position delta: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+            joint_positions[0] - current_position[0], joint_positions[1] - current_position[1],
+            joint_positions[2] - current_position[2], joint_positions[3] - current_position[3],
+            joint_positions[4] - current_position[4], joint_positions[5] - current_position[5],
+            joint_positions[6] - current_position[6]);
+    }
+
     
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     auto now = std::chrono::steady_clock::now();

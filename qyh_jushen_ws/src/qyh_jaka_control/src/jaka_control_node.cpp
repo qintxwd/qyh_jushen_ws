@@ -463,27 +463,32 @@ private:
     // ==================== 主循环 ====================
     void mainLoop()
     {
+        auto start = std::chrono::high_resolution_clock::now();
+        
+        // ⚡ 始终获取当前机械臂位姿（参考30.edgservo.cpp）
+        // 无论servo是否运行，都需要更新状态缓存供publishStatus使用
+        jaka_interface_.getJointPositions(0, cached_left_joints_);
+        jaka_interface_.getJointPositions(1, cached_right_joints_);
+        jaka_interface_.getCartesianPosition(0, cached_left_pose_);
+        jaka_interface_.getCartesianPosition(1, cached_right_pose_);
+        has_cached_state_ = true;
+
+        // 如果伺服未运行，只更新状态缓存，不执行伺服命令
         if (!servo_running_) {
+            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, 
+                "[MainLoop] Servo not running, only updating state cache");
             return;
         }
 
-        RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First call - servo_running_=true");
+        RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First servo cycle");
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "[MainLoop] Running at %.1f Hz (cycle: %.2f ms)", 
             1000.0 / cycle_time_ms_, cycle_time_ms_);
         
-        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to get timestamp...");
-        auto start = std::chrono::high_resolution_clock::now();
-        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Got timestamp successfully");
-        
         // Bridge模式：从缓冲区获取插值后的指令
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Getting interpolated commands...");
-        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to call left_bridge_->getInterpolatedCommand...");
         std::vector<double> left_cmd, right_cmd;
         bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
-        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Left getInterpolatedCommand returned: %d", has_left);
-        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to call right_bridge_->getInterpolatedCommand...");
         bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
-        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Right getInterpolatedCommand returned: %d", has_right);
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] has_left=%d, has_right=%d", has_left, has_right);
         
         if (has_left || has_right) {
@@ -545,15 +550,11 @@ private:
 
     void publishStatus()
     {
-        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000, "[publishStatus] Publishing status...");
+        auto now = this->now();
         
-        // 伺服状态
+        // ==================== 1. 伺服状态 ====================
         auto servo_msg = qyh_jaka_control_msgs::msg::JakaServoStatus();
-        if (servo_running_) {
-            servo_msg.mode = "bridge_joint";  // Bridge模式，关节空间控制
-        } else {
-            servo_msg.mode = "idle";
-        }
+        servo_msg.mode = servo_running_ ? "bridge_joint" : "idle";
         servo_msg.is_abs = true;
         servo_msg.cycle_time_ns = static_cast<int32_t>(cycle_time_ms_ * 1e6);
         servo_msg.publish_rate_hz = servo_running_ ? (1000.0 / cycle_time_ms_) : 0.0;
@@ -564,56 +565,54 @@ private:
             "[Status] Servo: %s, Rate: %.1f Hz, Latency: %.2f ms",
             servo_msg.mode.c_str(), servo_msg.publish_rate_hz, servo_msg.latency_ms);
 
-        // 机器人状态
+        // ==================== 2. 机器人状态 ====================
         auto robot_state_msg = qyh_jaka_control_msgs::msg::RobotState();
-        robot_state_msg.header.stamp = this->now();
+        robot_state_msg.header.stamp = now;
         robot_state_msg.header.frame_id = "world";
         robot_state_msg.connected = connected_;
         robot_state_msg.robot_ip = robot_ip_;
-
-        RobotState state;
-        if (jaka_interface_.getRobotState(state)) {
-            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000, "[Status] Got robot state successfully");
-            robot_state_msg.powered_on = state.poweredOn;
-            robot_state_msg.enabled = state.servoEnabled;
-            robot_state_msg.in_estop = state.estoped;
-            robot_state_msg.servo_mode_enabled = servo_running_;
-
-            if (state.poweredOn) {
-                int error[2] = {0, 0};
-                if (jaka_interface_.isInError(error)) {
-                    robot_state_msg.in_error = (error[0] || error[1]);
-                }
-
-                if (!robot_state_msg.in_error) {
-                    // 获取关节位置
-                    JointValue left_joint, right_joint;
-                    std::array<double, 7> left_joint_positions{};
-                    std::array<double, 7> right_joint_positions{};
-
-                    if (jaka_interface_.getJointPositions(0, left_joint)) {
-                        for (size_t i = 0; i < left_joint_positions.size(); ++i) {
-                            left_joint_positions[i] = left_joint.jVal[i];
-                        }
-                    }
-                    if (jaka_interface_.getJointPositions(1, right_joint)) {
-                        for (size_t i = 0; i < right_joint_positions.size(); ++i) {
-                            right_joint_positions[i] = right_joint.jVal[i];
-                        }
-                    }
-
-                    robot_state_msg.left_joint_positions = left_joint_positions;
-                    robot_state_msg.right_joint_positions = right_joint_positions;
-
-                    // 获取笛卡尔位姿
-                    CartesianPose left_pose, right_pose;
-                    if (jaka_interface_.getCartesianPose(0, left_pose)) {
-                        robot_state_msg.left_cartesian_pose = jaka_interface_.jakaPoseToRos(left_pose);
-                    }
-                    if (jaka_interface_.getCartesianPose(1, right_pose)) {
-                        robot_state_msg.right_cartesian_pose = jaka_interface_.jakaPoseToRos(right_pose);
-                    }
-                } else {
+        robot_state_msg.servo_mode_enabled = servo_running_;
+        
+        // ⚡ 始终使用缓存数据（mainLoop现在总是更新缓存）
+        if (has_cached_state_) {
+            robot_state_msg.powered_on = powered_;
+            robot_state_msg.enabled = enabled_;
+            
+            // 关节位置
+            robot_state_msg.left_joint_positions.resize(7);
+            robot_state_msg.right_joint_positions.resize(7);
+            for (size_t i = 0; i < 7; ++i) {
+                robot_state_msg.left_joint_positions[i] = cached_left_joints_.jVal[i];
+                robot_state_msg.right_joint_positions[i] = cached_right_joints_.jVal[i];
+            }
+            
+            // TCP位姿
+            robot_state_msg.left_tcp_position = {
+                cached_left_pose_.tran.x, 
+                cached_left_pose_.tran.y, 
+                cached_left_pose_.tran.z
+            };
+            robot_state_msg.left_tcp_orientation = {
+                cached_left_pose_.rpy.rx, 
+                cached_left_pose_.rpy.ry, 
+                cached_left_pose_.rpy.rz
+            };
+            robot_state_msg.right_tcp_position = {
+                cached_right_pose_.tran.x, 
+                cached_right_pose_.tran.y, 
+                cached_right_pose_.tran.z
+            };
+            robot_state_msg.right_tcp_orientation = {
+                cached_right_pose_.rpy.rx, 
+                cached_right_pose_.rpy.ry, 
+                cached_right_pose_.rpy.rz
+            };
+            
+            // 检查错误状态
+            int error[2] = {0, 0};
+            if (jaka_interface_.isInError(error)) {
+                robot_state_msg.in_error = (error[0] || error[1]);
+                if (robot_state_msg.in_error) {
                     ErrorCode error_code;
                     if (jaka_interface_.getLastError(error_code)) {
                         robot_state_msg.error_message = error_code.message;
@@ -621,22 +620,28 @@ private:
                 }
             }
         } else {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "[Status] Failed to get robot state");
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, 
+                "[Status] No cached state available yet");
         }
 
         robot_state_pub_->publish(robot_state_msg);
-        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000,
-            "[Status] Published robot state (powered:%d, enabled:%d, servo:%d)",
-            robot_state_msg.powered_on, robot_state_msg.enabled, robot_state_msg.servo_mode_enabled);
 
-        // 发布标准JointState消息
+        // ==================== 3. 标准JointState消息 ====================
         auto joint_state_msg = sensor_msgs::msg::JointState();
-        joint_state_msg.header.stamp = this->now();
+        joint_state_msg.header.stamp = now;
         joint_state_msg.header.frame_id = "world";
         
-        for (int i = 1; i <= 7; ++i) joint_state_msg.name.push_back("left_joint" + std::to_string(i));
-        for (int i = 1; i <= 7; ++i) joint_state_msg.name.push_back("right_joint" + std::to_string(i));
+        // 关节名称
+        joint_state_msg.name.reserve(14);
+        for (int i = 1; i <= 7; ++i) {
+            joint_state_msg.name.push_back("left_joint" + std::to_string(i));
+        }
+        for (int i = 1; i <= 7; ++i) {
+            joint_state_msg.name.push_back("right_joint" + std::to_string(i));
+        }
         
+        // 关节位置（从robot_state_msg复用）
+        joint_state_msg.position.reserve(14);
         joint_state_msg.position.assign(
             robot_state_msg.left_joint_positions.begin(),
             robot_state_msg.left_joint_positions.end());
@@ -646,7 +651,11 @@ private:
             robot_state_msg.right_joint_positions.end());
         
         joint_states_pub_->publish(joint_state_msg);
-        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000, "[Status] Published joint states (14 joints)");
+        
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000,
+            "[Status] Published all states (powered:%d, enabled:%d, servo:%d, joints:%zu)",
+            robot_state_msg.powered_on, robot_state_msg.enabled, 
+            robot_state_msg.servo_mode_enabled, joint_state_msg.position.size());
     }
 
     // ==================== Bridge回调函数 ====================
@@ -658,11 +667,10 @@ private:
             RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
-            // 获取当前真实位置传给Bridge，由Bridge智能决定是否使用
+            // 使用缓存的当前位置传给Bridge，由Bridge智能决定是否使用
             std::vector<double> current_joints(7);
-            JointValue current_pos;
-            if (jaka_interface_.getJointPositions(0, current_pos)) {
-                for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
+            if (has_cached_state_) {
+                for (size_t i = 0; i < 7; ++i) current_joints[i] = cached_left_joints_.jVal[i];
                 left_bridge_->addCommand(positions, current_joints);
             } else {
                 left_bridge_->addCommand(positions);
@@ -681,11 +689,10 @@ private:
             RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
-            // 获取当前真实位置传给Bridge，由Bridge智能决定是否使用
+            // 使用缓存的当前位置传给Bridge，由Bridge智能决定是否使用
             std::vector<double> current_joints(7);
-            JointValue current_pos;
-            if (jaka_interface_.getJointPositions(1, current_pos)) {
-                for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
+            if (has_cached_state_) {
+                for (size_t i = 0; i < 7; ++i) current_joints[i] = cached_right_joints_.jVal[i];
                 right_bridge_->addCommand(positions, current_joints);
             } else {
                 right_bridge_->addCommand(positions);
@@ -789,7 +796,7 @@ private:
         
         // 直接获取当前真实关节角度作为IK参考
         JointValue ref_joints;
-        jaka_interface_.get_joint_position(0, ref_joints);
+        jaka_interface_.getJointPositions(0, ref_joints);
         
         // 调用IK求解
         JointValue ik_result;
@@ -892,7 +899,7 @@ private:
         
         // 直接获取当前真实关节角度作为IK参考
         JointValue ref_joints;
-        jaka_interface_.get_joint_position(1, ref_joints);
+        jaka_interface_.getJointPositions(1, ref_joints);
         
         // 调用IK求解
         JointValue ik_result;
@@ -1315,6 +1322,13 @@ private:
     std::atomic<bool> servo_running_;
     int64_t last_cycle_duration_us_ = 0;
     uint32_t cmd_index_ = 0;
+    
+    // 缓存的机械臂位姿（主循环更新，状态发布使用）
+    JointValue cached_left_joints_;
+    JointValue cached_right_joints_;
+    CartesianPose cached_left_pose_;
+    CartesianPose cached_right_pose_;
+    bool has_cached_state_{false};
 
     // IK求解相关
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
