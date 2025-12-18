@@ -481,8 +481,6 @@ private:
             }
             // ========== 真实机器人模式：发送指令 ==========
             else {
-                bool success = true;
-                
                 // 独立发送左臂指令
                 if (has_left) {
                     RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First left command - preparing edgServoJ");
@@ -517,13 +515,14 @@ private:
                 
                 // 统一发送，保证双臂同步
                 RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
-                if (!jaka_interface_.edgSend(&cmd_index_)) {
+                uint32_t index = cmd_index_.load();
+                if (!jaka_interface_.edgSend(&index)) {
                     RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
                         "[MainLoop] Failed to send servo commands via edgSend");
                     return;  // 发送失败，停止本周期
                 }
-                cmd_index_++;
-                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u", cmd_index_);
+                cmd_index_.store(index);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u", index);
                 
                 RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 3000, 
                     "[MainLoop] Servo commands sent successfully (L:%d R:%d)", has_left, has_right);

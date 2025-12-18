@@ -26,10 +26,10 @@ public:
     JakaServiceHandlers(
         rclcpp::Node* node,
         JakaInterface& jaka_interface,
-        bool& connected,
-        bool& powered,
-        bool& enabled,
-        bool& servo_running,
+        std::atomic<bool>& connected,
+        std::atomic<bool>& powered,
+        std::atomic<bool>& enabled,
+        std::atomic<bool>& servo_running,
         std::function<bool()> start_servo_callback,
         std::function<bool()> stop_servo_callback);
     
@@ -57,10 +57,10 @@ public:
 private:
     rclcpp::Node* node_;
     JakaInterface& jaka_interface_;
-    bool& connected_;
-    bool& powered_;
-    bool& enabled_;
-    bool& servo_running_;
+    std::atomic<bool>& connected_;
+    std::atomic<bool>& powered_;
+    std::atomic<bool>& enabled_;
+    std::atomic<bool>& servo_running_;
     std::function<bool()> start_servo_callback_;
     std::function<bool()> stop_servo_callback_;
 };

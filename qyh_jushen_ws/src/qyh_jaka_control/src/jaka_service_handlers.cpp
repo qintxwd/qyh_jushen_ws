@@ -6,10 +6,10 @@ namespace qyh_jaka_control {
 JakaServiceHandlers::JakaServiceHandlers(
     rclcpp::Node* node,
     JakaInterface& jaka_interface,
-    bool& connected,
-    bool& powered,
-    bool& enabled,
-    bool& servo_running,
+    std::atomic<bool>& connected,
+    std::atomic<bool>& powered,
+    std::atomic<bool>& enabled,
+    std::atomic<bool>& servo_running,
     std::function<bool()> start_servo_callback,
     std::function<bool()> stop_servo_callback)
     : node_(node),
