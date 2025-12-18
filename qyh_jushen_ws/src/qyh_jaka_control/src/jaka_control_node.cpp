@@ -170,12 +170,6 @@ public:
         // 参数声明
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
         declare_parameter<double>("cycle_time_ms", 8.0); // 默认 125Hz
-        declare_parameter<bool>("auto_connect", true);
-        declare_parameter<bool>("auto_power_on", false);
-        declare_parameter<bool>("auto_enable", false);
-        declare_parameter<bool>("auto_initialize", false);
-        declare_parameter<std::string>("default_filter_type", "joint_lpf");
-        declare_parameter<double>("default_filter_cutoff", 1.0);
         
         // Bridge 参数
         declare_parameter<int>("buffer_size", 10);
@@ -185,9 +179,6 @@ public:
         // 获取参数
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
-        auto_connect_ = get_parameter("auto_connect").as_bool();
-        auto_power_on_ = get_parameter("auto_power_on").as_bool();
-        auto_enable_ = get_parameter("auto_enable").as_bool();
         
         // 初始化 Bridge
         size_t buffer_size = static_cast<size_t>(get_parameter("buffer_size").as_int());
@@ -318,19 +309,53 @@ public:
         enabled_ = false;
         servo_running_ = false;
 
-        if (auto_connect_) {
-            if (jaka_interface_.connect(robot_ip_)) {
-                // 连接后，需要等待5秒钟让机器人初始化完成
-                std::this_thread::sleep_for(std::chrono::seconds(5));
-                connected_ = true;
-                RCLCPP_INFO(get_logger(), "✓ Connected to robot at %s", robot_ip_.c_str());
-                
-                if (get_parameter("auto_initialize").as_bool()) {
-                    autoInitialize();
-                }
+        // 按照官方示例程序的标准初始化流程
+        RCLCPP_INFO(get_logger(), "Connecting to robot at %s...", robot_ip_.c_str());
+        if (jaka_interface_.connect(robot_ip_)) {
+            connected_ = true;
+            RCLCPP_INFO(get_logger(), "✓ Connected to robot");
+            
+            // 1. 清除错误
+            RCLCPP_INFO(get_logger(), "Clearing errors...");
+            jaka_interface_.clearError();
+            
+            // 2. 关闭伺服模式（确保从干净状态开始）
+            RCLCPP_INFO(get_logger(), "Disabling servo mode...");
+            jaka_interface_.servoMoveEnable(false, -1);
+            
+            // 3. 设置滤波器为none
+            RCLCPP_INFO(get_logger(), "Setting filter to none...");
+            jaka_interface_.setFilterNone();
+            
+            // 4. 上电
+            RCLCPP_INFO(get_logger(), "Powering on...");
+            if (jaka_interface_.powerOn()) {
+                powered_ = true;
+                RCLCPP_INFO(get_logger(), "✓ Powered on");
             } else {
-                RCLCPP_ERROR(get_logger(), "✗ Failed to connect to robot at %s", robot_ip_.c_str());
+                RCLCPP_ERROR(get_logger(), "✗ Failed to power on");
             }
+            
+            // 5. 使能
+            RCLCPP_INFO(get_logger(), "Enabling robot...");
+            if (jaka_interface_.enableRobot()) {
+                enabled_ = true;
+                RCLCPP_INFO(get_logger(), "✓ Robot enabled");
+            } else {
+                RCLCPP_ERROR(get_logger(), "✗ Failed to enable robot");
+            }
+            
+            // 6. 停止当前动作
+            RCLCPP_INFO(get_logger(), "Aborting any motion...");
+            jaka_interface_.motionAbort();
+            
+            // 7. 等待5秒让机器人稳定
+            RCLCPP_INFO(get_logger(), "Waiting 5 seconds for robot to stabilize...");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            
+            RCLCPP_INFO(get_logger(), "✓ Robot initialization complete and ready");
+        } else {
+            RCLCPP_ERROR(get_logger(), "✗ Failed to connect to robot at %s", robot_ip_.c_str());
         }
 
         // Timers
@@ -359,49 +384,86 @@ private:
             return;
         }
 
+        RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First call - servo_running_=true");
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "[MainLoop] Running at %.1f Hz (cycle: %.2f ms)", 
+            1000.0 / cycle_time_ms_, cycle_time_ms_);
+        
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to get timestamp...");
         auto start = std::chrono::high_resolution_clock::now();
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Got timestamp successfully");
         
         // Bridge模式：从缓冲区获取插值后的指令
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Getting interpolated commands...");
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to call left_bridge_->getInterpolatedCommand...");
         std::vector<double> left_cmd, right_cmd;
         bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Left getInterpolatedCommand returned: %d", has_left);
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to call right_bridge_->getInterpolatedCommand...");
         bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Right getInterpolatedCommand returned: %d", has_right);
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] has_left=%d, has_right=%d", has_left, has_right);
         
         if (has_left || has_right) {
             bool success = true;
             
             // 独立发送左臂指令
             if (has_left) {
+                RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First left command - preparing edgServoJ");
                 auto jv = convertToJointValue(left_cmd);
                 RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
                     "[Bridge] Left: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
                     jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgServoJ(0)...");
                 success &= jaka_interface_.edgServoJ(0, jv, true);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(0) returned");
             }
             
             // 独立发送右臂指令
             if (has_right) {
+                RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First right command - preparing edgServoJ");
                 auto jv = convertToJointValue(right_cmd);
                 RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
                     "[Bridge] Right: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
                     jv.jVal[0], jv.jVal[1], jv.jVal[2], jv.jVal[3], jv.jVal[4], jv.jVal[5], jv.jVal[6]);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgServoJ(1)...");
                 success &= jaka_interface_.edgServoJ(1, jv, true);
+                RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(1) returned");
             }
             
             // 统一发送，保证双臂同步（这是JakaDualJointServo的优点，已融入）
-            success &= jaka_interface_.edgSend();
+            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
+            success &= jaka_interface_.edgSend(&cmd_index_);
+            cmd_index_++;
+            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u, success=%d", cmd_index_, success);
             
             if (!success) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
                     "[Bridge] Failed to send servo commands");
+            } else {
+                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 3000, 
+                    "[MainLoop] Servo commands sent successfully (L:%d R:%d)", has_left, has_right);
             }
         }
         
         auto end = std::chrono::high_resolution_clock::now();
         last_cycle_duration_us_ = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        
+        // 性能监控：如果周期超时，发出警告
+        double cycle_time_us = cycle_time_ms_ * 1000.0;
+        if (last_cycle_duration_us_ > cycle_time_us * 0.8) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                "[MainLoop] Cycle time high: %.2f ms (target: %.2f ms)",
+                last_cycle_duration_us_ / 1000.0, cycle_time_ms_);
+        }
+        
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000,
+            "[MainLoop] Cycle completed in %.2f ms", last_cycle_duration_us_ / 1000.0);
     }
 
     void publishStatus()
     {
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000, "[publishStatus] Publishing status...");
+        
         // 伺服状态
         auto servo_msg = qyh_jaka_control_msgs::msg::JakaServoStatus();
         if (servo_running_) {
@@ -414,6 +476,10 @@ private:
         servo_msg.publish_rate_hz = servo_running_ ? (1000.0 / cycle_time_ms_) : 0.0;
         servo_msg.latency_ms = last_cycle_duration_us_ / 1000.0;
         status_pub_->publish(servo_msg);
+        
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+            "[Status] Servo: %s, Rate: %.1f Hz, Latency: %.2f ms",
+            servo_msg.mode.c_str(), servo_msg.publish_rate_hz, servo_msg.latency_ms);
 
         // 机器人状态
         auto robot_state_msg = qyh_jaka_control_msgs::msg::RobotState();
@@ -424,6 +490,7 @@ private:
 
         RobotState state;
         if (jaka_interface_.getRobotState(state)) {
+            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000, "[Status] Got robot state successfully");
             robot_state_msg.powered_on = state.poweredOn;
             robot_state_msg.enabled = state.servoEnabled;
             robot_state_msg.in_estop = state.estoped;
@@ -470,9 +537,14 @@ private:
                     }
                 }
             }
+        } else {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "[Status] Failed to get robot state");
         }
 
         robot_state_pub_->publish(robot_state_msg);
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000,
+            "[Status] Published robot state (powered:%d, enabled:%d, servo:%d)",
+            robot_state_msg.powered_on, robot_state_msg.enabled, robot_state_msg.servo_mode_enabled);
 
         // 发布标准JointState消息
         auto joint_state_msg = sensor_msgs::msg::JointState();
@@ -491,6 +563,7 @@ private:
             robot_state_msg.right_joint_positions.end());
         
         joint_states_pub_->publish(joint_state_msg);
+        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000, "[Status] Published joint states (14 joints)");
     }
 
     // ==================== Bridge回调函数 ====================
@@ -614,54 +687,108 @@ private:
 
     // ==================== 内部辅助函数 ====================
     bool startServoInternal() {
-        if (!enabled_) return false;
+        RCLCPP_INFO(get_logger(), "[Servo] === Starting Servo Mode ===");
+        
+        if (!enabled_) {
+            RCLCPP_ERROR(get_logger(), "[Servo] Cannot start: robot not enabled");
+            return false;
+        }
+        
+        RCLCPP_INFO(get_logger(), "[Servo] Step 1/5: Setting up filter...");
         // 应用默认滤波器
         std::string filter_type = get_parameter("default_filter_type").as_string();
         double cutoff = get_parameter("default_filter_cutoff").as_double();
-        if (filter_type == "joint_lpf") jaka_interface_.setFilterJointLPF(cutoff);
-        else if (filter_type == "none") jaka_interface_.setFilterNone();
+        RCLCPP_INFO(get_logger(), "[Servo] Filter type: %s, cutoff: %.2f", filter_type.c_str(), cutoff);
+        if (filter_type == "joint_lpf") {
+            jaka_interface_.setFilterJointLPF(cutoff);
+            RCLCPP_INFO(get_logger(), "[Servo] Joint LPF filter applied");
+        } else if (filter_type == "none") {
+            jaka_interface_.setFilterNone();
+            RCLCPP_INFO(get_logger(), "[Servo] No filter applied");
+        }
         
+        RCLCPP_INFO(get_logger(), "[Servo] Step 2/5: Enabling servo for left arm (id=0)...");
         // 显式启用双臂伺服 (0:左臂, 1:右臂)
         bool success = true;
         success &= jaka_interface_.servoMoveEnable(true, 0);
+        if (!success) {
+            RCLCPP_ERROR(get_logger(), "[Servo] Failed to enable left arm servo!");
+            return false;
+        }
+        RCLCPP_INFO(get_logger(), "[Servo] Left arm servo enabled successfully");
+        
+        RCLCPP_INFO(get_logger(), "[Servo] Step 3/5: Enabling servo for right arm (id=1)...");
         success &= jaka_interface_.servoMoveEnable(true, 1);
+        if (!success) {
+            RCLCPP_ERROR(get_logger(), "[Servo] Failed to enable right arm servo!");
+            jaka_interface_.servoMoveEnable(false, 0);  // 回滚左臂
+            return false;
+        }
+        RCLCPP_INFO(get_logger(), "[Servo] Right arm servo enabled successfully");
         
         if (success) {
+            // ★★★ 参考官方示例：servo_move_enable后立即获取状态并初始化 ★★★
+            // 不需要额外延迟，SDK内部已处理状态同步
+            
+            RCLCPP_INFO(get_logger(), "[Servo] Step 4/5: Initializing bridges from current positions...");
             servo_running_ = true;
             
-            // ★★★ 关键改进：从当前机械臂位置初始化Bridge，避免启动跳变 ★★★
+            // 从当前机械臂位置初始化Bridge，避免启动跳变
+            RCLCPP_INFO(get_logger(), "[Servo] Getting left arm current position...");
             JointValue left_pos, right_pos;
             if (jaka_interface_.getJointPositions(0, left_pos)) {
                 std::vector<double> left_joints(7);
                 for (size_t i = 0; i < 7; ++i) left_joints[i] = left_pos.jVal[i];
+                RCLCPP_INFO(get_logger(), "[Servo] Left joints: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                    left_joints[0], left_joints[1], left_joints[2], left_joints[3],
+                    left_joints[4], left_joints[5], left_joints[6]);
                 left_bridge_->initializeFromCurrent(left_joints);
-                RCLCPP_INFO(get_logger(), "[Servo] Left bridge initialized from current position");
+                RCLCPP_INFO(get_logger(), "[Servo] ✓ Left bridge initialized from current position");
             } else {
-                RCLCPP_WARN(get_logger(), "[Servo] Failed to get left arm position for initialization");
+                RCLCPP_WARN(get_logger(), "[Servo] ✗ Failed to get left arm position for initialization");
             }
             
+            RCLCPP_INFO(get_logger(), "[Servo] Getting right arm current position...");
             if (jaka_interface_.getJointPositions(1, right_pos)) {
                 std::vector<double> right_joints(7);
                 for (size_t i = 0; i < 7; ++i) right_joints[i] = right_pos.jVal[i];
+                RCLCPP_INFO(get_logger(), "[Servo] Right joints: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                    right_joints[0], right_joints[1], right_joints[2], right_joints[3],
+                    right_joints[4], right_joints[5], right_joints[6]);
                 right_bridge_->initializeFromCurrent(right_joints);
-                RCLCPP_INFO(get_logger(), "[Servo] Right bridge initialized from current position");
+                RCLCPP_INFO(get_logger(), "[Servo] ✓ Right bridge initialized from current position");
             } else {
-                RCLCPP_WARN(get_logger(), "[Servo] Failed to get right arm position for initialization");
+                RCLCPP_WARN(get_logger(), "[Servo] ✗ Failed to get right arm position for initialization");
             }
+            
+            RCLCPP_INFO(get_logger(), "[Servo] Step 5/5: All initialization complete");
+            RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Active - Ready for commands ===");
             
             return true;
         }
         // 如果失败，尝试回滚
+        RCLCPP_ERROR(get_logger(), "[Servo] Failed to enable servo, rolling back...");
         jaka_interface_.servoMoveEnable(false, 0);
         jaka_interface_.servoMoveEnable(false, 1);
+        RCLCPP_ERROR(get_logger(), "[Servo] Servo start failed!");
         return false;
     }
     
     bool stopServoInternal() {
+        RCLCPP_INFO(get_logger(), "[Servo] === Stopping Servo Mode ===");
         servo_running_ = false;
+        
+        RCLCPP_INFO(get_logger(), "[Servo] Disabling left arm servo...");
         bool success = true;
         success &= jaka_interface_.servoMoveEnable(false, 0);
+        RCLCPP_INFO(get_logger(), "[Servo] Disabling right arm servo...");
         success &= jaka_interface_.servoMoveEnable(false, 1);
+        
+        if (success) {
+            RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Stopped ===");
+        } else {
+            RCLCPP_ERROR(get_logger(), "[Servo] Failed to stop servo cleanly");
+        }
         return success;
     }
     
@@ -876,9 +1003,6 @@ private:
     // 参数
     std::string robot_ip_;
     double cycle_time_ms_;
-    bool auto_connect_;
-    bool auto_power_on_;
-    bool auto_enable_;
 
     // 状态
     std::atomic<bool> connected_;
@@ -886,6 +1010,7 @@ private:
     std::atomic<bool> enabled_;
     std::atomic<bool> servo_running_;
     int64_t last_cycle_duration_us_ = 0;
+    uint32_t cmd_index_ = 0;
 
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;

@@ -185,9 +185,9 @@ bool JakaInterface::setFilterCarteNLF(double max_vp, double max_ap, double max_j
 // Note: edg_recv() is deprecated in SDK 2.3.0.12+
 // edg_get_stat() no longer depends on edg_recv()
 
-bool JakaInterface::edgSend()
+bool JakaInterface::edgSend(uint32_t* cmd_index)
 {
-    errno_t ret = robot_->edg_send();
+    errno_t ret = robot_->edg_send(cmd_index);
     return checkReturn(ret, "edg_send");
 }
 

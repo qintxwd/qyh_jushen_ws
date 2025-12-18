@@ -50,7 +50,7 @@ public:
 
     // EtherCAT同步模式 (SDK 2.3.0.13+)
     // Note: edg_recv() is deprecated in SDK 2.3.0.12+
-    bool edgSend();
+    bool edgSend(uint32_t* cmd_index = nullptr);
     bool edgGetStat(int robot_id, JointValue& joint_pos, CartesianPose& cartesian_pose);
     bool edgServoJ(int robot_id, const JointValue& joint_pos, bool is_abs);
     bool edgServoP(int robot_id, const CartesianPose& pose, bool is_abs);
