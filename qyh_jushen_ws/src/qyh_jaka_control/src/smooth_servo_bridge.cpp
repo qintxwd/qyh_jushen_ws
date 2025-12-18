@@ -32,7 +32,7 @@ SmoothServoBridge::SmoothServoBridge(
 bool SmoothServoBridge::addCommand(const std::vector<double>& joint_positions)
 {
     if (joint_positions.size() != 7) {
-        RCLCPP_ERROR_THROTTLE(logger_, *rclcpp::Clock::SharedPtr(new rclcpp::Clock()), 1000,
+        RCLCPP_ERROR(logger_,
             "Invalid joint command size: %zu (expected 7)", joint_positions.size());
         return false;
     }
@@ -67,7 +67,7 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
     
     if (has_last_output_ && time_since_last_cmd > command_timeout_sec_) {
         // 超时：下次收到新指令时会重新从当前位置开始（在jaka_control_node中处理）
-        RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::SharedPtr(new rclcpp::Clock()), 2000,
+        RCLCPP_DEBUG(logger_,
             "Command timeout (%.1fs > %.1fs), will re-sync on next command",
             time_since_last_cmd, command_timeout_sec_);
         has_last_output_ = false;
@@ -89,7 +89,7 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
         // 不插值，直接使用最新命令
         // （如果has_last_output_为false，说明是超时后第一个指令，需要重新同步）
         if (!has_last_output_) {
-            RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::SharedPtr(new rclcpp::Clock()), 2000,
+            RCLCPP_DEBUG(logger_,
                 "Re-syncing: using latest command directly after timeout/init");
         }
         interpolated_positions = latest_command.positions;

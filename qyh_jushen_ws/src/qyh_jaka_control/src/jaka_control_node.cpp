@@ -170,12 +170,6 @@ public:
         // 参数声明
         declare_parameter<std::string>("robot_ip", "192.168.2.200");
         declare_parameter<double>("cycle_time_ms", 8.0); // 默认 125Hz
-        declare_parameter<bool>("auto_connect", true);
-        declare_parameter<bool>("auto_power_on", false);
-        declare_parameter<bool>("auto_enable", false);
-        declare_parameter<bool>("auto_initialize", false);
-        declare_parameter<std::string>("default_filter_type", "none");
-        declare_parameter<double>("default_filter_cutoff", 1.0);
         
         // Bridge 参数
         declare_parameter<int>("buffer_size", 10);
@@ -185,9 +179,6 @@ public:
         // 获取参数
         robot_ip_ = get_parameter("robot_ip").as_string();
         cycle_time_ms_ = get_parameter("cycle_time_ms").as_double();
-        auto_connect_ = get_parameter("auto_connect").as_bool();
-        auto_power_on_ = get_parameter("auto_power_on").as_bool();
-        auto_enable_ = get_parameter("auto_enable").as_bool();
         
         // 初始化 Bridge
         size_t buffer_size = static_cast<size_t>(get_parameter("buffer_size").as_int());
@@ -318,19 +309,53 @@ public:
         enabled_ = false;
         servo_running_ = false;
 
-        if (auto_connect_) {
-            if (jaka_interface_.connect(robot_ip_)) {
-                // 连接后，需要等待5秒钟让机器人初始化完成
-                std::this_thread::sleep_for(std::chrono::seconds(5));
-                connected_ = true;
-                RCLCPP_INFO(get_logger(), "✓ Connected to robot at %s", robot_ip_.c_str());
-                
-                if (get_parameter("auto_initialize").as_bool()) {
-                    autoInitialize();
-                }
+        // 按照官方示例程序的标准初始化流程
+        RCLCPP_INFO(get_logger(), "Connecting to robot at %s...", robot_ip_.c_str());
+        if (jaka_interface_.connect(robot_ip_)) {
+            connected_ = true;
+            RCLCPP_INFO(get_logger(), "✓ Connected to robot");
+            
+            // 1. 清除错误
+            RCLCPP_INFO(get_logger(), "Clearing errors...");
+            jaka_interface_.clearError();
+            
+            // 2. 关闭伺服模式（确保从干净状态开始）
+            RCLCPP_INFO(get_logger(), "Disabling servo mode...");
+            jaka_interface_.servoMoveEnable(false, -1);
+            
+            // 3. 设置滤波器为none
+            RCLCPP_INFO(get_logger(), "Setting filter to none...");
+            jaka_interface_.setFilterNone();
+            
+            // 4. 上电
+            RCLCPP_INFO(get_logger(), "Powering on...");
+            if (jaka_interface_.powerOn()) {
+                powered_ = true;
+                RCLCPP_INFO(get_logger(), "✓ Powered on");
             } else {
-                RCLCPP_ERROR(get_logger(), "✗ Failed to connect to robot at %s", robot_ip_.c_str());
+                RCLCPP_ERROR(get_logger(), "✗ Failed to power on");
             }
+            
+            // 5. 使能
+            RCLCPP_INFO(get_logger(), "Enabling robot...");
+            if (jaka_interface_.enableRobot()) {
+                enabled_ = true;
+                RCLCPP_INFO(get_logger(), "✓ Robot enabled");
+            } else {
+                RCLCPP_ERROR(get_logger(), "✗ Failed to enable robot");
+            }
+            
+            // 6. 停止当前动作
+            RCLCPP_INFO(get_logger(), "Aborting any motion...");
+            jaka_interface_.motionAbort();
+            
+            // 7. 等待5秒让机器人稳定
+            RCLCPP_INFO(get_logger(), "Waiting 5 seconds for robot to stabilize...");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            
+            RCLCPP_INFO(get_logger(), "✓ Robot initialization complete and ready");
+        } else {
+            RCLCPP_ERROR(get_logger(), "✗ Failed to connect to robot at %s", robot_ip_.c_str());
         }
 
         // Timers
@@ -363,13 +388,19 @@ private:
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "[MainLoop] Running at %.1f Hz (cycle: %.2f ms)", 
             1000.0 / cycle_time_ms_, cycle_time_ms_);
         
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to get timestamp...");
         auto start = std::chrono::high_resolution_clock::now();
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Got timestamp successfully");
         
         // Bridge模式：从缓冲区获取插值后的指令
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Getting interpolated commands...");
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to call left_bridge_->getInterpolatedCommand...");
         std::vector<double> left_cmd, right_cmd;
         bool has_left = left_bridge_->getInterpolatedCommand(left_cmd);
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Left getInterpolatedCommand returned: %d", has_left);
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ About to call right_bridge_->getInterpolatedCommand...");
         bool has_right = right_bridge_->getInterpolatedCommand(right_cmd);
+        RCLCPP_INFO_ONCE(get_logger(), "[MainLoop] ☑ Right getInterpolatedCommand returned: %d", has_right);
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] has_left=%d, has_right=%d", has_left, has_right);
         
         if (has_left || has_right) {
@@ -401,8 +432,9 @@ private:
             
             // 统一发送，保证双臂同步（这是JakaDualJointServo的优点，已融入）
             RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
-            success &= jaka_interface_.edgSend();
-            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, success=%d", success);
+            success &= jaka_interface_.edgSend(&cmd_index_);
+            cmd_index_++;
+            RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u, success=%d", cmd_index_, success);
             
             if (!success) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
@@ -971,9 +1003,6 @@ private:
     // 参数
     std::string robot_ip_;
     double cycle_time_ms_;
-    bool auto_connect_;
-    bool auto_power_on_;
-    bool auto_enable_;
 
     // 状态
     std::atomic<bool> connected_;
@@ -981,6 +1010,7 @@ private:
     std::atomic<bool> enabled_;
     std::atomic<bool> servo_running_;
     int64_t last_cycle_duration_us_ = 0;
+    uint32_t cmd_index_ = 0;
 
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;
