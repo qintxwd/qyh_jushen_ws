@@ -21,6 +21,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -124,6 +125,15 @@ public:
             if (!right_vel_controller_->initialize(urdf_path, "base_link_right", "forward_rt")) {
                 RCLCPP_ERROR(get_logger(), "Failed to initialize right velocity controller");
             }
+            
+            // 📌 统一设置关节限位（从 JAKA_ZU7_LIMITS 应用安全裕度）
+            std::vector<double> joint_min(7), joint_max(7);
+            for (int i = 0; i < 7; ++i) {
+                joint_min[i] = JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS;
+                joint_max[i] = JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS;
+            }
+            if (left_vel_controller_) left_vel_controller_->setJointLimits(joint_min, joint_max);
+            if (right_vel_controller_) right_vel_controller_->setJointLimits(joint_min, joint_max);
             
             RCLCPP_INFO(get_logger(), "✓ 速度伺服控制器已初始化");
             RCLCPP_INFO(get_logger(), "  has_z_offset=%s", has_z_offset_ ? "true" : "false");
@@ -309,6 +319,46 @@ public:
         if (connected_) {
             jaka_interface_.disconnect();
         }
+    }
+    
+    // 在构造函数完成后调用，初始化速度控制器
+    void initVelocityControllers() {
+        if (!ik_enabled_) return;
+        
+        RCLCPP_INFO(get_logger(), "[初始化] 创建速度控制器...");
+        
+        // 使用ROS2包查找机制获取URDF路径
+        std::string urdf_path;
+        try {
+            std::string package_path = ament_index_cpp::get_package_share_directory("qyh_dual_arms_description");
+            urdf_path = package_path + "/urdf/dual_arms.urdf";
+            RCLCPP_INFO(get_logger(), "[初始化] URDF路径: %s", urdf_path.c_str());
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(get_logger(), "[初始化] 找不到包 qyh_dual_arms_description: %s", e.what());
+            return;
+        }
+        
+        left_vel_controller_ = std::make_unique<qyh_jaka_control::VelocityServoController>(shared_from_this(), "left");
+        if (!left_vel_controller_->initialize(urdf_path, "base_link_left", "forward_lt")) {
+            RCLCPP_ERROR(get_logger(), "Failed to initialize left velocity controller");
+        }
+        
+        right_vel_controller_ = std::make_unique<qyh_jaka_control::VelocityServoController>(shared_from_this(), "right");
+        if (!right_vel_controller_->initialize(urdf_path, "base_link_right", "forward_rt")) {
+            RCLCPP_ERROR(get_logger(), "Failed to initialize right velocity controller");
+        }
+        
+        // 📋 统一设置关节限位（从 JAKA_ZU7_LIMITS 应用安全裕度）
+        std::vector<double> joint_min(7), joint_max(7);
+        for (int i = 0; i < 7; ++i) {
+            joint_min[i] = JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS;
+            joint_max[i] = JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS;
+        }
+        if (left_vel_controller_) left_vel_controller_->setJointLimits(joint_min, joint_max);
+        if (right_vel_controller_) right_vel_controller_->setJointLimits(joint_min, joint_max);
+        
+        RCLCPP_INFO(get_logger(), "✓ 速度伺服控制器已初始化");
+        RCLCPP_INFO(get_logger(), "  has_z_offset=%s", has_z_offset_ ? "true" : "false");
     }
 
 private:
@@ -643,11 +693,14 @@ private:
     // ==================== 关节限位检查 ====================
     bool checkJointLimits(const JointValue& joints, const std::string& arm_name) {
         for (int i = 0; i < 7; ++i) {
-            if (joints.jVal[i] < JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS ||
-                joints.jVal[i] > JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS) {
+            // 归一化角度（防止SDK返回超出[-π,π]的值）
+            double angle = normalizeAngle(joints.jVal[i]);
+            
+            if (angle < JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS ||
+                angle > JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS) {
                 RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                    "[Safety] %s 关节%d超出限位: %.3f (限位: %.3f ~ %.3f)",
-                    arm_name.c_str(), i+1, joints.jVal[i],
+                    "[Safety] %s 关节%d超出限位: %.3f (归一化: %.3f, 限位: %.3f ~ %.3f)",
+                    arm_name.c_str(), i+1, joints.jVal[i], angle,
                     JAKA_ZU7_LIMITS[i].pos_min, JAKA_ZU7_LIMITS[i].pos_max);
                 return false;
             }
@@ -735,8 +788,11 @@ private:
                 RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Active - Ready for commands ===");
             } else {
                 RCLCPP_ERROR(get_logger(), "[Servo] Both controllers failed to initialize, rolling back...");
+                // 回滚：关闭伺服并重置controller状态
                 jaka_interface_.servoMoveEnable(false, 0);
                 jaka_interface_.servoMoveEnable(false, 1);
+                if (left_vel_controller_) left_vel_controller_->reset();
+                if (right_vel_controller_) right_vel_controller_->reset();
                 return false;
             }
             
@@ -791,7 +847,7 @@ private:
     std::atomic<bool> enabled_;
     std::atomic<bool> servo_running_;
     int64_t last_cycle_duration_us_ = 0;
-    uint32_t cmd_index_ = 0;
+    std::atomic<uint32_t> cmd_index_{0};  // 线程安全的命令计数器
     
     // 缓存的机械臂位姿（主循环更新，状态发布使用）
     JointValue cached_left_joints_;
@@ -846,6 +902,8 @@ int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<JakaControlNode>();
+    // 在shared_ptr创建完成后初始化速度控制器
+    node->initVelocityControllers();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

@@ -63,6 +63,13 @@ public:
      * @brief Reset controller state
      */
     void reset();
+    
+    /**
+     * @brief Set joint position limits
+     * @param pos_min Minimum joint positions (rad)
+     * @param pos_max Maximum joint positions (rad)
+     */
+    void setJointLimits(const std::vector<double>& pos_min, const std::vector<double>& pos_max);
 
 private:
     rclcpp::Node::SharedPtr node_;
@@ -91,6 +98,20 @@ private:
     double max_linear_vel_ = 0.5;
     double max_angular_vel_ = 1.0;
     double joint_vel_limit_ = 1.5;
+    
+    // 安全参数（可配置）
+    double q_dot_min_ = 1e-4;        // 微小速度死区 (rad/s)
+    double max_delta_q_ = 0.02;      // 最大积分步长 (rad)
+    double lambda_min_ = 1e-4;       // 阻尼系数下限
+    double position_deadzone_ = 0.001;    // 位置死区 (m)
+    double orientation_deadzone_ = 0.017; // 姿态死区 (rad)
+    
+    // 关节限位（防止积分漂移）
+    std::vector<double> joint_pos_min_;
+    std::vector<double> joint_pos_max_;
+    
+    // 预分配Jacobian对象（性能优化）
+    KDL::Jacobian jac_;
     
     std::mutex state_mutex_;
     

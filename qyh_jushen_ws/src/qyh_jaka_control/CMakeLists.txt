@@ -17,6 +17,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(qyh_jaka_control_msgs REQUIRED)
 find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
@@ -78,6 +79,7 @@ ament_target_dependencies(jaka_control_node
   tf2_ros
   tf2_geometry_msgs
   qyh_jaka_control_msgs
+  ament_index_cpp
   orocos_kdl
   kdl_parser
   urdf
