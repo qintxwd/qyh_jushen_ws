@@ -568,10 +568,11 @@ private:
 
     // ==================== Bridge回调函数 ====================
     void leftBridgeCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 1000, 
-            "leftBridgeCallback: servo_running=%d, positions=%zu", 
+        RCLCPP_INFO(get_logger(), 
+            "[Callback] leftBridgeCallback received: servo_running=%d, positions=%zu", 
             servo_running_.load(), msg->position.size());
         if (servo_running_ && msg->position.size() >= 7) {
+            RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
             // ⭐ 智能重新同步：如果Bridge空闲后收到新指令，从当前位置重新初始化
@@ -583,8 +584,10 @@ private:
                     left_bridge_->initializeFromCurrent(current_joints);
                     RCLCPP_INFO(get_logger(), "[Left] Re-synced from current position after idle");
                 }
+            } else {
+            RCLCPP_WARN(get_logger(), "[Callback] Command rejected: servo_running=%d, size=%zu (need: true & >=7)", 
+                        servo_running_.load(), msg->position.size());
             }
-            
             left_bridge_->addCommand(positions);
         }
     }
@@ -695,17 +698,8 @@ private:
         }
         
         RCLCPP_INFO(get_logger(), "[Servo] Step 1/5: Setting up filter...");
-        // 应用默认滤波器
-        std::string filter_type = get_parameter("default_filter_type").as_string();
-        double cutoff = get_parameter("default_filter_cutoff").as_double();
-        RCLCPP_INFO(get_logger(), "[Servo] Filter type: %s, cutoff: %.2f", filter_type.c_str(), cutoff);
-        if (filter_type == "joint_lpf") {
-            jaka_interface_.setFilterJointLPF(cutoff);
-            RCLCPP_INFO(get_logger(), "[Servo] Joint LPF filter applied");
-        } else if (filter_type == "none") {
-            jaka_interface_.setFilterNone();
-            RCLCPP_INFO(get_logger(), "[Servo] No filter applied");
-        }
+        // 按照官方示例，默认使用 none filter（已在初始化时设置）
+        RCLCPP_INFO(get_logger(), "[Servo] Using none filter (set during initialization)");
         
         RCLCPP_INFO(get_logger(), "[Servo] Step 2/5: Enabling servo for left arm (id=0)...");
         // 显式启用双臂伺服 (0:左臂, 1:右臂)
@@ -796,21 +790,6 @@ private:
         JointValue jv;
         for(size_t i=0; i<7 && i<joints.size(); ++i) jv.jVal[i] = joints[i];
         return jv;
-    }
-    
-    bool autoInitialize() {
-        // 简化的自动初始化逻辑
-        if (!powered_ && auto_power_on_) {
-            if (jaka_interface_.powerOn()) powered_ = true;
-            else return false;
-            std::this_thread::sleep_for(1s);
-        }
-        if (powered_ && !enabled_ && auto_enable_) {
-            if (jaka_interface_.enableRobot()) enabled_ = true;
-            else return false;
-            std::this_thread::sleep_for(1s);
-        }
-        return true;
     }
 
     // ==================== 其他服务 (MoveJ, MoveL, Jog, Payload) ====================
