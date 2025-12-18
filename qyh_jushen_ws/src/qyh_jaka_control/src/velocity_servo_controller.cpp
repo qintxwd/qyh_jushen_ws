@@ -7,24 +7,8 @@ namespace qyh_jaka_control {
 
 VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, const std::string& arm_prefix)
     : node_(node), arm_prefix_(arm_prefix) {
-    // 声明参数
-    node_->declare_parameter("velocity_control.dt", 0.008);
-    node_->declare_parameter("velocity_control.linear_gain", 2.0);
-    node_->declare_parameter("velocity_control.angular_gain", 1.0);
-    node_->declare_parameter("velocity_control.max_linear_vel", 0.5);
-    node_->declare_parameter("velocity_control.max_angular_vel", 1.0);
-    node_->declare_parameter("velocity_control.joint_vel_limit", 1.5);
-    node_->declare_parameter("velocity_control.q_dot_min", 1e-4);
-    node_->declare_parameter("velocity_control.max_delta_q", 0.02);
-    node_->declare_parameter("velocity_control.lambda_min", 1e-4);
-    node_->declare_parameter("velocity_control.position_deadzone", 0.001);
-    node_->declare_parameter("velocity_control.orientation_deadzone", 0.017);
-    
-    // 关节限位将通过setJointLimits()从外部设置（避免硬编码）
-    node_->declare_parameter("velocity_control.joint_pos_min", std::vector<double>(7, -6.28));
-    node_->declare_parameter("velocity_control.joint_pos_max", std::vector<double>(7, 6.28));
-    
-    // 读取参数
+    // 参数已在 JakaControlNode 中声明，这里直接读取
+    // （避免重复声明导致 ParameterAlreadyDeclaredException）
     dt_ = node_->get_parameter("velocity_control.dt").as_double();
     linear_gain_ = node_->get_parameter("velocity_control.linear_gain").as_double();
     angular_gain_ = node_->get_parameter("velocity_control.angular_gain").as_double();
