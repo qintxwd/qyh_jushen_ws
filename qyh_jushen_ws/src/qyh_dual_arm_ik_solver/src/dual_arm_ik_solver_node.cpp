@@ -47,7 +47,7 @@ const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
 }};
 
 const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
-const double SAFETY_MARGIN_VEL = 1.2;     // 允许超过标称速度20%（考虑IK求解的突变）
+const double SAFETY_MARGIN_VEL = 1.0;     // 允许超过标称速度20%（考虑IK求解的突变）
 
 // # left joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
 // # right joint = 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
@@ -344,10 +344,11 @@ private:
         try {
             // 使用最新的TF变换（而不是消息时间戳对应的变换）
             // 这样即使消息稍旧，也能用当前TF树进行转换
+            geometry_msgs::msg::PoseStamped input_pose = *left_target_;
+            input_pose.header.stamp = rclcpp::Time(0);
             target_in_base_left = tf_buffer_->transform(
-                *left_target_, 
+                input_pose, 
                 "base_link_left",
-                tf2::TimePointZero,  // 使用最新可用的TF
                 tf2::durationFromSec(0.1)  // 100ms超时
             );
         } catch (const tf2::TransformException& ex) {
@@ -608,10 +609,11 @@ private:
         
         try {
             // 使用最新的TF变换
+            geometry_msgs::msg::PoseStamped input_pose = *right_target_;
+            input_pose.header.stamp = rclcpp::Time(0);
             target_in_base_right = tf_buffer_->transform(
-                *right_target_, 
+                input_pose, 
                 "base_link_right",
-                tf2::TimePointZero,  // 使用最新可用的TF
                 tf2::durationFromSec(0.1)  // 100ms超时
             );
         } catch (const tf2::TransformException& ex) {
