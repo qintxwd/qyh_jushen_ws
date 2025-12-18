@@ -575,39 +575,50 @@ private:
             RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
-            // ⭐ 智能重新同步：如果Bridge空闲后收到新指令，从当前位置重新初始化
-            if (left_bridge_->isEmpty()) {
+            // ⭐ 智能重新同步：只在长时间空闲（5秒+）后才从当前位置重新初始化
+            // 这样避免单次命令的回弹，同时保证长时间空闲后的安全性
+            auto idle_time = left_bridge_->getIdleTime();
+            if (left_bridge_->isEmpty() && idle_time > 5.0) {
                 JointValue current_pos;
                 if (jaka_interface_.getJointPositions(0, current_pos)) {
                     std::vector<double> current_joints(7);
                     for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
                     left_bridge_->initializeFromCurrent(current_joints);
-                    RCLCPP_INFO(get_logger(), "[Left] Re-synced from current position after idle");
+                    RCLCPP_INFO(get_logger(), "[Left] Re-synced from current position after %.1fs idle", idle_time);
                 }
-            } else {
+            }
+            
+            left_bridge_->addCommand(positions);
+        } else {
             RCLCPP_WARN(get_logger(), "[Callback] Command rejected: servo_running=%d, size=%zu (need: true & >=7)", 
                         servo_running_.load(), msg->position.size());
-            }
-            left_bridge_->addCommand(positions);
         }
     }
     
     void rightBridgeCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
+        RCLCPP_INFO(get_logger(), 
+            "[Callback] rightBridgeCallback received: servo_running=%d, positions=%zu", 
+            servo_running_.load(), msg->position.size());
         if (servo_running_ && msg->position.size() >= 7) {
+            RCLCPP_INFO(get_logger(), "[Callback] Condition passed, processing command");
             std::vector<double> positions(msg->position.begin(), msg->position.begin() + 7);
             
-            // ⭐ 智能重新同步：如果Bridge空闲后收到新指令，从当前位置重新初始化
-            if (right_bridge_->isEmpty()) {
+            // ⭐ 智能重新同步：只在长时间空闲（5秒+）后才从当前位置重新初始化
+            auto idle_time = right_bridge_->getIdleTime();
+            if (right_bridge_->isEmpty() && idle_time > 5.0) {
                 JointValue current_pos;
                 if (jaka_interface_.getJointPositions(1, current_pos)) {
                     std::vector<double> current_joints(7);
                     for (size_t i = 0; i < 7; ++i) current_joints[i] = current_pos.jVal[i];
                     right_bridge_->initializeFromCurrent(current_joints);
-                    RCLCPP_INFO(get_logger(), "[Right] Re-synced from current position after idle");
+                    RCLCPP_INFO(get_logger(), "[Right] Re-synced from current position after %.1fs idle", idle_time);
                 }
             }
             
             right_bridge_->addCommand(positions);
+        } else {
+            RCLCPP_WARN(get_logger(), "[Callback] Command rejected: servo_running=%d, size=%zu (need: true & >=7)", 
+                        servo_running_.load(), msg->position.size());
         }
     }
 

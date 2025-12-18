@@ -108,6 +108,11 @@ public:
     size_t getBufferSize() const;
     
     /**
+     * @brief 获取空闲时间（秒） - 从最后一次收到命令到现在的时间
+     */
+    double getIdleTime() const;
+    
+    /**
      * @brief 获取性能统计
      */
     ServoPerformanceStats getPerformanceStats() const;

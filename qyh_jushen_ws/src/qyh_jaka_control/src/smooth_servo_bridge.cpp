@@ -73,7 +73,6 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
         // 如果缓冲器为空，持续使用上一次的输出（保持位置）
         if (has_last_output_) {
             interpolated_positions = last_output_command_.positions;
-            // 降低频率，避免刷屏
             RCLCPP_INFO(logger_, 
                 "[Bridge] Buffer empty, holding last position: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
                 interpolated_positions[0], interpolated_positions[1], interpolated_positions[2],
@@ -109,6 +108,25 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
         // 更新last_output_command_
         last_output_command_.positions = interpolated_positions;
         last_output_command_.timestamp = now;
+        
+        // 检查是否已经足够接近目标（用于判断是否可以清空buffer）
+        // 因为我们使用.back()获取最新命令，如果已达到最新目标，说明所有中间命令都可以跳过
+        double max_diff = 0.0;
+        for (size_t i = 0; i < interpolated_positions.size(); ++i) {
+            double diff = std::abs(interpolated_positions[i] - latest_command.positions[i]);
+            max_diff = std::max(max_diff, diff);
+        }
+        
+        // 如果所有关节都已经非常接近最新目标（误差小于0.001弧度，约0.057度）
+        // 则认为已经达到目标，清空buffer（因为使用.back()时，中间的命令可以跳过）
+        const double REACHED_THRESHOLD = 0.001;
+        if (max_diff < REACHED_THRESHOLD && command_buffer_.size() > 0) {
+            size_t cleared_count = command_buffer_.size();
+            command_buffer_.clear();
+            RCLCPP_DEBUG(logger_, 
+                "[Bridge] Target reached (max_diff=%.6f), cleared %zu command(s) from buffer", 
+                max_diff, cleared_count);
+        }
     }
     
     // 计算延迟
@@ -126,9 +144,6 @@ bool SmoothServoBridge::getInterpolatedCommand(std::vector<double>& interpolated
         interpolated_positions[0], interpolated_positions[1], interpolated_positions[2],
         interpolated_positions[3], interpolated_positions[4], interpolated_positions[5],
         interpolated_positions[6], command_buffer_.size());
-    
-    // 清理缓冲器（可选：只保留最新的几个点）
-    // 这里我们保留所有点，让缓冲器自动管理
     
     return true;
 }
@@ -151,6 +166,15 @@ size_t SmoothServoBridge::getBufferSize() const
 {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     return command_buffer_.size();
+}
+
+double SmoothServoBridge::getIdleTime() const
+{
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - last_command_time_
+    ).count();
+    return duration / 1000.0;  // 返回秒
 }
 
 ServoPerformanceStats SmoothServoBridge::getPerformanceStats() const

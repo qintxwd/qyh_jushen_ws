@@ -748,7 +748,7 @@ private:
             publishJointCommand(ik_result, right_joint_pub_);
             return true;
         } else {
-            if (right_error_count_++ % 100 == 0) {
+            if (right_error_count_++ % 10 == 0) {
                 RCLCPP_WARN(get_logger(), "右臂IK失败 (错误计数: %d, 错误码: %d)", 
                     right_error_count_, ret);
                 
