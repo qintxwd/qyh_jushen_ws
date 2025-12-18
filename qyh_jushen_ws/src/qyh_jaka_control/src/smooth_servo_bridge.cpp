@@ -18,7 +18,7 @@ SmoothServoBridge::SmoothServoBridge(
       interpolation_weight_(0.5),
       has_last_output_(false),
       command_timeout_sec_(0.5),  // 默认500ms无指令则失效
-      stale_threshold_sec_(0.05),  // 50ms后缓存过期，使用current_position
+      stale_threshold_sec_(0.3),  // 200ms后缓存过期，适应手柄30Hz输入
       velocity_limits_(7, 2.0),  // 默认2.0 rad/s
       velocity_safety_factor_(0.8),  // 默认80%安全速度
       cycle_time_sec_(1.0 / target_frequency_hz),
