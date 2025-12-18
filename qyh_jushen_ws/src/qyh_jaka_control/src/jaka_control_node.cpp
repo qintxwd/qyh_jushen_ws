@@ -207,9 +207,10 @@ public:
         declare_parameter<bool>("visualization_only", false); // 仅可视化模式，不发送给真实机器人
         
         // Bridge 参数
-        declare_parameter<int>("buffer_size", 10);
-        declare_parameter<double>("interpolation_weight", 0.5);
+        declare_parameter<int>("buffer_size", 16);  // 增大缓冲区以提高平滑度
+        declare_parameter<double>("interpolation_weight", 0.3);  // 降低权重以提高平滑度
         declare_parameter<bool>("enable_interpolation", true);
+        declare_parameter<double>("velocity_safety_factor", 0.65);  // 降低速度以提高平滑度
 
         // 获取参数
         robot_ip_ = get_parameter("robot_ip").as_string();
@@ -237,6 +238,7 @@ public:
         
         double interp_weight = get_parameter("interpolation_weight").as_double();
         bool enable_interp = get_parameter("enable_interpolation").as_bool();
+        double velocity_safety_factor = get_parameter("velocity_safety_factor").as_double();
         
         left_bridge_->setInterpolationWeight(interp_weight);
         left_bridge_->enableInterpolation(enable_interp);
@@ -250,8 +252,15 @@ public:
         }
         left_bridge_->setVelocityLimits(velocity_limits);
         right_bridge_->setVelocityLimits(velocity_limits);
-        left_bridge_->setVelocitySafetyFactor(SAFETY_MARGIN_VEL);
-        right_bridge_->setVelocitySafetyFactor(SAFETY_MARGIN_VEL);
+        left_bridge_->setVelocitySafetyFactor(velocity_safety_factor);
+        right_bridge_->setVelocitySafetyFactor(velocity_safety_factor);
+        
+        RCLCPP_INFO(get_logger(), "========================================");
+        RCLCPP_INFO(get_logger(), "  平滑参数配置:");
+        RCLCPP_INFO(get_logger(), "    Buffer size: %zu", buffer_size);
+        RCLCPP_INFO(get_logger(), "    Interpolation weight: %.2f", interp_weight);
+        RCLCPP_INFO(get_logger(), "    Velocity safety factor: %.1f%%", velocity_safety_factor * 100.0);
+        RCLCPP_INFO(get_logger(), "========================================");
 
         // Publishers
         status_pub_ = create_publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>("/jaka/servo/status", 10);
@@ -696,10 +705,10 @@ private:
             joint_states_pub_->publish(joint_state_msg);
         }
         
-        RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000,
-            "[Status] Published all states (powered:%d, enabled:%d, servo:%d, joints:%zu)",
-            robot_state_msg.powered_on, robot_state_msg.enabled, 
-            robot_state_msg.servo_mode_enabled, joint_state_msg.position.size());
+        // RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 10000,
+        //     "[Status] Published all states (powered:%d, enabled:%d, servo:%d, joints:%zu)",
+        //     robot_state_msg.powered_on, robot_state_msg.enabled, 
+        //     robot_state_msg.servo_mode_enabled, joint_state_msg.position.size());
     }
 
     // ==================== Bridge回调函数 ====================
