@@ -110,33 +110,9 @@ public:
         left_z_offset_ = get_parameter("ik_solver.left_z_offset").as_double();
         right_z_offset_ = get_parameter("ik_solver.right_z_offset").as_double();
         
-        // 初始化速度控制器
+        // 速度控制器将在构造函数完成后初始化（避免shared_from_this()问题）
         if (ik_enabled_) {
             RCLCPP_INFO(get_logger(), "🎯 速度积分控制模式已启用");
-            
-            std::string urdf_path = "d:/work/yc/qyh_jushen_ws/qyh_jushen_ws/src/qyh_dual_arms_description/urdf/dual_arms.urdf";
-            
-            left_vel_controller_ = std::make_unique<qyh_jaka_control::VelocityServoController>(shared_from_this(), "left");
-            if (!left_vel_controller_->initialize(urdf_path, "base_link_left", "forward_lt")) {
-                RCLCPP_ERROR(get_logger(), "Failed to initialize left velocity controller");
-            }
-            
-            right_vel_controller_ = std::make_unique<qyh_jaka_control::VelocityServoController>(shared_from_this(), "right");
-            if (!right_vel_controller_->initialize(urdf_path, "base_link_right", "forward_rt")) {
-                RCLCPP_ERROR(get_logger(), "Failed to initialize right velocity controller");
-            }
-            
-            // 📌 统一设置关节限位（从 JAKA_ZU7_LIMITS 应用安全裕度）
-            std::vector<double> joint_min(7), joint_max(7);
-            for (int i = 0; i < 7; ++i) {
-                joint_min[i] = JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS;
-                joint_max[i] = JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS;
-            }
-            if (left_vel_controller_) left_vel_controller_->setJointLimits(joint_min, joint_max);
-            if (right_vel_controller_) right_vel_controller_->setJointLimits(joint_min, joint_max);
-            
-            RCLCPP_INFO(get_logger(), "✓ 速度伺服控制器已初始化");
-            RCLCPP_INFO(get_logger(), "  has_z_offset=%s", has_z_offset_ ? "true" : "false");
             
             // 初始化TF监听器
             tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
@@ -153,6 +129,7 @@ public:
             
             RCLCPP_INFO(get_logger(), "  ✓ TF监听器已初始化");
             RCLCPP_INFO(get_logger(), "  ✓ 订阅VR目标位姿话题");
+            RCLCPP_INFO(get_logger(), "  ⏳ 速度控制器将在节点完全初始化后创建");
         } else {
             RCLCPP_WARN(get_logger(), "⚠️ IK求解模式未启用，节点将不工作");
         }
