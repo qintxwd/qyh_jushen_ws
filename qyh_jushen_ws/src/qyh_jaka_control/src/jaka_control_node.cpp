@@ -554,7 +554,24 @@ private:
                 RCLCPP_DEBUG(get_logger(), "[MainLoop] Current cmd_index=%u", index);
                 if (!jaka_interface_.edgSend(&index)) {
                     RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
-                        "[MainLoop] Failed to send servo commands via edgSend");
+                        "[MainLoop] ❌ Failed to send servo commands via edgSend");
+                    
+                    // 🔧 检查机械臂错误状态
+                    int error[2] = {0, 0};
+                    if (jaka_interface_.isInError(error)) {
+                        if (error[0] || error[1]) {
+                            ErrorCode error_code;
+                            if (jaka_interface_.getLastError(error_code)) {
+                                RCLCPP_ERROR(get_logger(), 
+                                    "[MainLoop] 🚨 Robot error detected - Left:%d Right:%d | Code:%d Msg:%s", 
+                                    error[0], error[1], error_code.code, error_code.desc);
+                            }
+                            // // 自动尝试恢复
+                            // RCLCPP_WARN(get_logger(), "[MainLoop] Attempting automatic recovery...");
+                            // jaka_interface_.clearError();
+                            // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                    }
                     return;  // 发送失败，停止本周期
                 }
                 index++;
