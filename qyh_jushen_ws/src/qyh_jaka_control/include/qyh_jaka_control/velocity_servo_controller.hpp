@@ -11,6 +11,7 @@
 #include <kdl/frames.hpp>
 #include <kdl/jacobian.hpp>
 #include <kdl/jntarray.hpp>
+#include <trac_ik/trac_ik.hpp>
 #include <vector>
 #include <string>
 #include <mutex>
@@ -79,6 +80,7 @@ private:
     KDL::Chain chain_;
     std::shared_ptr<KDL::ChainJntToJacSolver> jac_solver_;
     std::shared_ptr<KDL::ChainFkSolverPos_recursive> fk_solver_;
+    std::unique_ptr<TRAC_IK::TRAC_IK> tracik_solver_;  // TracIK求解器（支持seed state）
     
     // State
     KDL::JntArray current_q_;

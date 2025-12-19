@@ -412,3 +412,5 @@ cd ~/qyh_jushen_ws/qyh_jushen_ws
 rm -rf build install log
 colcon build --symlink-install
 ```
+
+sudo apt install libnlopt-dev ros-humble-orocos-kdl-vendor

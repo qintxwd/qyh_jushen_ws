@@ -22,6 +22,7 @@ find_package(qyh_jaka_control_msgs REQUIRED)
 find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(urdf REQUIRED)
+find_package(trac_ik_lib REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
 # Include directories
@@ -61,6 +62,7 @@ ament_target_dependencies(velocity_servo_controller
   orocos_kdl
   kdl_parser
   urdf
+  trac_ik_lib
 )
 target_link_libraries(velocity_servo_controller
   ${orocos_kdl_LIBRARIES}
@@ -84,6 +86,7 @@ ament_target_dependencies(jaka_control_node
   orocos_kdl
   kdl_parser
   urdf
+  trac_ik_lib
 )
 target_link_libraries(jaka_control_node
   jaka_interface
