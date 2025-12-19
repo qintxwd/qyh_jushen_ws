@@ -84,7 +84,8 @@ void VelocityServoController::updateRobotState(const std::vector<double>& curren
     if (first_update_) {
         integrated_q_ = current_joints;
         first_update_ = false;
-        RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Initialized integrated state from robot");
+        has_initialized_command_ = true;  // 🔧 标记已有有效指令，立即进入静止状态
+        RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Initialized integrated state from robot (ready for hold)");
     }
 }
 
@@ -97,7 +98,17 @@ void VelocityServoController::setTargetPose(const geometry_msgs::msg::PoseStampe
 bool VelocityServoController::computeNextCommand(std::vector<double>& next_joints) {
     std::lock_guard<std::mutex> lock(state_mutex_);
 
-    if (!initialized_ || !has_target_) return false;
+    if (!initialized_) return false;
+    
+    // 🔧 关键修复：当没有VR目标时，返回上次的积分状态（保持静止）
+    // 这样可以避免用真实关节位置（带抖动）发送指令，防止误差累积
+    if (!has_target_) {
+        if (has_initialized_command_) {
+            next_joints = integrated_q_;
+            return true;  // 返回上次的固定指令，保持静止
+        }
+        return false;  // 还没有初始化过指令
+    }
 
     // 1️⃣ 当前末端位姿（用真实关节状态FK）
     // CRITICAL: Use real robot state (current_q_) for FK and Jacobian, not integrated state
@@ -179,6 +190,8 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         
         next_joints[i] = integrated_q_[i];
     }
+    
+    has_initialized_command_ = true;  // 标记已有有效的静止指令
 
     return true;
 }
@@ -187,6 +200,7 @@ void VelocityServoController::reset() {
     std::lock_guard<std::mutex> lock(state_mutex_);
     has_target_ = false;
     first_update_ = true;
+    has_initialized_command_ = false;  // 重置时清除指令初始化标志
     // Note: integrated_q_ will be re-initialized from robot state on next updateRobotState()
     // This ensures smooth restart without jumps
 }

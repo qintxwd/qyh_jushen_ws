@@ -892,56 +892,18 @@ private:
                 RCLCPP_WARN(get_logger(), "[Servo] ✗ Failed to initialize right controller");
             }
             
-            // ★★★ 初始化完成后再允许主循环执行伺服 ★★★
+            // ★★★ 初始化完成后立即启动主循环 ★★★
+            // VelocityServoController 已在 updateRobotState() 时同步了真实位置
+            // 并设置了 has_initialized_command_=true，主循环会自动发送静止指令
             if (left_init_success || right_init_success) {
-                RCLCPP_INFO(get_logger(), "[Servo] Step 5/5: Controllers initialized, starting stabilization period...");
+                RCLCPP_INFO(get_logger(), "[Servo] Step 5/5: Controllers initialized and ready");
                 
-                // 🔧 关键修复：启动伺服后，先发送几个周期的当前位置让机器人稳定
-                // 这避免了机器人控制器内部状态不同步导致的错误
-                RCLCPP_INFO(get_logger(), "[Servo] Sending current position for 1 second to stabilize...");
-                JointValue cmd_left_jv, cmd_right_jv;
-                memset(&cmd_left_jv, 0, sizeof(JointValue));
-                memset(&cmd_right_jv, 0, sizeof(JointValue));
-                if (left_init_success) {
-                        jaka_interface_.getJointPositions(0, cmd_left_jv);
-                        RCLCPP_INFO(get_logger(), "[Servo] stabilize CMD Left joints: [%f, %f, %f, %f, %f, %f, %f]",
-                            cmd_left_jv.jVal[0], cmd_left_jv.jVal[1], cmd_left_jv.jVal[2], cmd_left_jv.jVal[3],
-                            cmd_left_jv.jVal[4], cmd_left_jv.jVal[5], cmd_left_jv.jVal[6]);
-                 }
-                 if( right_init_success) {
-                        jaka_interface_.getJointPositions(1, cmd_right_jv);
-                        RCLCPP_INFO(get_logger(), "[Servo] stabilize CMD Right joints: [%f, %f, %f, %f, %f, %f, %f]",
-                            cmd_right_jv.jVal[0], cmd_right_jv.jVal[1], cmd_right_jv.jVal[2], cmd_right_jv.jVal[3],
-                            cmd_right_jv.jVal[4], cmd_right_jv.jVal[5], cmd_right_jv.jVal[6]);
-                 }
-                // 🔧 关键：cmd_index必须连续递增，不能每次都是0！
-                uint32_t stab_idx = 0;
-                for (int i = 0; i < 125; ++i) {  // 125个周期 = 1秒
-                    JointValue left_jv, right_jv;
-                    if (left_init_success) {
-                        jaka_interface_.getJointPositions(0, left_jv);
-                        RCLCPP_INFO(get_logger(), "[Servo] stabilize Left joints: [%f, %f, %f, %f, %f, %f, %f]",
-                            left_jv.jVal[0], left_jv.jVal[1], left_jv.jVal[2], left_jv.jVal[3],
-                            left_jv.jVal[4], left_jv.jVal[5], left_jv.jVal[6]);
-                        jaka_interface_.edgServoJ(0, cmd_left_jv, true);
-                    }
-                    if (right_init_success) {
-                        jaka_interface_.getJointPositions(1, right_jv);
-                        RCLCPP_INFO(get_logger(), "[Servo] stabilize Right joints: [%f, %f, %f, %f, %f, %f, %f]",
-                            right_jv.jVal[0], right_jv.jVal[1], right_jv.jVal[2], right_jv.jVal[3],
-                            right_jv.jVal[4], right_jv.jVal[5], right_jv.jVal[6]);
-                        jaka_interface_.edgServoJ(1, cmd_right_jv, true);
-                    }
-                    jaka_interface_.edgSend(&stab_idx);  // 使用递增索引
-                    stab_idx++;  // 每次递增
-                    std::this_thread::sleep_for(std::chrono::milliseconds(8));
-                }
+                // 初始化命令索引
+                cmd_index_.store(0);
                 
-                // 将稳定期结束的索引同步到主循环，确保命令索引连续
-                cmd_index_.store(stab_idx);
-                RCLCPP_INFO(get_logger(), "[Servo] ✓ Stabilization complete (sent %u commands)", stab_idx);
+                // 立即启动伺服模式，主循环会自动发送静止指令
                 servo_running_ = true;
-                RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Active - Ready for commands ===");
+                RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Active - Main loop will send hold commands ===");
             } else {
                 RCLCPP_ERROR(get_logger(), "[Servo] Both controllers failed to initialize, rolling back...");
                 // 回滚：关闭伺服并重置controller状态
