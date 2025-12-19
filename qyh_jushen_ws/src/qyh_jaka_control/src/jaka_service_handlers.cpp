@@ -100,15 +100,24 @@ void JakaServiceHandlers::handleMoveL(const qyh_jaka_control_msgs::srv::MoveL::R
 }
 
 void JakaServiceHandlers::handleSetToolOffset(const qyh_jaka_control_msgs::srv::SetToolOffset::Request::SharedPtr, qyh_jaka_control_msgs::srv::SetToolOffset::Response::SharedPtr res) {
-    res->success = true; // Placeholder
+    res->success = jaka_interface_.setToolOffset(req->robot_id, req->tool_offset);
 }
 
 void JakaServiceHandlers::handleSetPayload(const qyh_jaka_control_msgs::srv::SetPayload::Request::SharedPtr, qyh_jaka_control_msgs::srv::SetPayload::Response::SharedPtr res) {
-    res->success = true; // Placeholder
+    res->success = jaka_interface_.setPayload(req->robot_id, req->mass);
 }
 
 void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr, qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res) {
-    res->success = true; // Placeholder
+    double mass;
+    double centroid_x, centroid_y, centroid_z;
+    
+    res->success = jaka_interface_.getPayload(req->robot_id, mass, centroid_x, centroid_y, centroid_z);
+    if (res->success) {
+        res->mass = mass;
+        res->centroid_x = centroid_x;
+        res->centroid_y = centroid_y;
+        res->centroid_z = centroid_z;
+    }
 }
 
 } // namespace qyh_jaka_control
