@@ -22,6 +22,7 @@ find_package(qyh_jaka_control_msgs REQUIRED)
 find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(urdf REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # Include directories
 include_directories(
@@ -89,6 +90,7 @@ target_link_libraries(jaka_control_node
   velocity_servo_controller
   ${JAKA_API_LIB}
   ${orocos_kdl_LIBRARIES}
+  yaml-cpp
 )
 
 # Bridge node for teleoperation (subscribes to /left_arm/joint_command, /right_arm/joint_command)

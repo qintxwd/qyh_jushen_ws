@@ -29,8 +29,11 @@
 #include <map>
 #include <array>
 #include <cmath>
+#include <yaml-cpp/yaml.h>
+#include <filesystem>
 
 using namespace std::chrono_literals;
+namespace fs = std::filesystem;
 
 // ==================== IK求解相关定义 ====================
 // JAKA Zu7 关节限位和速度限制
@@ -242,6 +245,10 @@ public:
             // 3. 设置滤波器为none
             RCLCPP_INFO(get_logger(), "Setting filter to none...");
             jaka_interface_.setFilterNone();
+            
+            // 🔧 新增：在上电前设置负载
+            RCLCPP_INFO(get_logger(), "Loading and setting payload configuration...");
+            loadAndSetPayloadFromConfig();
             
             // 4. 上电
             RCLCPP_INFO(get_logger(), "Powering on...");
@@ -659,6 +666,88 @@ private:
         }
     }
 
+    // ==================== 负载配置加载 ====================
+    /**
+     * @brief 从YAML配置文件加载并设置夹爪负载
+     * @return true if successful
+     */
+    bool loadAndSetPayloadFromConfig() {
+        // 获取配置文件路径：~/qyh_jushen_ws/persistent/preset/payload_config.yaml
+        std::string home_dir = std::getenv("HOME") ? std::getenv("HOME") : std::getenv("USERPROFILE");
+        if (home_dir.empty()) {
+            // 尝试使用当前工作目录的相对路径
+            home_dir = ".";
+        }
+        
+        fs::path config_path = fs::path(home_dir) / "qyh_jushen_ws" / "persistent" / "preset" / "payload_config.yaml";
+        
+        // 如果找不到，尝试从当前可执行文件往上找
+        if (!fs::exists(config_path)) {
+            fs::path alt_path = fs::current_path().parent_path().parent_path().parent_path() / "persistent" / "preset" / "payload_config.yaml";
+            if (fs::exists(alt_path)) {
+                config_path = alt_path;
+            }
+        }
+        
+        if (!fs::exists(config_path)) {
+            RCLCPP_WARN(get_logger(), "Payload config file not found at: %s", config_path.string().c_str());
+            RCLCPP_WARN(get_logger(), "Skipping payload configuration. Using default robot settings.");
+            return false;
+        }
+        
+        try {
+            RCLCPP_INFO(get_logger(), "Loading payload config from: %s", config_path.string().c_str());
+            YAML::Node config = YAML::LoadFile(config_path.string());
+            
+            // 读取左右夹爪质量
+            double left_mass = 0.0;
+            double right_mass = 0.0;
+            
+            if (config["left_gripper"] && config["left_gripper"]["mass"]) {
+                left_mass = config["left_gripper"]["mass"].as<double>();
+                RCLCPP_INFO(get_logger(), "  Left gripper mass: %.2f kg", left_mass);
+            } else {
+                RCLCPP_WARN(get_logger(), "  Left gripper mass not found in config, using 0.0 kg");
+            }
+            
+            if (config["right_gripper"] && config["right_gripper"]["mass"]) {
+                right_mass = config["right_gripper"]["mass"].as<double>();
+                RCLCPP_INFO(get_logger(), "  Right gripper mass: %.2f kg", right_mass);
+            } else {
+                RCLCPP_WARN(get_logger(), "  Right gripper mass not found in config, using 0.0 kg");
+            }
+            
+            // 设置负载到机器人（centroid_x默认150mm，即夹爪质心在末端前方15cm）
+            RCLCPP_INFO(get_logger(), "Setting payload to robot...");
+            
+            bool left_success = jaka_interface_.setPayload(0, left_mass, 150.0);
+            if (left_success) {
+                RCLCPP_INFO(get_logger(), "  ✓ Left arm payload set: %.2f kg", left_mass);
+            } else {
+                RCLCPP_ERROR(get_logger(), "  ✗ Failed to set left arm payload");
+            }
+            
+            bool right_success = jaka_interface_.setPayload(1, right_mass, 150.0);
+            if (right_success) {
+                RCLCPP_INFO(get_logger(), "  ✓ Right arm payload set: %.2f kg", right_mass);
+            } else {
+                RCLCPP_ERROR(get_logger(), "  ✗ Failed to set right arm payload");
+            }
+            
+            // 等待设置生效
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            
+            return left_success && right_success;
+            
+        } catch (const YAML::Exception& e) {
+            RCLCPP_ERROR(get_logger(), "Failed to parse payload config: %s", e.what());
+            return false;
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(get_logger(), "Error loading payload config: %s", e.what());
+            return false;
+        }
+    }
+    
     // ==================== 关节限位检查 ====================
     bool checkJointLimits(const JointValue& joints, const std::string& arm_name) {
         for (int i = 0; i < 7; ++i) {
