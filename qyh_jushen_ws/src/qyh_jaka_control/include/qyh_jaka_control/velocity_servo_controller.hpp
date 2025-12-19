@@ -141,6 +141,9 @@ private:
     std::mutex state_mutex_;
     bool has_initialized_command_ = false;  // 是否已有有效的静止指令（避免抖动累积）
     
+    // 饱和计数器（防止长期贴着max_delta_q_走）
+    std::vector<int> sat_count_;
+
     // Helper to convert Pose msg to KDL Frame
     KDL::Frame poseToKDL(const geometry_msgs::msg::Pose& pose);
     

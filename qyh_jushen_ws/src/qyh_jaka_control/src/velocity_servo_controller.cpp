@@ -91,6 +91,7 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     current_q_.resize(chain_.getNrOfJoints());
     joint_target_.resize(chain_.getNrOfJoints(), 0.0);
     integrated_q_.resize(chain_.getNrOfJoints(), 0.0);
+    sat_count_.resize(chain_.getNrOfJoints(), 0);
     
     // 预分配Jacobian对象，避免每次计算时重新分配内存
     jac_ = KDL::Jacobian(chain_.getNrOfJoints());
@@ -132,13 +133,19 @@ void VelocityServoController::setJointTarget(const std::vector<double>& joint_ta
         return;
     }
     
-    // 🔥 防止IK解跳变过大（JAKA会报"轨迹异常"）
-    const double max_jump = 0.25;  // rad，经验值：约14°
+    // � 刀1：IK目标平滑（Target Smoothing）
+    // 限制目标值的变化率，避免IK解突变直接传给Servo
+    // 即使IK解是合法的，如果变化太快，Servo也追不上，会导致饱和
+    const double max_target_step = 0.02; // rad, 允许IK目标每帧最大跳变 (30Hz -> 0.6 rad/s)
+    
     for (size_t i = 0; i < joint_target.size(); ++i) {
+        // 如果是第一次或者没有目标，就以当前位置为基准
+        double prev_target = has_target_ ? joint_target_[i] : current_q_(i);
+        
         joint_target_[i] = std::clamp(
             joint_target[i],
-            current_q_(i) - max_jump,
-            current_q_(i) + max_jump
+            prev_target - max_target_step,
+            prev_target + max_target_step
         );
     }
     
@@ -229,12 +236,17 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
     
     unsigned int n_joints = chain_.getNrOfJoints();
     
-    // ✅ 漂移修正：防止积分器与真实位置偏离过大
+    // ✅ 漂移修正：软限制积分器与真实位置的偏差
+    // 改为Clamp模式，避免Hard Reset导致的指令突变（速度冲击）
     for (unsigned int i = 0; i < n_joints; ++i) {
         double drift_thresh = (i >= 4) ? 0.02 : 0.05;  // 腕部更严格
-        if (std::abs(integrated_q_[i] - current_q_(i)) > drift_thresh) {
-            integrated_q_[i] = current_q_(i);
-            RCLCPP_DEBUG(node_->get_logger(), "[%s] Joint %d drift corrected", arm_prefix_.c_str(), i);
+        
+        // 将积分器限制在当前位置的邻域内
+        // 这样即使跑偏，也只是"拖着走"，而不会"跳回"
+        if (integrated_q_[i] > current_q_(i) + drift_thresh) {
+            integrated_q_[i] = current_q_(i) + drift_thresh;
+        } else if (integrated_q_[i] < current_q_(i) - drift_thresh) {
+            integrated_q_[i] = current_q_(i) - drift_thresh;
         }
     }
     
@@ -259,17 +271,44 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         // 位置积分
         double delta_q = cmd_vel * dt_;
         
-        // 单步增量保护（防止JAKA报错）
-        delta_q = std::clamp(delta_q, -max_delta_q_, max_delta_q_);
+        // 🔪 刀3：Servo层最终安全钳（Final Safety Clamp）
+        // 无论积分器怎么算，发给机器人的指令绝对不能超过当前位置的 max_delta_q_
+        // 这是避免 "Following Error" 的最后一道防线
         
-        integrated_q_[i] += delta_q;
+        // 预期的新位置（基于积分器）
+        double expected_q = integrated_q_[i] + delta_q;
+        
+        // 计算相对于真实位置的偏差
+        double real_delta = expected_q - current_q_(i);
+        
+        // 强制钳位到安全范围 (max_delta_q_ = 0.02 rad)
+        real_delta = std::clamp(real_delta, -max_delta_q_, max_delta_q_);
+        
+        // 🔪 刀4：饱和计数器（Saturation Counter）
+        // 如果指令长期贴着 max_delta_q_ 走，说明 Servo 已经跟不上了
+        // JAKA 会认为这是"外部轨迹异常"，所以我们需要自己先熔断
+        if (std::abs(real_delta) > 0.9 * max_delta_q_) {
+            sat_count_[i]++;
+        } else {
+            sat_count_[i] = 0;
+        }
+        
+        if (sat_count_[i] > 15) { // ~120ms @ 125Hz
+             // 熔断保护：冻结该关节
+             real_delta = 0.0;
+        }
+        
+        // 反算最终指令
+        next_joints[i] = current_q_(i) + real_delta;
+        
+        // 更新积分器（Anti-windup，保持同步）
+        integrated_q_[i] = next_joints[i];
         
         // 硬限位保护
         if (i < joint_pos_min_.size() && i < joint_pos_max_.size()) {
             integrated_q_[i] = std::clamp(integrated_q_[i], joint_pos_min_[i], joint_pos_max_[i]);
+            next_joints[i] = integrated_q_[i];
         }
-        
-        next_joints[i] = integrated_q_[i];
     }
     
     has_initialized_command_ = true;
