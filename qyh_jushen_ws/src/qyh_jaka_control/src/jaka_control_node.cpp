@@ -100,39 +100,33 @@ public:
 
         // 速度控制模式参数
         auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
-        declare_parameter<bool>("ik_solver.enabled", true);
         declare_parameter<bool>("ik_solver.has_z_offset", true);
         declare_parameter<double>("ik_solver.left_z_offset", 0.219885132);
         declare_parameter<double>("ik_solver.right_z_offset", 0.217950931);
         
-        ik_enabled_ = get_parameter("ik_solver.enabled").as_bool();
         has_z_offset_ = get_parameter("ik_solver.has_z_offset").as_bool();
         left_z_offset_ = get_parameter("ik_solver.left_z_offset").as_double();
         right_z_offset_ = get_parameter("ik_solver.right_z_offset").as_double();
         
         // 速度控制器将在构造函数完成后初始化（避免shared_from_this()问题）
-        if (ik_enabled_) {
-            RCLCPP_INFO(get_logger(), "🎯 速度积分控制模式已启用");
-            
-            // 初始化TF监听器
-            tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
-            tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
-            
-            // 订阅VR目标位姿
-            left_vr_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-                "/teleop/left_hand/target", qos,
-                std::bind(&JakaControlNode::leftVRTargetCallback, this, std::placeholders::_1));
-            
-            right_vr_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-                "/teleop/right_hand/target", qos,
-                std::bind(&JakaControlNode::rightVRTargetCallback, this, std::placeholders::_1));
-            
-            RCLCPP_INFO(get_logger(), "  ✓ TF监听器已初始化");
-            RCLCPP_INFO(get_logger(), "  ✓ 订阅VR目标位姿话题");
-            RCLCPP_INFO(get_logger(), "  ⏳ 速度控制器将在节点完全初始化后创建");
-        } else {
-            RCLCPP_WARN(get_logger(), "⚠️ IK求解模式未启用，节点将不工作");
-        }
+        RCLCPP_INFO(get_logger(), "🎯 速度积分控制模式已启用");
+        
+        // 初始化TF监听器
+        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+        tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+        
+        // 订阅VR目标位姿
+        left_vr_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/teleop/left_hand/target", qos,
+            std::bind(&JakaControlNode::leftVRTargetCallback, this, std::placeholders::_1));
+        
+        right_vr_target_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+            "/teleop/right_hand/target", qos,
+            std::bind(&JakaControlNode::rightVRTargetCallback, this, std::placeholders::_1));
+        
+        RCLCPP_INFO(get_logger(), "  ✓ TF监听器已初始化");
+        RCLCPP_INFO(get_logger(), "  ✓ 订阅VR目标位姿话题");
+        RCLCPP_INFO(get_logger(), "  ⏳ 速度控制器将在节点完全初始化后创建");
 
         // 创建服务处理器（负责所有服务回调）
         service_handlers_ = std::make_unique<qyh_jaka_control::JakaServiceHandlers>(
@@ -300,7 +294,6 @@ public:
     
     // 在构造函数完成后调用，初始化速度控制器
     void initVelocityControllers() {
-        if (!ik_enabled_) return;
         
         RCLCPP_INFO(get_logger(), "[初始化] 创建速度控制器...");
         
@@ -835,7 +828,6 @@ private:
     // IK求解相关
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
-    bool ik_enabled_{false};
     bool target_x_left_{false};
     bool has_z_offset_{true};
     double left_z_offset_{0.219885132};
