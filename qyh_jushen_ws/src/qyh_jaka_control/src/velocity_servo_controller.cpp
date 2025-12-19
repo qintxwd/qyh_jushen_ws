@@ -72,8 +72,8 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     // 注意：TracIK构造函数需要URDF XML字符串，不是文件路径
     tracik_solver_ = std::make_unique<TRAC_IK::TRAC_IK>(
         base_link, tip_link, urdf_xml, 
-        0.005,  // timeout: 5ms求解时间
-        1e-5,   // epsilon: 位置误差容限（米）
+        0.01,   // timeout: 10ms求解时间（放宽以提高成功率）
+        1e-4,   // epsilon: 0.1mm位置误差容限（放宽以减少震荡）
         TRAC_IK::Distance  // 同时优化位置和姿态
     );
     
@@ -155,53 +155,73 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         return true;
     }
 
-    // 3️⃣ 🔥 使用TracIK求解目标关节位置（利用seed state避免多解跳变）
-    // 准备seed state（使用积分状态作为参考，保证解的连续性）
-    KDL::JntArray seed_state(chain_.getNrOfJoints());
-    for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
+    unsigned int n_joints = chain_.getNrOfJoints();
+    
+    // 2️⃣ 积分状态漂移修正：避免长期偏离真实关节（分关节阈值）
+    for (unsigned int i = 0; i < n_joints; ++i) {
+        // 末端wrist关节(4-6)更敏感，用更小阈值；大臂关节(0-3)用较大阈值
+        double drift_thresh = (i >= 4) ? 0.02 : 0.05;  // wrist: 1.15°, arm: 2.86°
+        if (std::abs(integrated_q_[i] - current_q_(i)) > drift_thresh) {
+            integrated_q_[i] = current_q_(i);
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] Joint %d drift corrected", arm_prefix_.c_str(), i);
+        }
+    }
+
+    // 3️⃣ 🔥 误差缩放与目标插值（借鉴旧版，防止冲过头导致震荡）
+    // 根据误差大小动态调整接近速度
+    double linear_scale = std::min(1.0, max_linear_vel_ * dt_ / (position_error + 1e-6));
+    double angular_scale = std::min(1.0, max_angular_vel_ * dt_ / (orientation_error + 1e-6));
+    double approach_factor = std::min(linear_scale, angular_scale);
+    
+    // 对目标位姿进行插值，渐进接近
+    KDL::Frame interpolated_target;
+    interpolated_target.p = current_pose.p + (target_kdl.p - current_pose.p) * approach_factor;
+    
+    // 姿态插值（四元数球面线性插值的简化版）
+    KDL::Rotation rot_diff = current_pose.M.Inverse() * target_kdl.M;
+    KDL::Vector rot_axis;
+    double rot_angle = rot_diff.GetRotAngle(rot_axis);
+    
+    // 🔧 关键保护：极小角度时保持当前姿态，避免轴不稳定导致wrist抖动
+    if (rot_angle > 1e-3) {  // >0.057°才插值
+        interpolated_target.M = current_pose.M * KDL::Rotation::Rot(rot_axis, rot_angle * approach_factor);
+    } else {
+        interpolated_target.M = current_pose.M;  // 姿态误差极小，保持不动
+    }
+
+    // 4️⃣ 使用TracIK求解插值后的目标（利用seed state避免多解跳变）
+    KDL::JntArray seed_state(n_joints);
+    for (unsigned int i = 0; i < n_joints; ++i) {
         seed_state(i) = integrated_q_[i];
     }
     
-    // 调用TracIK求解
-    KDL::JntArray result_joints(chain_.getNrOfJoints());
-    int rc = tracik_solver_->CartToJnt(seed_state, target_kdl, result_joints);
+    KDL::JntArray result_joints(n_joints);
+    int rc = tracik_solver_->CartToJnt(seed_state, interpolated_target, result_joints);
     
     if (rc < 0) {
-        // IK求解失败，保持当前位置
+        // 🔄 IK失败，保持当前积分状态（不重置，避免卡顿）
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-            "[%s] TracIK failed (code=%d), target may be out of workspace", arm_prefix_.c_str(), rc);
+            "[%s] TracIK failed (code=%d), maintaining current position", arm_prefix_.c_str(), rc);
         next_joints = integrated_q_;
         return true;
     }
     
-    // 4️⃣ 计算到IK目标的增量并平滑插值
-    next_joints.resize(chain_.getNrOfJoints());
+    // 5️⃣ 计算增量并限制步长（简化限速策略，避免过度平滑）
+    next_joints.resize(n_joints);
     double max_joint_delta = 0.0;
     
-    for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
+    for (unsigned int i = 0; i < n_joints; ++i) {
         double delta_q = result_joints(i) - integrated_q_[i];
         max_joint_delta = std::max(max_joint_delta, std::abs(delta_q));
         
-        // 限制单步增量（防止跳变）
-        if (delta_q > max_delta_q_) delta_q = max_delta_q_;
-        if (delta_q < -max_delta_q_) delta_q = -max_delta_q_;
+        // 单步增量保护（防止跳变）
+        delta_q = std::clamp(delta_q, -max_delta_q_, max_delta_q_);
         
         integrated_q_[i] += delta_q;
         
         // 🔒 硬限位保护
         if (i < joint_pos_min_.size() && i < joint_pos_max_.size()) {
-            if (integrated_q_[i] > joint_pos_max_[i]) {
-                integrated_q_[i] = joint_pos_max_[i];
-                RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
-                    "[%s] Joint %d exceeded max limit, clamped to %.3f", 
-                    arm_prefix_.c_str(), i, joint_pos_max_[i]);
-            }
-            if (integrated_q_[i] < joint_pos_min_[i]) {
-                integrated_q_[i] = joint_pos_min_[i];
-                RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
-                    "[%s] Joint %d exceeded min limit, clamped to %.3f", 
-                    arm_prefix_.c_str(), i, joint_pos_min_[i]);
-            }
+            integrated_q_[i] = std::clamp(integrated_q_[i], joint_pos_min_[i], joint_pos_max_[i]);
         }
         
         next_joints[i] = integrated_q_[i];
