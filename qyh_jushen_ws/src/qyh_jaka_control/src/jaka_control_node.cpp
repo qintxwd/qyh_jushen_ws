@@ -107,6 +107,25 @@ public:
         declare_parameter<double>("ik_solver.left_z_offset", 0.219885132);
         declare_parameter<double>("ik_solver.right_z_offset", 0.217950931);
         
+        // 声明速度控制器参数（供 VelocityServoController 使用）
+        declare_parameter<double>("velocity_control.dt", 0.008);
+        declare_parameter<double>("velocity_control.linear_gain", 2.0);
+        declare_parameter<double>("velocity_control.angular_gain", 1.0);
+        declare_parameter<double>("velocity_control.max_linear_vel", 0.5);
+        declare_parameter<double>("velocity_control.max_angular_vel", 1.0);
+        declare_parameter<double>("velocity_control.joint_vel_limit", 1.5);
+        declare_parameter<double>("velocity_control.q_dot_min", 1e-4);
+        declare_parameter<double>("velocity_control.max_delta_q", 0.02);
+        declare_parameter<double>("velocity_control.lambda_min", 1e-4);
+        declare_parameter<double>("velocity_control.position_deadzone", 0.001);
+        declare_parameter<double>("velocity_control.orientation_deadzone", 0.017);
+        
+        // 关节限位（默认值，会在 initVelocityControllers 中设置）
+        std::vector<double> default_joint_min(7, -6.2832);
+        std::vector<double> default_joint_max(7, 6.2832);
+        declare_parameter<std::vector<double>>("velocity_control.joint_pos_min", default_joint_min);
+        declare_parameter<std::vector<double>>("velocity_control.joint_pos_max", default_joint_max);
+        
         has_z_offset_ = get_parameter("ik_solver.has_z_offset").as_bool();
         left_z_offset_ = get_parameter("ik_solver.left_z_offset").as_double();
         right_z_offset_ = get_parameter("ik_solver.right_z_offset").as_double();

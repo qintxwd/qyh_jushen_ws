@@ -70,5 +70,38 @@
       left_z_offset: 0.219885132  # 左臂零位Z偏移(m)
       right_z_offset: 0.217950931  # 右臂零位Z偏移(m)
 
+    # 速度积分控制参数 (Velocity Servo Controller)
+    velocity_control:
+      # 控制周期与增益
+      dt: 0.008  # 控制周期 (s), 对应125Hz
+      linear_gain: 2.0  # 位置误差增益
+      angular_gain: 1.0  # 姿态误差增益
+      
+      # 末端速度限制
+      max_linear_vel: 0.5  # 最大线速度 (m/s)
+      max_angular_vel: 1.0  # 最大角速度 (rad/s)
+      
+      # 关节速度限制
+      joint_vel_limit: 1.5  # 关节速度限制 (rad/s)
+      
+      # 安全参数
+      q_dot_min: 0.0001  # 微小速度死区 (rad/s), 防止抖动漂移
+      max_delta_q: 0.02  # 最大单步积分量 (rad), 防止大跳变
+      lambda_min: 0.0001  # 雅可比伪逆阻尼系数下限
+      
+      # 末端死区（到达目标附近时停止运动）
+      position_deadzone: 0.001  # 位置死区 (m)
+      orientation_deadzone: 0.017  # 姿态死区 (rad), 约1度
+      
+      # 关节限位（自动从URDF读取，这里作为备份）
+      joint_pos_min: [-6.2832, -1.8326, -6.2832, -2.5307, -6.2832, -1.8326, -6.2832]  # rad
+      joint_pos_max: [6.2832, 1.8326, 6.2832, 0.5236, 6.2832, 1.8326, 6.2832]  # rad
+    
+    # 性能调优建议：
+    # - 如果感觉太慢：增大 max_linear_vel, max_angular_vel, linear_gain
+    # - 如果接近目标抖动：增大 position_deadzone, orientation_deadzone
+    # - 如果路径不平滑：减小 joint_vel_limit, max_delta_q
+    # - 如果奇异点附近速度爆炸：增大 lambda_min
+
   
   
