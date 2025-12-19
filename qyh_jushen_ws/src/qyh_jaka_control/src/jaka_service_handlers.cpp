@@ -99,15 +99,15 @@ void JakaServiceHandlers::handleMoveL(const qyh_jaka_control_msgs::srv::MoveL::R
     res->success = jaka_interface_.moveL(req->robot_id, req->target_pose, req->move_mode, req->velocity, req->acceleration, req->is_block);
 }
 
-void JakaServiceHandlers::handleSetToolOffset(const qyh_jaka_control_msgs::srv::SetToolOffset::Request::SharedPtr, qyh_jaka_control_msgs::srv::SetToolOffset::Response::SharedPtr res) {
+void JakaServiceHandlers::handleSetToolOffset(const qyh_jaka_control_msgs::srv::SetToolOffset::Request::SharedPtr req, qyh_jaka_control_msgs::srv::SetToolOffset::Response::SharedPtr res) {
     res->success = jaka_interface_.setToolOffset(req->robot_id, req->tool_offset);
 }
 
-void JakaServiceHandlers::handleSetPayload(const qyh_jaka_control_msgs::srv::SetPayload::Request::SharedPtr, qyh_jaka_control_msgs::srv::SetPayload::Response::SharedPtr res) {
+void JakaServiceHandlers::handleSetPayload(const qyh_jaka_control_msgs::srv::SetPayload::Request::SharedPtr req, qyh_jaka_control_msgs::srv::SetPayload::Response::SharedPtr res) {
     res->success = jaka_interface_.setPayload(req->robot_id, req->mass);
 }
 
-void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr, qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res) {
+void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr req, qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res) {
     double mass;
     double centroid_x, centroid_y, centroid_z;
     
