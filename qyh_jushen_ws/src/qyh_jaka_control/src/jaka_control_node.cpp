@@ -116,6 +116,7 @@ public:
         declare_parameter<double>("velocity_control.joint_vel_limit", 1.5);
         declare_parameter<double>("velocity_control.q_dot_min", 1e-4);
         declare_parameter<double>("velocity_control.max_delta_q", 0.02);
+        declare_parameter<double>("velocity_control.max_joint_accel", 50.0);  // rad/s²
         declare_parameter<double>("velocity_control.lambda_min", 1e-4);
         declare_parameter<double>("velocity_control.position_deadzone", 0.001);
         declare_parameter<double>("velocity_control.orientation_deadzone", 0.017);
@@ -709,8 +710,9 @@ private:
         if (!servo_running_ || !left_vel_controller_) return;
         
         try {
+            // ① TF变换到base_link
             geometry_msgs::msg::PoseStamped input_pose = *msg;
-            input_pose.header.stamp = now();  // 使用当前时间，保证 TF 查找成功
+            input_pose.header.stamp = now();
             geometry_msgs::msg::PoseStamped target_in_base = tf_buffer_->transform(
                 input_pose, "base_link_left", tf2::durationFromSec(0.1));
             
@@ -718,14 +720,13 @@ private:
                 target_in_base.pose.position.z += left_z_offset_;
             }
             
-            // 🔧 目标变化检测：只有变化超过阈值才更新，避免微小抖动累积
+            // ② 目标变化检测（过滤微小抖动）
             if (has_left_target_) {
                 double pos_change = std::sqrt(
                     std::pow(target_in_base.pose.position.x - left_last_target_.pose.position.x, 2) +
                     std::pow(target_in_base.pose.position.y - left_last_target_.pose.position.y, 2) +
                     std::pow(target_in_base.pose.position.z - left_last_target_.pose.position.z, 2));
                 
-                // 简单的姿态变化估计（四元数差异）
                 double ori_change = std::sqrt(
                     std::pow(target_in_base.pose.orientation.x - left_last_target_.pose.orientation.x, 2) +
                     std::pow(target_in_base.pose.orientation.y - left_last_target_.pose.orientation.y, 2) +
@@ -735,13 +736,30 @@ private:
                 if (pos_change < target_change_pos_threshold_ && ori_change < target_change_ori_threshold_) {
                     RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 2000, 
                         "[Left] Target change too small (pos:%.4f ori:%.4f), ignoring", pos_change, ori_change);
-                    return;  // 变化太小，忽略此次更新
+                    return;
                 }
             }
             
-            left_vel_controller_->setTargetPose(target_in_base);
+            // ③ IK求解（30Hz，只在这里执行）
+            std::vector<double> seed_joints(7);
+            for (int i = 0; i < 7; ++i) {
+                seed_joints[i] = cached_left_joints_.jVal[i];
+            }
+            
+            std::vector<double> joint_target;
+            bool ik_ok = left_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
+            
+            if (!ik_ok) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Left] IK failed");
+                return;
+            }
+            
+            // ④ 设置关节目标（Servo层会连续追踪）
+            left_vel_controller_->setJointTarget(joint_target);
+            
             left_last_target_ = target_in_base;
             has_left_target_ = true;
+            
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Left TF Error: %s", ex.what());
         }
@@ -751,8 +769,9 @@ private:
         if (!servo_running_ || !right_vel_controller_) return;
         
         try {
+            // ① TF变换到base_link
             geometry_msgs::msg::PoseStamped input_pose = *msg;
-            input_pose.header.stamp = now();  // 使用当前时间，保证 TF 查找成功
+            input_pose.header.stamp = now();
             geometry_msgs::msg::PoseStamped target_in_base = tf_buffer_->transform(
                 input_pose, "base_link_right", tf2::durationFromSec(0.1));
             
@@ -760,14 +779,13 @@ private:
                 target_in_base.pose.position.z += right_z_offset_;
             }
             
-            // 🔧 目标变化检测：只有变化超过阈值才更新，避免微小抖动累积
+            // ② 目标变化检测（过滤微小抖动）
             if (has_right_target_) {
                 double pos_change = std::sqrt(
                     std::pow(target_in_base.pose.position.x - right_last_target_.pose.position.x, 2) +
                     std::pow(target_in_base.pose.position.y - right_last_target_.pose.position.y, 2) +
                     std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
                 
-                // 简单的姿态变化估计（四元数差异）
                 double ori_change = std::sqrt(
                     std::pow(target_in_base.pose.orientation.x - right_last_target_.pose.orientation.x, 2) +
                     std::pow(target_in_base.pose.orientation.y - right_last_target_.pose.orientation.y, 2) +
@@ -777,13 +795,30 @@ private:
                 if (pos_change < target_change_pos_threshold_ && ori_change < target_change_ori_threshold_) {
                     RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 2000, 
                         "[Right] Target change too small (pos:%.4f ori:%.4f), ignoring", pos_change, ori_change);
-                    return;  // 变化太小，忽略此次更新
+                    return;
                 }
             }
             
-            right_vel_controller_->setTargetPose(target_in_base);
+            // ③ IK求解（30Hz，只在这里执行）
+            std::vector<double> seed_joints(7);
+            for (int i = 0; i < 7; ++i) {
+                seed_joints[i] = cached_right_joints_.jVal[i];
+            }
+            
+            std::vector<double> joint_target;
+            bool ik_ok = right_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
+            
+            if (!ik_ok) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Right] IK failed");
+                return;
+            }
+            
+            // ④ 设置关节目标（Servo层会连续追踪）
+            right_vel_controller_->setJointTarget(joint_target);
+            
             right_last_target_ = target_in_base;
             has_right_target_ = true;
+            
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Right TF Error: %s", ex.what());
         }

@@ -41,10 +41,21 @@ public:
     void updateRobotState(const std::vector<double>& current_joints);
     
     /**
-     * @brief Set target pose (from VR)
-     * @param target_pose Target pose in base frame
+     * @brief Set joint target (from IK solver, called in VR callback)
+     * @param joint_target Target joint positions in radians
      */
-    void setTargetPose(const geometry_msgs::msg::PoseStamped& target_pose);
+    void setJointTarget(const std::vector<double>& joint_target);
+    
+    /**
+     * @brief Solve IK for target pose (exposes IK capability to caller)
+     * @param target_pose Target pose in base frame
+     * @param seed_joints Seed state for IK solver
+     * @param result_joints Output joint positions
+     * @return true if IK succeeded
+     */
+    bool solveIK(const geometry_msgs::msg::Pose& target_pose,
+                 const std::vector<double>& seed_joints,
+                 std::vector<double>& result_joints);
     
     /**
      * @brief Calculate next joint command (called at 125Hz)
@@ -90,8 +101,12 @@ private:
     bool initialized_ = false;
     bool first_update_ = true;
     
-    // Integrated position (internal state for smooth output)
-    std::vector<double> integrated_q_;
+    // 🔥 两层结构状态量
+    std::vector<double> joint_target_;     // IK层输出：目标关节位置
+    std::vector<double> integrated_q_;     // Servo层输出：积分后的指令
+    
+    // 🔥 关键：target更新标志（只在新target到达时跑IK）
+    std::atomic<bool> target_updated_{false};
     
     // Control parameters
     double dt_ = 0.008; // 125Hz
@@ -107,6 +122,9 @@ private:
     double lambda_min_ = 1e-4;       // 阻尼系数下限
     double position_deadzone_ = 0.001;    // 位置死区 (m)
     double orientation_deadzone_ = 0.017; // 姿态死区 (rad)
+    
+    // Servo层P控制增益
+    double servo_kp_ = 5.0;          // 关节位置误差增益
     
     // 关节限位（防止积分漂移）
     std::vector<double> joint_pos_min_;

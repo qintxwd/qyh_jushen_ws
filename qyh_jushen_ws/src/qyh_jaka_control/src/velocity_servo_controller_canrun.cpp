@@ -40,20 +40,6 @@ void VelocityServoController::setJointLimits(const std::vector<double>& pos_min,
 }
 
 bool VelocityServoController::initialize(const std::string& urdf_path, const std::string& base_link, const std::string& tip_link) {
-    // 🔥 读取URDF文件内容（TracIK需要XML字符串，不是文件路径）
-    std::ifstream urdf_file(urdf_path);
-    if (!urdf_file.is_open()) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Failed to open URDF file: %s", urdf_path.c_str());
-        return false;
-    }
-    std::string urdf_xml((std::istreambuf_iterator<char>(urdf_file)), std::istreambuf_iterator<char>());
-    urdf_file.close();
-    
-    if (urdf_xml.empty()) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] URDF file is empty: %s", urdf_path.c_str());
-        return false;
-    }
-
     KDL::Tree tree;
     if (!kdl_parser::treeFromFile(urdf_path, tree)) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to construct KDL tree from URDF file: %s", urdf_path.c_str());
@@ -68,28 +54,13 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     jac_solver_ = std::make_shared<KDL::ChainJntToJacSolver>(chain_);
     fk_solver_ = std::make_shared<KDL::ChainFkSolverPos_recursive>(chain_);
     
-    // 🔥 初始化TracIK求解器（支持seed state，避免多解跳变）
-    // 注意：TracIK构造函数需要URDF XML字符串，不是文件路径
-    tracik_solver_ = std::make_unique<TRAC_IK::TRAC_IK>(
-        base_link, tip_link, urdf_xml, 
-        0.01,   // timeout: 10ms求解时间（放宽以提高成功率）
-        1e-4,   // epsilon: 0.1mm位置误差容限（放宽以减少震荡）
-        TRAC_IK::Distance  // 同时优化位置和姿态
-    );
-    
-    if (!tracik_solver_->getKDLChain(chain_)) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] TracIK failed to get KDL chain");
-        return false;
-    }
-    
     current_q_.resize(chain_.getNrOfJoints());
-    joint_target_.resize(chain_.getNrOfJoints(), 0.0);
     integrated_q_.resize(chain_.getNrOfJoints(), 0.0);
     
     // 预分配Jacobian对象，避免每次计算时重新分配内存
     jac_ = KDL::Jacobian(chain_.getNrOfJoints());
     
-    RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Initialized with %d joints (using TracIK)", chain_.getNrOfJoints());
+    RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Initialized with %d joints", chain_.getNrOfJoints());
     initialized_ = true;
     return true;
 }
@@ -109,145 +80,119 @@ void VelocityServoController::updateRobotState(const std::vector<double>& curren
         current_q_(i) = current_joints[i];
     }
     
-    // If this is the first update or reset, sync both targets with real robot
+    // If this is the first update or reset, sync integrated state with real robot
     if (first_update_) {
-        joint_target_ = current_joints;
         integrated_q_ = current_joints;
         first_update_ = false;
-        has_initialized_command_ = true;
-        RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Initialized joint_target & integrated_q from robot");
+        has_initialized_command_ = true;  // 🔧 标记已有有效指令，立即进入静止状态
+        RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Initialized integrated state from robot (ready for hold)");
     }
 }
 
-void VelocityServoController::setJointTarget(const std::vector<double>& joint_target) {
+void VelocityServoController::setTargetPose(const geometry_msgs::msg::PoseStamped& target_pose) {
     std::lock_guard<std::mutex> lock(state_mutex_);
-    if (joint_target.size() != chain_.getNrOfJoints()) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Invalid joint target size: %zu", joint_target.size());
-        return;
-    }
-    joint_target_ = joint_target;
+    target_pose_ = target_pose;
     has_target_ = true;
 }
 
-// ============================================================
-// 🧠 IK求解接口（暴露给VR回调使用）
-// 功能：位姿 + seed → 关节角度
-// ============================================================
-bool VelocityServoController::solveIK(
-    const geometry_msgs::msg::Pose& target_pose,
-    const std::vector<double>& seed_joints,
-    std::vector<double>& result_joints)
-{
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    
-    if (!initialized_) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Controller not initialized");
-        return false;
-    }
-    
-    unsigned int n_joints = chain_.getNrOfJoints();
-    
-    if (seed_joints.size() != n_joints) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Invalid seed size: %zu", seed_joints.size());
-        return false;
-    }
-    
-    // 转换为KDL格式
-    KDL::Frame target_kdl = poseToKDL(target_pose);
-    
-    KDL::JntArray seed_state(n_joints);
-    for (unsigned int i = 0; i < n_joints; ++i) {
-        seed_state(i) = seed_joints[i];
-    }
-    
-    // TracIK求解
-    KDL::JntArray ik_result(n_joints);
-    int rc = tracik_solver_->CartToJnt(seed_state, target_kdl, ik_result);
-    
-    if (rc < 0) {
-        RCLCPP_DEBUG_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-            "[%s] IK failed (code=%d)", arm_prefix_.c_str(), rc);
-        return false;
-    }
-    
-    // 输出结果（带限位保护）
-    result_joints.resize(n_joints);
-    for (unsigned int i = 0; i < n_joints; ++i) {
-        result_joints[i] = ik_result(i);
-        
-        // 硬限位保护
-        if (i < joint_pos_min_.size() && i < joint_pos_max_.size()) {
-            result_joints[i] = std::clamp(result_joints[i], joint_pos_min_[i], joint_pos_max_[i]);
-        }
-    }
-    
-    return true;
-}
-
-// ============================================================
-// ⚙️ Servo层（高频 125Hz，纯追踪）
-// 功能：追踪joint_target_（来自VR回调的IK结果）
-// ============================================================
 bool VelocityServoController::computeNextCommand(std::vector<double>& next_joints) {
     std::lock_guard<std::mutex> lock(state_mutex_);
-    
+
     if (!initialized_) return false;
     
-    // Hold模式：无关节目标时保持当前位置
+    // 🔧 关键修复：当没有VR目标时，返回上次的积分状态（保持静止）
+    // 这样可以避免用真实关节位置（带抖动）发送指令，防止误差累积
     if (!has_target_) {
         if (has_initialized_command_) {
             next_joints = integrated_q_;
-            return true;
+            return true;  // 返回上次的固定指令，保持静止
         }
-        return false;
+        return false;  // 还没有初始化过指令
     }
-    
-    unsigned int n_joints = chain_.getNrOfJoints();
-    
-    // ✅ 漂移修正：防止积分器与真实位置偏离过大
-    for (unsigned int i = 0; i < n_joints; ++i) {
-        double drift_thresh = (i >= 4) ? 0.02 : 0.05;  // 腕部更严格
-        if (std::abs(integrated_q_[i] - current_q_(i)) > drift_thresh) {
-            integrated_q_[i] = current_q_(i);
-            RCLCPP_DEBUG(node_->get_logger(), "[%s] Joint %d drift corrected", arm_prefix_.c_str(), i);
-        }
+
+    // 1️⃣ 当前末端位姿（用真实关节状态FK）
+    // CRITICAL: Use real robot state (current_q_) for FK and Jacobian, not integrated state
+    KDL::Frame current_pose;
+    fk_solver_->JntToCart(current_q_, current_pose);
+
+    KDL::Frame target_kdl = poseToKDL(target_pose_.pose);
+    KDL::Twist twist = KDL::diff(current_pose, target_kdl);
+
+    // 2️⃣ 位置/姿态误差
+    double position_error = twist.vel.Norm();
+    double orientation_error = twist.rot.Norm();
+
+    if (position_error < position_deadzone_ && orientation_error < orientation_deadzone_) {
+        next_joints = integrated_q_;  // 静止保持
+        return true;
     }
+
+    // 3️⃣ 误差缩放，防止远目标积分过大
+    double linear_scale = std::min(1.0, max_linear_vel_ / (position_error + 1e-6));
+    double angular_scale = std::min(1.0, max_angular_vel_ / (orientation_error + 1e-6));
+
+    twist.vel = twist.vel * linear_gain_ * linear_scale;
+    twist.rot = twist.rot * angular_gain_ * angular_scale;
+
+    // 4️⃣ 计算雅可比（CRITICAL: 使用真实关节状态）
+    // 使用预分配的jac_对象，避免每次重新分配内存
+    jac_solver_->JntToJac(current_q_, jac_);
+    Eigen::MatrixXd J = jac_.data;
+
+    // 5️⃣ 关节速度计算（动态阻尼伪逆）
+    Eigen::VectorXd v_cart(6);
+    v_cart << twist.vel.x(), twist.vel.y(), twist.vel.z(),
+              twist.rot.x(), twist.rot.y(), twist.rot.z();
+
+    // 动态阻尼：lambda随最大奇异值变化，防止奇异点时关节速度爆炸
+    // 添加下限保护，防止s.maxCoeff()太小导致lambda接近0
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    Eigen::VectorXd s = svd.singularValues();
+    double lambda = std::max(0.01 * s.maxCoeff(), lambda_min_);
+    Eigen::VectorXd s_inv = s.array() / (s.array().square() + lambda * lambda);
+    Eigen::MatrixXd J_pinv = svd.matrixV() * s_inv.asDiagonal() * svd.matrixU().transpose();
+
+    Eigen::VectorXd q_dot = J_pinv * v_cart;
+
+    // 6️⃣ 积分与安全限制
+    next_joints.resize(chain_.getNrOfJoints());
     
-    // ⚙️ Servo层：简单P控制（连续、可预测、JAKA喜欢）
-    next_joints.resize(n_joints);
-    
-    for (unsigned int i = 0; i < n_joints; ++i) {
-        // P控制：计算位置误差
-        double error = joint_target_[i] - current_q_(i);
-        
-        // 速度指令（比例控制）
-        double cmd_vel = servo_kp_ * error;
-        
-        // 速度限制
-        cmd_vel = std::clamp(cmd_vel, -joint_vel_limit_, joint_vel_limit_);
-        
-        // 微小速度死区（防止目标附近抖动）
-        if (std::abs(cmd_vel) < q_dot_min_) {
-            cmd_vel = 0.0;
-        }
-        
-        // 位置积分
-        double delta_q = cmd_vel * dt_;
-        
-        // 单步增量保护（防止JAKA报错）
-        delta_q = std::clamp(delta_q, -max_delta_q_, max_delta_q_);
-        
+    for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
+        // 限制关节速度
+        if (q_dot(i) > joint_vel_limit_) q_dot(i) = joint_vel_limit_;
+        if (q_dot(i) < -joint_vel_limit_) q_dot(i) = -joint_vel_limit_;
+
+        // 微小速度置零（防止死区边界抖动导致漂移）
+        if (std::abs(q_dot(i)) < q_dot_min_) q_dot(i) = 0.0;
+
+        // 积分
+        double delta_q = q_dot(i) * dt_;
+
+        // 积分步长饱和（双重安全保护）
+        if (delta_q > max_delta_q_) delta_q = max_delta_q_;
+        if (delta_q < -max_delta_q_) delta_q = -max_delta_q_;
+
         integrated_q_[i] += delta_q;
         
-        // 硬限位保护
+        // 🔒 关键安全：限制积分结果在关节物理范围内，防止长时间运行漂移
         if (i < joint_pos_min_.size() && i < joint_pos_max_.size()) {
-            integrated_q_[i] = std::clamp(integrated_q_[i], joint_pos_min_[i], joint_pos_max_[i]);
+            if (integrated_q_[i] > joint_pos_max_[i]) {
+                integrated_q_[i] = joint_pos_max_[i];
+                RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+                    "[VelCtrl] Joint %d exceeded max limit, clamped to %.3f", i, joint_pos_max_[i]);
+            }
+            if (integrated_q_[i] < joint_pos_min_[i]) {
+                integrated_q_[i] = joint_pos_min_[i];
+                RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+                    "[VelCtrl] Joint %d exceeded min limit, clamped to %.3f", i, joint_pos_min_[i]);
+            }
         }
         
         next_joints[i] = integrated_q_[i];
     }
     
-    has_initialized_command_ = true;
+    has_initialized_command_ = true;  // 标记已有有效的静止指令
+
     return true;
 }
 
