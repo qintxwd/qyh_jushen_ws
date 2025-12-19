@@ -564,7 +564,7 @@ private:
                             if (jaka_interface_.getLastError(error_code)) {
                                 RCLCPP_ERROR(get_logger(), 
                                     "[MainLoop] 🚨 Robot error detected - Left:%d Right:%d | Code:%d Msg:%s", 
-                                    error[0], error[1], error_code.code, error_code.desc);
+                                    error[0], error[1], error_code.code, error_code.message);
                             }
                             // // 自动尝试恢复
                             // RCLCPP_WARN(get_logger(), "[MainLoop] Attempting automatic recovery...");
