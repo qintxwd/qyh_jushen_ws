@@ -418,3 +418,9 @@ sudo apt install liborocos-kdl-dev
 sudo apt install libnlopt-dev
 sudo apt install ros-humble-kdl-parser
 sudo apt install libnlopt-cxx-dev
+
+export CMAKE_PREFIX_PATH=/usr/local:$CMAKE_PREFIX_PATH
+cd ~/qyh_jushen_ws/资料/双机械臂/trac_ik/trac_ik_lib
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
