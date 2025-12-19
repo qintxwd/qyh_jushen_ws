@@ -411,6 +411,22 @@ private:
                 left_cmd = current_left;
                 has_left = true; 
             }
+            
+            // 🔍 调试：打印当前值、目标值和差值
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[Left] Current: [%f, %f, %f, %f, %f, %f, %f]",
+                current_left[0], current_left[1], current_left[2], current_left[3],
+                current_left[4], current_left[5], current_left[6]);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[Left] Command: [%f, %f, %f, %f, %f, %f, %f]",
+                left_cmd[0], left_cmd[1], left_cmd[2], left_cmd[3],
+                left_cmd[4], left_cmd[5], left_cmd[6]);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[Left] Delta:   [%f, %f, %f, %f, %f, %f, %f] (rad)",
+                left_cmd[0]-current_left[0], left_cmd[1]-current_left[1], 
+                left_cmd[2]-current_left[2], left_cmd[3]-current_left[3],
+                left_cmd[4]-current_left[4], left_cmd[5]-current_left[5], 
+                left_cmd[6]-current_left[6]);
         }
         
         // 右臂
@@ -435,6 +451,22 @@ private:
                 right_cmd = current_right;
                 has_right = true;
             }
+            
+            // 🔍 调试：打印当前值、目标值和差值
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[Right] Current: [%f, %f, %f, %f, %f, %f, %f]",
+                current_right[0], current_right[1], current_right[2], current_right[3],
+                current_right[4], current_right[5], current_right[6]);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[Right] Command: [%f, %f, %f, %f, %f, %f, %f]",
+                right_cmd[0], right_cmd[1], right_cmd[2], right_cmd[3],
+                right_cmd[4], right_cmd[5], right_cmd[6]);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "[Right] Delta:   [%f, %f, %f, %f, %f, %f, %f] (rad)",
+                right_cmd[0]-current_right[0], right_cmd[1]-current_right[1], 
+                right_cmd[2]-current_right[2], right_cmd[3]-current_right[3],
+                right_cmd[4]-current_right[4], right_cmd[5]-current_right[5], 
+                right_cmd[6]-current_right[6]);
         }
 
         RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] has_left=%d, has_right=%d", has_left, has_right);
@@ -512,11 +544,13 @@ private:
                 // 统一发送，保证双臂同步
                 RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
                 uint32_t index = cmd_index_.load();
+                RCLCPP_DEBUG(get_logger(), "[MainLoop] Current cmd_index=%u", index);
                 if (!jaka_interface_.edgSend(&index)) {
                     RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, 
                         "[MainLoop] Failed to send servo commands via edgSend");
                     return;  // 发送失败，停止本周期
                 }
+                index++;
                 cmd_index_.store(index);
                 RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgSend() returned, cmd_index=%u", index);
                 
@@ -832,7 +866,7 @@ private:
             if (left_vel_controller_ && jaka_interface_.getJointPositions(0, left_pos)) {
                 std::vector<double> left_joints(7);
                 for (size_t i = 0; i < 7; ++i) left_joints[i] = left_pos.jVal[i];
-                RCLCPP_INFO(get_logger(), "[Servo] Left joints: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                RCLCPP_INFO(get_logger(), "[Servo] Left joints: [%f, %f, %f, %f, %f, %f, %f]",
                     left_joints[0], left_joints[1], left_joints[2], left_joints[3],
                     left_joints[4], left_joints[5], left_joints[6]);
                 left_vel_controller_->updateRobotState(left_joints);
@@ -847,7 +881,7 @@ private:
             if (right_vel_controller_ && jaka_interface_.getJointPositions(1, right_pos)) {
                 std::vector<double> right_joints(7);
                 for (size_t i = 0; i < 7; ++i) right_joints[i] = right_pos.jVal[i];
-                RCLCPP_INFO(get_logger(), "[Servo] Right joints: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                RCLCPP_INFO(get_logger(), "[Servo] Right joints: [%f, %f, %f, %f, %f, %f, %f]",
                     right_joints[0], right_joints[1], right_joints[2], right_joints[3],
                     right_joints[4], right_joints[5], right_joints[6]);
                 right_vel_controller_->updateRobotState(right_joints);
@@ -860,8 +894,53 @@ private:
             
             // ★★★ 初始化完成后再允许主循环执行伺服 ★★★
             if (left_init_success || right_init_success) {
+                RCLCPP_INFO(get_logger(), "[Servo] Step 5/5: Controllers initialized, starting stabilization period...");
+                
+                // 🔧 关键修复：启动伺服后，先发送几个周期的当前位置让机器人稳定
+                // 这避免了机器人控制器内部状态不同步导致的错误
+                RCLCPP_INFO(get_logger(), "[Servo] Sending current position for 1 second to stabilize...");
+                JointValue cmd_left_jv, cmd_right_jv;
+                memset(&cmd_left_jv, 0, sizeof(JointValue));
+                memset(&cmd_right_jv, 0, sizeof(JointValue));
+                if (left_init_success) {
+                        jaka_interface_.getJointPositions(0, cmd_left_jv);
+                        RCLCPP_INFO(get_logger(), "[Servo] stabilize CMD Left joints: [%f, %f, %f, %f, %f, %f, %f]",
+                            cmd_left_jv.jVal[0], cmd_left_jv.jVal[1], cmd_left_jv.jVal[2], cmd_left_jv.jVal[3],
+                            cmd_left_jv.jVal[4], cmd_left_jv.jVal[5], cmd_left_jv.jVal[6]);
+                 }
+                 if( right_init_success) {
+                        jaka_interface_.getJointPositions(1, cmd_right_jv);
+                        RCLCPP_INFO(get_logger(), "[Servo] stabilize CMD Right joints: [%f, %f, %f, %f, %f, %f, %f]",
+                            cmd_right_jv.jVal[0], cmd_right_jv.jVal[1], cmd_right_jv.jVal[2], cmd_right_jv.jVal[3],
+                            cmd_right_jv.jVal[4], cmd_right_jv.jVal[5], cmd_right_jv.jVal[6]);
+                 }
+                // 🔧 关键：cmd_index必须连续递增，不能每次都是0！
+                uint32_t stab_idx = 0;
+                for (int i = 0; i < 125; ++i) {  // 125个周期 = 1秒
+                    JointValue left_jv, right_jv;
+                    if (left_init_success) {
+                        jaka_interface_.getJointPositions(0, left_jv);
+                        RCLCPP_INFO(get_logger(), "[Servo] stabilize Left joints: [%f, %f, %f, %f, %f, %f, %f]",
+                            left_jv.jVal[0], left_jv.jVal[1], left_jv.jVal[2], left_jv.jVal[3],
+                            left_jv.jVal[4], left_jv.jVal[5], left_jv.jVal[6]);
+                        jaka_interface_.edgServoJ(0, cmd_left_jv, true);
+                    }
+                    if (right_init_success) {
+                        jaka_interface_.getJointPositions(1, right_jv);
+                        RCLCPP_INFO(get_logger(), "[Servo] stabilize Right joints: [%f, %f, %f, %f, %f, %f, %f]",
+                            right_jv.jVal[0], right_jv.jVal[1], right_jv.jVal[2], right_jv.jVal[3],
+                            right_jv.jVal[4], right_jv.jVal[5], right_jv.jVal[6]);
+                        jaka_interface_.edgServoJ(1, cmd_right_jv, true);
+                    }
+                    jaka_interface_.edgSend(&stab_idx);  // 使用递增索引
+                    stab_idx++;  // 每次递增
+                    std::this_thread::sleep_for(std::chrono::milliseconds(8));
+                }
+                
+                // 将稳定期结束的索引同步到主循环，确保命令索引连续
+                cmd_index_.store(stab_idx);
+                RCLCPP_INFO(get_logger(), "[Servo] ✓ Stabilization complete (sent %u commands)", stab_idx);
                 servo_running_ = true;
-                RCLCPP_INFO(get_logger(), "[Servo] Step 5/5: Controllers initialized, servo mode active");
                 RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Active - Ready for commands ===");
             } else {
                 RCLCPP_ERROR(get_logger(), "[Servo] Both controllers failed to initialize, rolling back...");
