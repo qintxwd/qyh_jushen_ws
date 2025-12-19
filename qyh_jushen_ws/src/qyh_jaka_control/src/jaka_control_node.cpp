@@ -120,6 +120,10 @@ public:
         declare_parameter<double>("velocity_control.position_deadzone", 0.001);
         declare_parameter<double>("velocity_control.orientation_deadzone", 0.017);
         
+        // 目标变化死区：过滤VR手柄的微小抖动，避免不必要的指令更新
+        declare_parameter<double>("velocity_control.target_change_position_threshold", 0.002);  // 2mm
+        declare_parameter<double>("velocity_control.target_change_orientation_threshold", 0.035); // ~2°
+        
         // 关节限位（默认值，会在 initVelocityControllers 中设置）
         std::vector<double> default_joint_min(7, -6.2832);
         std::vector<double> default_joint_max(7, 6.2832);
@@ -129,6 +133,9 @@ public:
         has_z_offset_ = get_parameter("ik_solver.has_z_offset").as_bool();
         left_z_offset_ = get_parameter("ik_solver.left_z_offset").as_double();
         right_z_offset_ = get_parameter("ik_solver.right_z_offset").as_double();
+        
+        target_change_pos_threshold_ = get_parameter("velocity_control.target_change_position_threshold").as_double();
+        target_change_ori_threshold_ = get_parameter("velocity_control.target_change_orientation_threshold").as_double();
         
         // 速度控制器将在构造函数完成后初始化（避免shared_from_this()问题）
         RCLCPP_INFO(get_logger(), "🎯 速度积分控制模式已启用");
@@ -694,7 +701,30 @@ private:
                 target_in_base.pose.position.z += left_z_offset_;
             }
             
+            // 🔧 目标变化检测：只有变化超过阈值才更新，避免微小抖动累积
+            if (has_left_target_) {
+                double pos_change = std::sqrt(
+                    std::pow(target_in_base.pose.position.x - left_last_target_.pose.position.x, 2) +
+                    std::pow(target_in_base.pose.position.y - left_last_target_.pose.position.y, 2) +
+                    std::pow(target_in_base.pose.position.z - left_last_target_.pose.position.z, 2));
+                
+                // 简单的姿态变化估计（四元数差异）
+                double ori_change = std::sqrt(
+                    std::pow(target_in_base.pose.orientation.x - left_last_target_.pose.orientation.x, 2) +
+                    std::pow(target_in_base.pose.orientation.y - left_last_target_.pose.orientation.y, 2) +
+                    std::pow(target_in_base.pose.orientation.z - left_last_target_.pose.orientation.z, 2) +
+                    std::pow(target_in_base.pose.orientation.w - left_last_target_.pose.orientation.w, 2));
+                
+                if (pos_change < target_change_pos_threshold_ && ori_change < target_change_ori_threshold_) {
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 2000, 
+                        "[Left] Target change too small (pos:%.4f ori:%.4f), ignoring", pos_change, ori_change);
+                    return;  // 变化太小，忽略此次更新
+                }
+            }
+            
             left_vel_controller_->setTargetPose(target_in_base);
+            left_last_target_ = target_in_base;
+            has_left_target_ = true;
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Left TF Error: %s", ex.what());
         }
@@ -713,7 +743,30 @@ private:
                 target_in_base.pose.position.z += right_z_offset_;
             }
             
+            // 🔧 目标变化检测：只有变化超过阈值才更新，避免微小抖动累积
+            if (has_right_target_) {
+                double pos_change = std::sqrt(
+                    std::pow(target_in_base.pose.position.x - right_last_target_.pose.position.x, 2) +
+                    std::pow(target_in_base.pose.position.y - right_last_target_.pose.position.y, 2) +
+                    std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
+                
+                // 简单的姿态变化估计（四元数差异）
+                double ori_change = std::sqrt(
+                    std::pow(target_in_base.pose.orientation.x - right_last_target_.pose.orientation.x, 2) +
+                    std::pow(target_in_base.pose.orientation.y - right_last_target_.pose.orientation.y, 2) +
+                    std::pow(target_in_base.pose.orientation.z - right_last_target_.pose.orientation.z, 2) +
+                    std::pow(target_in_base.pose.orientation.w - right_last_target_.pose.orientation.w, 2));
+                
+                if (pos_change < target_change_pos_threshold_ && ori_change < target_change_ori_threshold_) {
+                    RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 2000, 
+                        "[Right] Target change too small (pos:%.4f ori:%.4f), ignoring", pos_change, ori_change);
+                    return;  // 变化太小，忽略此次更新
+                }
+            }
+            
             right_vel_controller_->setTargetPose(target_in_base);
+            right_last_target_ = target_in_base;
+            has_right_target_ = true;
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Right TF Error: %s", ex.what());
         }
@@ -981,6 +1034,14 @@ private:
     bool has_z_offset_{true};
     double left_z_offset_{0.219885132};
     double right_z_offset_{0.217950931};
+    
+    // 目标变化死区（过滤VR手柄微小抖动）
+    double target_change_pos_threshold_{0.002};   // 位置变化阈值（米）
+    double target_change_ori_threshold_{0.035};   // 姿态变化阈值（四元数距离）
+    geometry_msgs::msg::PoseStamped left_last_target_;
+    geometry_msgs::msg::PoseStamped right_last_target_;
+    bool has_left_target_{false};
+    bool has_right_target_{false};
     
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;

@@ -93,6 +93,10 @@
       position_deadzone: 0.001  # 位置死区 (m)
       orientation_deadzone: 0.017  # 姿态死区 (rad), 约1度
       
+      # 目标变化死区（过滤VR手柄的微小抖动，避免不必要的指令更新）
+      target_change_position_threshold: 0.002  # 位置变化阈值 (m), 约2mm
+      target_change_orientation_threshold: 0.035  # 姿态变化阈值 (四元数距离), 约2度
+      
       # 关节限位（自动从URDF读取，这里作为备份）
       joint_pos_min: [-6.2832, -1.8326, -6.2832, -2.5307, -6.2832, -1.8326, -6.2832]  # rad
       joint_pos_max: [6.2832, 1.8326, 6.2832, 0.5236, 6.2832, 1.8326, 6.2832]  # rad
@@ -100,6 +104,7 @@
     # 性能调优建议：
     # - 如果感觉太慢：增大 max_linear_vel, max_angular_vel, linear_gain
     # - 如果接近目标抖动：增大 position_deadzone, orientation_deadzone
+    # - 如果VR手柄抖动明显：增大 target_change_position_threshold, target_change_orientation_threshold
     # - 如果路径不平滑：减小 joint_vel_limit, max_delta_q
     # - 如果奇异点附近速度爆炸：增大 lambda_min
 
