@@ -750,7 +750,8 @@ private:
             bool ik_ok = left_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
             
             if (!ik_ok) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Left] IK failed");
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Left] IK failed, holding current position");
+                left_vel_controller_->holdCurrent();  // 🔥 冻结在当前位置
                 return;
             }
             
@@ -809,7 +810,8 @@ private:
             bool ik_ok = right_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
             
             if (!ik_ok) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Right] IK failed");
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Right] IK failed, holding current position");
+                right_vel_controller_->holdCurrent();  // 🔥 冻结在当前位置
                 return;
             }
             

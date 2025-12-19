@@ -47,6 +47,11 @@ public:
     void setJointTarget(const std::vector<double>& joint_target);
     
     /**
+     * @brief Hold current position (used when IK fails)
+     */
+    void holdCurrent();
+    
+    /**
      * @brief Solve IK for target pose (exposes IK capability to caller)
      * @param target_pose Target pose in base frame
      * @param seed_joints Seed state for IK solver

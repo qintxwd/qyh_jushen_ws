@@ -17,6 +17,12 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     joint_vel_limit_ = node_->get_parameter("velocity_control.joint_vel_limit").as_double();
     q_dot_min_ = node_->get_parameter("velocity_control.q_dot_min").as_double();
     max_delta_q_ = node_->get_parameter("velocity_control.max_delta_q").as_double();
+    
+    // 🎯 工业级参数建议（JAKA实测优化值）
+    // joint_vel_limit: 0.6 rad/s（避免速度报警）
+    // q_dot_min: 0.005（死区放大，减少微抖）
+    // servo_kp: 0.4（关键：降低增益避免震荡）
+    // max_delta_q: 0.02（单步保护，已优化）
     lambda_min_ = node_->get_parameter("velocity_control.lambda_min").as_double();
     position_deadzone_ = node_->get_parameter("velocity_control.position_deadzone").as_double();
     orientation_deadzone_ = node_->get_parameter("velocity_control.orientation_deadzone").as_double();
@@ -125,7 +131,26 @@ void VelocityServoController::setJointTarget(const std::vector<double>& joint_ta
         RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Invalid joint target size: %zu", joint_target.size());
         return;
     }
-    joint_target_ = joint_target;
+    
+    // 🔥 防止IK解跳变过大（JAKA会报"轨迹异常"）
+    const double max_jump = 0.25;  // rad，经验值：约14°
+    for (size_t i = 0; i < joint_target.size(); ++i) {
+        joint_target_[i] = std::clamp(
+            joint_target[i],
+            current_q_(i) - max_jump,
+            current_q_(i) + max_jump
+        );
+    }
+    
+    has_target_ = true;
+}
+
+void VelocityServoController::holdCurrent() {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    // IK失败时冻结在当前位置，防止Servo层追旧目标
+    for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
+        joint_target_[i] = current_q_(i);
+    }
     has_target_ = true;
 }
 
