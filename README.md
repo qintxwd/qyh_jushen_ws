@@ -414,3 +414,7 @@ colcon build --symlink-install
 ```
 
 sudo apt install libnlopt-dev ros-humble-orocos-kdl-vendor
+sudo apt install liborocos-kdl-dev
+sudo apt install libnlopt-dev
+sudo apt install ros-humble-kdl-parser
+sudo apt install libnlopt-cxx-dev
