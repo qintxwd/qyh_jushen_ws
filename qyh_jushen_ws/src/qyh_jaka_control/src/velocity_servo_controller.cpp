@@ -40,6 +40,20 @@ void VelocityServoController::setJointLimits(const std::vector<double>& pos_min,
 }
 
 bool VelocityServoController::initialize(const std::string& urdf_path, const std::string& base_link, const std::string& tip_link) {
+    // 🔥 读取URDF文件内容（TracIK需要XML字符串，不是文件路径）
+    std::ifstream urdf_file(urdf_path);
+    if (!urdf_file.is_open()) {
+        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Failed to open URDF file: %s", urdf_path.c_str());
+        return false;
+    }
+    std::string urdf_xml((std::istreambuf_iterator<char>(urdf_file)), std::istreambuf_iterator<char>());
+    urdf_file.close();
+    
+    if (urdf_xml.empty()) {
+        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] URDF file is empty: %s", urdf_path.c_str());
+        return false;
+    }
+
     KDL::Tree tree;
     if (!kdl_parser::treeFromFile(urdf_path, tree)) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to construct KDL tree from URDF file: %s", urdf_path.c_str());
@@ -55,9 +69,9 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     fk_solver_ = std::make_shared<KDL::ChainFkSolverPos_recursive>(chain_);
     
     // 🔥 初始化TracIK求解器（支持seed state，避免多解跳变）
-    // timeout=0.005秒, error=1e-5米（位置精度）, error_type=Distance（位置+姿态）
+    // 注意：TracIK构造函数需要URDF XML字符串，不是文件路径
     tracik_solver_ = std::make_unique<TRAC_IK::TRAC_IK>(
-        base_link, tip_link, urdf_path, 
+        base_link, tip_link, urdf_xml, 
         0.005,  // timeout: 5ms求解时间
         1e-5,   // epsilon: 位置误差容限（米）
         TRAC_IK::Distance  // 同时优化位置和姿态
