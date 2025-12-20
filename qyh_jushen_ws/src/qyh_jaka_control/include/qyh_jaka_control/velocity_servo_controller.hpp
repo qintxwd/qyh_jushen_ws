@@ -45,6 +45,20 @@ public:
      * @param joint_target Target joint positions in radians
      */
     void setJointTarget(const std::vector<double>& joint_target);
+
+    /**
+     * @brief Set joint target reference (slow IK reference)
+     * @param ik_joints Target joint positions from IK
+     */
+    void setJointTargetRef(const std::vector<double>& ik_joints);
+
+    /**
+     * @brief Check if IK result is continuous with seed state
+     * @param seed Seed joint positions
+     * @param result IK result joint positions
+     * @return true if continuous (safe)
+     */
+    bool checkIKContinuity(const std::vector<double>& seed, const std::vector<double>& result);
     
     /**
      * @brief Hold current position (used when IK fails)
@@ -62,6 +76,13 @@ public:
                  const std::vector<double>& seed_joints,
                  std::vector<double>& result_joints);
     
+    /**
+     * @brief Get current integrated joint positions (Servo's internal state)
+     * @param q_out Output vector
+     * @return true if initialized
+     */
+    bool getIntegratedQ(std::vector<double>& q_out);
+
     /**
      * @brief Calculate next joint command (called at 125Hz)
      * 
@@ -86,7 +107,7 @@ public:
      * @param pos_min Minimum joint positions (rad)
      * @param pos_max Maximum joint positions (rad)
      */
-    void setJointLimits(const std::vector<double>& pos_min, const std::vector<double>& pos_max);
+    void setJointLimits(const std::vector<double>& pos_min, const std::vector<double>& pos_max, const std::vector<double>& vel_limit);
 
 private:
     rclcpp::Node::SharedPtr node_;
@@ -107,7 +128,8 @@ private:
     bool first_update_ = true;
     
     // 🔥 两层结构状态量
-    std::vector<double> joint_target_;     // IK层输出：目标关节位置
+    std::vector<double> joint_target_;     // Servo内部连续目标 (Governor output)
+    std::vector<double> joint_target_ref_; // IK参考目标 (IK output, slow)
     std::vector<double> integrated_q_;     // Servo层输出：积分后的指令
     
     // 🔥 关键：target更新标志（只在新target到达时跑IK）
@@ -119,8 +141,12 @@ private:
     double angular_gain_ = 1.0;
     double max_linear_vel_ = 0.5;
     double max_angular_vel_ = 1.0;
-    double joint_vel_limit_ = 1.5;
     
+    // Branch-Safe Hybrid Servo Parameters
+    double single_joint_jump_thresh_ = 0.15;
+    double total_jump_thresh_ = 0.4;
+    double follow_time_ = 0.25;
+
     // 安全参数（可配置）
     double q_dot_min_ = 1e-4;        // 微小速度死区 (rad/s)
     double max_delta_q_ = 0.02;      // 最大积分步长 (rad)
@@ -134,6 +160,7 @@ private:
     // 关节限位（防止积分漂移）
     std::vector<double> joint_pos_min_;
     std::vector<double> joint_pos_max_;
+    std::vector<double> joint_vel_limit_;
     
     // 预分配Jacobian对象（性能优化）
     KDL::Jacobian jac_;
@@ -149,6 +176,9 @@ private:
     
     // Damped Pseudo Inverse
     Eigen::MatrixXd dampedPseudoInverse(const Eigen::MatrixXd& J, double lambda = 0.01);
+
+    // Target Governor (10Hz logic executed in servo loop)
+    void updateTargetGovernor();
 };
 
 } // namespace qyh_jaka_control

@@ -14,7 +14,8 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     angular_gain_ = node_->get_parameter("velocity_control.angular_gain").as_double();
     max_linear_vel_ = node_->get_parameter("velocity_control.max_linear_vel").as_double();
     max_angular_vel_ = node_->get_parameter("velocity_control.max_angular_vel").as_double();
-    joint_vel_limit_ = node_->get_parameter("velocity_control.joint_vel_limit").as_double();
+    double default_vel_limit = node_->get_parameter("velocity_control.joint_vel_limit").as_double();
+    joint_vel_limit_.resize(7, default_vel_limit);  // 初始化为7个相同值
     q_dot_min_ = node_->get_parameter("velocity_control.q_dot_min").as_double();
     max_delta_q_ = node_->get_parameter("velocity_control.max_delta_q").as_double();
     
@@ -29,19 +30,20 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     joint_pos_min_ = node_->get_parameter("velocity_control.joint_pos_min").as_double_array();
     joint_pos_max_ = node_->get_parameter("velocity_control.joint_pos_max").as_double_array();
     
-    RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Parameters loaded: dt=%.3f, vel_limit=%.2f, q_dot_min=%.1e",
+    RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Parameters loaded: dt=%f, vel_limit=%.2f, q_dot_min=%.1e",
         dt_, joint_vel_limit_, q_dot_min_);
 }
 
 VelocityServoController::~VelocityServoController() {}
 
-void VelocityServoController::setJointLimits(const std::vector<double>& pos_min, const std::vector<double>& pos_max) {
-    if (pos_min.size() != 7 || pos_max.size() != 7) {
+void VelocityServoController::setJointLimits(const std::vector<double>& pos_min, const std::vector<double>& pos_max, const std::vector<double>& vel_limit) {
+    if (pos_min.size() != 7 || pos_max.size() != 7 || vel_limit.size() != 7) {
         RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Invalid joint limits size (expected 7)");
         return;
     }
     joint_pos_min_ = pos_min;
     joint_pos_max_ = pos_max;
+    joint_vel_limit_ = vel_limit;
     RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Joint limits configured for %s arm", arm_prefix_.c_str());
 }
 
@@ -90,6 +92,7 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     
     current_q_.resize(chain_.getNrOfJoints());
     joint_target_.resize(chain_.getNrOfJoints(), 0.0);
+    joint_target_ref_.resize(chain_.getNrOfJoints(), 0.0);
     integrated_q_.resize(chain_.getNrOfJoints(), 0.0);
     sat_count_.resize(chain_.getNrOfJoints(), 0);
     
@@ -119,6 +122,7 @@ void VelocityServoController::updateRobotState(const std::vector<double>& curren
     // If this is the first update or reset, sync both targets with real robot
     if (first_update_) {
         joint_target_ = current_joints;
+        joint_target_ref_ = current_joints;
         integrated_q_ = current_joints;
         first_update_ = false;
         has_initialized_command_ = true;
@@ -127,37 +131,71 @@ void VelocityServoController::updateRobotState(const std::vector<double>& curren
 }
 
 void VelocityServoController::setJointTarget(const std::vector<double>& joint_target) {
+    setJointTargetRef(joint_target);
+}
+
+void VelocityServoController::setJointTargetRef(const std::vector<double>& ik_joints) {
     std::lock_guard<std::mutex> lock(state_mutex_);
-    if (joint_target.size() != chain_.getNrOfJoints()) {
-        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Invalid joint target size: %zu", joint_target.size());
+    if (ik_joints.size() != chain_.getNrOfJoints()) {
+        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Invalid joint target size: %zu", ik_joints.size());
         return;
     }
     
-    // � 刀1：IK目标平滑（Target Smoothing）
-    // 限制目标值的变化率，避免IK解突变直接传给Servo
-    // 即使IK解是合法的，如果变化太快，Servo也追不上，会导致饱和
-    const double max_target_step = 0.02; // rad, 允许IK目标每帧最大跳变 (30Hz -> 0.6 rad/s)
-    
-    for (size_t i = 0; i < joint_target.size(); ++i) {
-        // 如果是第一次或者没有目标，就以当前位置为基准
-        double prev_target = has_target_ ? joint_target_[i] : current_q_(i);
-        
-        joint_target_[i] = std::clamp(
-            joint_target[i],
-            prev_target - max_target_step,
-            prev_target + max_target_step
-        );
+    // 直接更新参考目标（Target Governor 会处理平滑）
+    for (size_t i = 0; i < ik_joints.size(); ++i) {
+        joint_target_ref_[i] = ik_joints[i];
     }
-    
     has_target_ = true;
 }
 
+bool VelocityServoController::getIntegratedQ(std::vector<double>& q_out) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (!initialized_ || !has_initialized_command_) return false;
+    
+    q_out = integrated_q_;
+    return true;
+}
+
+bool VelocityServoController::checkIKContinuity(const std::vector<double>& seed, const std::vector<double>& result) {
+    if (seed.size() != result.size()) return false;
+
+    double sum_jump = 0.0;
+    for (size_t i = 0; i < seed.size(); ++i) {
+        double d = std::abs(result[i] - seed[i]);
+        if (d > single_joint_jump_thresh_) {
+            return false;   // ❌ 单关节跳解
+        }
+        sum_jump += d;
+    }
+    return sum_jump < total_jump_thresh_;
+}
+
+void VelocityServoController::updateTargetGovernor() {
+    unsigned int n_joints = chain_.getNrOfJoints();
+    for (size_t i = 0; i < n_joints; ++i) {
+        // 限制目标变化率 (Target Governor)
+        // 这里的 dt_ 是 Servo 周期 (0.008s)
+        // 允许的最大步长 = 0.15 * max_vel * dt (降低到 0.15 以获得更平滑的参考)
+        double max_step = 0.15 * joint_vel_limit_[i] * dt_;
+        
+        double diff = joint_target_ref_[i] - joint_target_[i];
+        joint_target_[i] += std::clamp(diff, -max_step, max_step);
+    }
+}
+
+
+
+
+
 void VelocityServoController::holdCurrent() {
     std::lock_guard<std::mutex> lock(state_mutex_);
-    // IK失败时冻结在当前位置，防止Servo层追旧目标
+    
+    // IK失败时冻结在当前位置
     for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
-        joint_target_[i] = current_q_(i);
+        joint_target_ref_[i] = current_q_(i);
+        // joint_target_ 也会在 Governor 中慢慢追过来
     }
+    RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Holding current position");
     has_target_ = true;
 }
 
@@ -170,7 +208,9 @@ bool VelocityServoController::solveIK(
     const std::vector<double>& seed_joints,
     std::vector<double>& result_joints)
 {
-    std::lock_guard<std::mutex> lock(state_mutex_);
+    // ⚠️ IK求解不加锁，避免阻塞 Servo 线程 (125Hz)
+    // TracIK 和 KDL 是线程安全的（只要不修改成员变量）
+    // std::lock_guard<std::mutex> lock(state_mutex_);
     
     if (!initialized_) {
         RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Controller not initialized");
@@ -234,69 +274,44 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         return false;
     }
     
+    // ⭐ 核心：Target Governor (10Hz logic executed in servo loop)
+    updateTargetGovernor();
+
     unsigned int n_joints = chain_.getNrOfJoints();
-    
-    // ✅ 漂移修正：软限制积分器与真实位置的偏差
-    // 改为Clamp模式，避免Hard Reset导致的指令突变（速度冲击）
-    for (unsigned int i = 0; i < n_joints; ++i) {
-        double drift_thresh = (i >= 4) ? 0.02 : 0.05;  // 腕部更严格
-        
-        // 将积分器限制在当前位置的邻域内
-        // 这样即使跑偏，也只是"拖着走"，而不会"跳回"
-        if (integrated_q_[i] > current_q_(i) + drift_thresh) {
-            integrated_q_[i] = current_q_(i) + drift_thresh;
-        } else if (integrated_q_[i] < current_q_(i) - drift_thresh) {
-            integrated_q_[i] = current_q_(i) - drift_thresh;
-        }
-    }
-    
-    // ⚙️ Servo层：简单P控制（连续、可预测、JAKA喜欢）
     next_joints.resize(n_joints);
     
     for (unsigned int i = 0; i < n_joints; ++i) {
-        // P控制：计算位置误差
-        double error = joint_target_[i] - current_q_(i);
+        // Soft sync integrated_q_ to real joint (anti drift)
+        // 防止积分器长期漂移，将其限制在真实位置的邻域内
+        double sync_thresh = (i >= 4) ? 0.02 : 0.05;
+        integrated_q_[i] = std::clamp(
+            integrated_q_[i],
+            current_q_(i) - sync_thresh,
+            current_q_(i) + sync_thresh
+        );
+
+        // Hybrid Velocity Servo: 追 integrated_q -> target
+        double error = joint_target_[i] - integrated_q_[i];
         
-        // 速度指令（比例控制）
-        double cmd_vel = servo_kp_ * error;
+        // 速度生成 (虚拟一阶系统)
+        double qdot = error / follow_time_;
+        qdot = std::clamp(qdot, -joint_vel_limit_[i], joint_vel_limit_[i]);
         
-        // 速度限制
-        cmd_vel = std::clamp(cmd_vel, -joint_vel_limit_, joint_vel_limit_);
-        
-        // 微小速度死区（防止目标附近抖动）
-        if (std::abs(cmd_vel) < q_dot_min_) {
-            cmd_vel = 0.0;
+        // 微小速度死区
+        if (std::abs(qdot) < q_dot_min_) {
+            qdot = 0.0;
         }
         
         // 位置积分
-        double delta_q = cmd_vel * dt_;
+        double delta = qdot * dt_;
+        delta = std::clamp(delta, -max_delta_q_, max_delta_q_);
+        
+        double cmd = integrated_q_[i] + delta;
         
         // 🔪 刀3：Servo层最终安全钳（Final Safety Clamp）
-        // 无论积分器怎么算，发给机器人的指令绝对不能超过当前位置的 max_delta_q_
-        // 这是避免 "Following Error" 的最后一道防线
-        
-        // 预期的新位置（基于积分器）
-        double expected_q = integrated_q_[i] + delta_q;
-        
-        // 计算相对于真实位置的偏差
-        double real_delta = expected_q - current_q_(i);
-        
-        // 强制钳位到安全范围 (max_delta_q_ = 0.02 rad)
+        // 相对真实位置再钳一次（防 Following Error）
+        double real_delta = cmd - current_q_(i);
         real_delta = std::clamp(real_delta, -max_delta_q_, max_delta_q_);
-        
-        // 🔪 刀4：饱和计数器（Saturation Counter）
-        // 如果指令长期贴着 max_delta_q_ 走，说明 Servo 已经跟不上了
-        // JAKA 会认为这是"外部轨迹异常"，所以我们需要自己先熔断
-        if (std::abs(real_delta) > 0.9 * max_delta_q_) {
-            sat_count_[i]++;
-        } else {
-            sat_count_[i] = 0;
-        }
-        
-        if (sat_count_[i] > 15) { // ~120ms @ 125Hz
-             // 熔断保护：冻结该关节
-             real_delta = 0.0;
-        }
         
         // 反算最终指令
         next_joints[i] = current_q_(i) + real_delta;

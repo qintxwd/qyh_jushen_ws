@@ -54,7 +54,7 @@ const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
 }};
 
 const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
-const double SAFETY_MARGIN_VEL = 0.8;     // 允许超过标称速度20%
+const double SAFETY_MARGIN_VEL = 0.8;     // 安全起见，削减20%
 
 // 归一化角度到[-π, π]范围
 static inline double normalizeAngle(double angle) {
@@ -353,13 +353,14 @@ public:
         }
         
         // 📋 统一设置关节限位（从 JAKA_ZU7_LIMITS 应用安全裕度）
-        std::vector<double> joint_min(7), joint_max(7);
+        std::vector<double> joint_min(7), joint_max(7), joint_vel_limit(7);
         for (int i = 0; i < 7; ++i) {
             joint_min[i] = JAKA_ZU7_LIMITS[i].pos_min + SAFETY_MARGIN_POS;
             joint_max[i] = JAKA_ZU7_LIMITS[i].pos_max - SAFETY_MARGIN_POS;
+            joint_vel_limit[i] = JAKA_ZU7_LIMITS[i].vel_max * SAFETY_MARGIN_VEL;
         }
-        if (left_vel_controller_) left_vel_controller_->setJointLimits(joint_min, joint_max);
-        if (right_vel_controller_) right_vel_controller_->setJointLimits(joint_min, joint_max);
+        if (left_vel_controller_) left_vel_controller_->setJointLimits(joint_min, joint_max, joint_vel_limit);
+        if (right_vel_controller_) right_vel_controller_->setJointLimits(joint_min, joint_max, joint_vel_limit);
         
         RCLCPP_INFO(get_logger(), "✓ 速度伺服控制器已初始化");
         RCLCPP_INFO(get_logger(), "  has_z_offset=%s", has_z_offset_ ? "true" : "false");
@@ -709,6 +710,14 @@ private:
     void leftVRTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
         if (!servo_running_ || !left_vel_controller_) return;
         
+        // 🎯 频率控制：降至 ~15Hz (66ms)
+        // VR输入(30Hz) + IK(30Hz) 没收益，只会增加抖动
+        static rclcpp::Time left_last_ik_time(0, 0, RCL_ROS_TIME);
+        if ((now() - left_last_ik_time).seconds() < 0.066) {
+            return;
+        }
+        
+
         try {
             // ① TF变换到base_link
             geometry_msgs::msg::PoseStamped input_pose = *msg;
@@ -727,6 +736,11 @@ private:
                     std::pow(target_in_base.pose.position.y - left_last_target_.pose.position.y, 2) +
                     std::pow(target_in_base.pose.position.z - left_last_target_.pose.position.z, 2));
                 
+                // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
+                if (pos_change < 0.003) { // 3mm
+                     target_in_base.pose.orientation = left_last_target_.pose.orientation;
+                }
+                
                 double ori_change = std::sqrt(
                     std::pow(target_in_base.pose.orientation.x - left_last_target_.pose.orientation.x, 2) +
                     std::pow(target_in_base.pose.orientation.y - left_last_target_.pose.orientation.y, 2) +
@@ -742,21 +756,28 @@ private:
             
             // ③ IK求解（30Hz，只在这里执行）
             std::vector<double> seed_joints(7);
-            for (int i = 0; i < 7; ++i) {
-                seed_joints[i] = cached_left_joints_.jVal[i];
+            // 🎯 策略：使用 integrated_q_ 作为 seed，保证 IK 连续性
+            if (!left_vel_controller_->getIntegratedQ(seed_joints)) {
+                // 如果还没有 integrated_q_ (刚启动)，则使用真实反馈
+                for (int i = 0; i < 7; ++i) {
+                    seed_joints[i] = cached_left_joints_.jVal[i];
+                }
             }
             
             std::vector<double> joint_target;
             bool ik_ok = left_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
             
-            if (!ik_ok) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Left] IK failed, holding current position");
-                left_vel_controller_->holdCurrent();  // 🔥 冻结在当前位置
+            // 🎯 策略：Branch-Safe Check
+            if (!ik_ok || !left_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
+                // ❗ IK失败或跳变：什么都不做，Servo层会继续追踪上一个有效目标
+                // 不要 holdCurrent()，否则会急停
                 return;
             }
+            // ✅ 只有成功 IK 才更新时间
+            left_last_ik_time = now();
             
             // ④ 设置关节目标（Servo层会连续追踪）
-            left_vel_controller_->setJointTarget(joint_target);
+            left_vel_controller_->setJointTargetRef(joint_target);
             
             left_last_target_ = target_in_base;
             has_left_target_ = true;
@@ -769,6 +790,12 @@ private:
     void rightVRTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
         if (!servo_running_ || !right_vel_controller_) return;
         
+        // 🎯 频率控制：降至 ~15Hz (66ms)
+        static rclcpp::Time right_last_ik_time(0, 0, RCL_ROS_TIME);
+        if ((now() - right_last_ik_time).seconds() < 0.066) {
+            return;
+        }
+
         try {
             // ① TF变换到base_link
             geometry_msgs::msg::PoseStamped input_pose = *msg;
@@ -787,6 +814,11 @@ private:
                     std::pow(target_in_base.pose.position.y - right_last_target_.pose.position.y, 2) +
                     std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
                 
+                // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
+                if (pos_change < 0.003) { // 3mm
+                     target_in_base.pose.orientation = right_last_target_.pose.orientation;
+                }
+                
                 double ori_change = std::sqrt(
                     std::pow(target_in_base.pose.orientation.x - right_last_target_.pose.orientation.x, 2) +
                     std::pow(target_in_base.pose.orientation.y - right_last_target_.pose.orientation.y, 2) +
@@ -802,21 +834,29 @@ private:
             
             // ③ IK求解（30Hz，只在这里执行）
             std::vector<double> seed_joints(7);
-            for (int i = 0; i < 7; ++i) {
-                seed_joints[i] = cached_right_joints_.jVal[i];
+            // 🎯 策略：使用 integrated_q_ 作为 seed，保证 IK 连续性
+            if (!right_vel_controller_->getIntegratedQ(seed_joints)) {
+                // 如果还没有 integrated_q_ (刚启动)，则使用真实反馈
+                for (int i = 0; i < 7; ++i) {
+                    seed_joints[i] = cached_right_joints_.jVal[i];
+                }
             }
             
             std::vector<double> joint_target;
             bool ik_ok = right_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
             
-            if (!ik_ok) {
-                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[Right] IK failed, holding current position");
-                right_vel_controller_->holdCurrent();  // 🔥 冻结在当前位置
+            // 🎯 策略：Branch-Safe Check
+            if (!ik_ok || !right_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
+                // ❗ IK失败或跳变：什么都不做，Servo层会继续追踪上一个有效目标
+                // 不要 holdCurrent()，否则会急停
                 return;
             }
+
+            // ✅ 只有成功 IK 才更新时间
+            right_last_ik_time = now();
             
             // ④ 设置关节目标（Servo层会连续追踪）
-            right_vel_controller_->setJointTarget(joint_target);
+            right_vel_controller_->setJointTargetRef(joint_target);
             
             right_last_target_ = target_in_base;
             has_right_target_ = true;
