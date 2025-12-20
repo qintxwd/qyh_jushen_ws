@@ -35,11 +35,12 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     // 读取目标更新周期，并自动调整跳变阈值
     target_update_dt_ = node_->get_parameter("velocity_control.target_update_dt").as_double();
     
-    // 自动计算跳变阈值：允许在更新周期内以最大速度运动，并给予5倍裕度
-    // 这样可以防止快速运动时触发IK不连续保护
+    // 自动计算跳变阈值：允许在更新周期内以最大速度运动，并给予裕度
+    // 🔧 修复：放宽裕度从5倍到7倍，适应VR快速运动
+    // 原因：VR手柄快速移动时，合理的关节运动可能超过5倍裕度
     double max_jump = default_vel_limit * target_update_dt_;
-    single_joint_jump_thresh_ = max_jump * 5.0; 
-    total_jump_thresh_ = single_joint_jump_thresh_ * 3.0;
+    single_joint_jump_thresh_ = max_jump * 7.0;  // 从5.0提升到7.0
+    total_jump_thresh_ = single_joint_jump_thresh_ * 3.5;  // 从3.0提升到3.5
     
     RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Parameters loaded: dt=%.3f, update_dt=%.3f, jump_thresh=%.3f",
         dt_, target_update_dt_, single_joint_jump_thresh_);
@@ -89,10 +90,13 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     
     // 🔥 初始化TracIK求解器（支持seed state，避免多解跳变）
     // 注意：TracIK构造函数需要URDF XML字符串，不是文件路径
+    // 🔧 优化参数提高IK连续性：
+    // - timeout: 0.015s（从0.01增加）给更多时间找到接近seed的解
+    // - epsilon: 5e-4（从1e-4放宽）容忍较大误差，减少解跳变
     tracik_solver_ = std::make_unique<TRAC_IK::TRAC_IK>(
         base_link, tip_link, urdf_xml, 
-        0.01,   // timeout: 10ms求解时间（放宽以提高成功率）
-        1e-4,   // epsilon: 0.1mm位置误差容限（放宽以减少震荡）
+        0.015,  // timeout: 15ms求解时间（增加以提高成功率）
+        5e-4,   // epsilon: 0.5mm位置误差容限（放宽以减少震荡）
         TRAC_IK::Distance  // 同时优化位置和姿态
     );
     

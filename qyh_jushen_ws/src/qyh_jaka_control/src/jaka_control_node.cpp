@@ -790,6 +790,25 @@ private:
                                                   (1-alpha) * left_last_target_.pose.position.y;
                 target_in_base.pose.position.z = alpha * target_in_base.pose.position.z + 
                                                   (1-alpha) * left_last_target_.pose.position.z;
+                
+                // 🔧 增加位置变化率限制（防止VR快速移动导致IK跳变）
+                double max_pos_change_per_update = 0.05;  // 每次更新最多5cm
+                double pos_change = std::sqrt(
+                    std::pow(target_in_base.pose.position.x - left_last_target_.pose.position.x, 2) +
+                    std::pow(target_in_base.pose.position.y - left_last_target_.pose.position.y, 2) +
+                    std::pow(target_in_base.pose.position.z - left_last_target_.pose.position.z, 2));
+                
+                if (pos_change > max_pos_change_per_update) {
+                    double scale = max_pos_change_per_update / pos_change;
+                    target_in_base.pose.position.x = left_last_target_.pose.position.x + 
+                        scale * (target_in_base.pose.position.x - left_last_target_.pose.position.x);
+                    target_in_base.pose.position.y = left_last_target_.pose.position.y + 
+                        scale * (target_in_base.pose.position.y - left_last_target_.pose.position.y);
+                    target_in_base.pose.position.z = left_last_target_.pose.position.z + 
+                        scale * (target_in_base.pose.position.z - left_last_target_.pose.position.z);
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+                        "[Left] VR move too fast (%.3f m), limited to %.3f m", pos_change, max_pos_change_per_update);
+                }
             }
             
             // ② 目标变化检测（过滤微小抖动）
@@ -798,11 +817,6 @@ private:
                     std::pow(target_in_base.pose.position.x - left_last_target_.pose.position.x, 2) +
                     std::pow(target_in_base.pose.position.y - left_last_target_.pose.position.y, 2) +
                     std::pow(target_in_base.pose.position.z - left_last_target_.pose.position.z, 2));
-                
-                // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
-                if (pos_change < 0.003) { // 3mm
-                     target_in_base.pose.orientation = left_last_target_.pose.orientation;
-                }
 
                 // 🔍 调试日志：检测VR输入的大幅跳变
                 if (pos_change > 0.05) { // 5cm
@@ -815,6 +829,7 @@ private:
                     std::pow(target_in_base.pose.orientation.z - left_last_target_.pose.orientation.z, 2) +
                     std::pow(target_in_base.pose.orientation.w - left_last_target_.pose.orientation.w, 2));
                 
+                // 🎯 修复：只有位置**和**姿态都很小时才忽略，允许纯旋转操作
                 if (pos_change < target_change_pos_threshold_ && ori_change < target_change_ori_threshold_) {
                     RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 2000, 
                         "[Left] Target change too small (pos:%.4f ori:%.4f), ignoring", pos_change, ori_change);
@@ -838,14 +853,31 @@ private:
             // 🎯 策略：Branch-Safe Check
             if (!ik_ok) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Left] ❌ IK Failed for target pose");
+                left_ik_fail_count_++;
+                if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
+                    RCLCPP_ERROR(get_logger(), 
+                        "[Left] 🛑 Continuous IK failures (%d times), stopping servo for safety!", 
+                        left_ik_fail_count_);
+                    stopServoInternal();
+                }
                 return;
             }
 
             if (!left_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
                 // 详细日志已在 checkIKContinuity 内部打印
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Left] ❌ IK Continuity Check Failed - Motion Aborted");
+                left_ik_fail_count_++;
+                if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
+                    RCLCPP_ERROR(get_logger(), 
+                        "[Left] 🛑 Continuous IK jump failures (%d times), stopping servo for safety!", 
+                        left_ik_fail_count_);
+                    stopServoInternal();
+                }
                 return;
             }
+            
+            // ✅ IK成功，重置错误计数器
+            left_ik_fail_count_ = 0;
             // ✅ 只有成功 IK 才更新时间
             left_last_ik_time = now();
             
@@ -889,6 +921,25 @@ private:
                                                   (1-alpha) * right_last_target_.pose.position.y;
                 target_in_base.pose.position.z = alpha * target_in_base.pose.position.z + 
                                                   (1-alpha) * right_last_target_.pose.position.z;
+                
+                // 🔧 增加位置变化率限制（防止VR快速移动导致IK跳变）
+                double max_pos_change_per_update = 0.05;  // 每次更新最多5cm
+                double pos_change = std::sqrt(
+                    std::pow(target_in_base.pose.position.x - right_last_target_.pose.position.x, 2) +
+                    std::pow(target_in_base.pose.position.y - right_last_target_.pose.position.y, 2) +
+                    std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
+                
+                if (pos_change > max_pos_change_per_update) {
+                    double scale = max_pos_change_per_update / pos_change;
+                    target_in_base.pose.position.x = right_last_target_.pose.position.x + 
+                        scale * (target_in_base.pose.position.x - right_last_target_.pose.position.x);
+                    target_in_base.pose.position.y = right_last_target_.pose.position.y + 
+                        scale * (target_in_base.pose.position.y - right_last_target_.pose.position.y);
+                    target_in_base.pose.position.z = right_last_target_.pose.position.z + 
+                        scale * (target_in_base.pose.position.z - right_last_target_.pose.position.z);
+                    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+                        "[Right] VR move too fast (%.3f m), limited to %.3f m", pos_change, max_pos_change_per_update);
+                }
             }
             
             // ② 目标变化检测（过滤微小抖动）
@@ -903,17 +954,13 @@ private:
                     RCLCPP_WARN(get_logger(), "[Right] ⚠️ Large VR Input Jump: %.4f m", pos_change);
                 }
                 
-                // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
-                if (pos_change < 0.003) { // 3mm
-                     target_in_base.pose.orientation = right_last_target_.pose.orientation;
-                }
-                
                 double ori_change = std::sqrt(
                     std::pow(target_in_base.pose.orientation.x - right_last_target_.pose.orientation.x, 2) +
                     std::pow(target_in_base.pose.orientation.y - right_last_target_.pose.orientation.y, 2) +
                     std::pow(target_in_base.pose.orientation.z - right_last_target_.pose.orientation.z, 2) +
                     std::pow(target_in_base.pose.orientation.w - right_last_target_.pose.orientation.w, 2));
                 
+                // 🎯 修复：只有位置**和**姿态都很小时才忽略，允许纯旋转操作
                 if (pos_change < target_change_pos_threshold_ && ori_change < target_change_ori_threshold_) {
                     RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 2000, 
                         "[Right] Target change too small (pos:%.4f ori:%.4f), ignoring", pos_change, ori_change);
@@ -937,14 +984,31 @@ private:
             // 🎯 策略：Branch-Safe Check
             if (!ik_ok) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Right] ❌ IK Failed for target pose");
+                right_ik_fail_count_++;
+                if (right_ik_fail_count_ >= max_continuous_ik_failures_) {
+                    RCLCPP_ERROR(get_logger(), 
+                        "[Right] 🛑 Continuous IK failures (%d times), stopping servo for safety!", 
+                        right_ik_fail_count_);
+                    stopServoInternal();
+                }
                 return;
             }
 
             if (!right_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
                 // 详细日志已在 checkIKContinuity 内部打印
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Right] ❌ IK Continuity Check Failed - Motion Aborted");
+                right_ik_fail_count_++;
+                if (right_ik_fail_count_ >= max_continuous_ik_failures_) {
+                    RCLCPP_ERROR(get_logger(), 
+                        "[Right] 🛑 Continuous IK jump failures (%d times), stopping servo for safety!", 
+                        right_ik_fail_count_);
+                    stopServoInternal();
+                }
                 return;
             }
+            
+            // ✅ IK成功，重置错误计数器
+            right_ik_fail_count_ = 0;
 
             // ✅ 只有成功 IK 才更新时间
             right_last_ik_time = now();
@@ -1142,6 +1206,10 @@ private:
                 // 初始化命令索引
                 cmd_index_.store(0);
                 
+                // 重置 IK 错误计数器
+                left_ik_fail_count_ = 0;
+                right_ik_fail_count_ = 0;
+                
                 // 立即启动伺服模式，主循环会自动发送静止指令
                 servo_running_ = true;
                 RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Active - Main loop will send hold commands ===");
@@ -1231,6 +1299,11 @@ private:
     geometry_msgs::msg::PoseStamped right_last_target_;
     bool has_left_target_{false};
     bool has_right_target_{false};
+    
+    // IK连续失败保护
+    int left_ik_fail_count_{0};
+    int right_ik_fail_count_{0};
+    const int max_continuous_ik_failures_{3};  // 连续失0次IK失败后退出伺服
     
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;
