@@ -376,6 +376,12 @@ private:
     // ==================== 主循环 ====================
     void mainLoop()
     {
+        // 🔍 看门狗日志：确认主循环是否存活
+        static int loop_watchdog = 0;
+        if (++loop_watchdog % 125 == 0) { // 每秒打印一次
+             RCLCPP_INFO(get_logger(), "[MainLoop] Alive. ServoRunning: %d", servo_running_.load());
+        }
+
         auto start = std::chrono::high_resolution_clock::now();
         
         // ⚡ 始终获取当前机械臂位姿（参考30.edgservo.cpp）
@@ -391,6 +397,12 @@ private:
             RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, 
                 "[MainLoop] Servo not running, only updating state cache");
             return;
+        }
+
+        // 🔍 调试日志：检查控制器状态
+        if (!left_vel_controller_ || !right_vel_controller_) {
+             RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000, "[MainLoop] Controllers not initialized!");
+             return;
         }
 
         RCLCPP_DEBUG_ONCE(get_logger(), "[MainLoop] First servo cycle");
