@@ -31,8 +31,17 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     joint_pos_min_ = node_->get_parameter("velocity_control.joint_pos_min").as_double_array();
     joint_pos_max_ = node_->get_parameter("velocity_control.joint_pos_max").as_double_array();
     
-    RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Parameters loaded: dt=%f, vel_limit=%.2f, q_dot_min=%.1e",
-        dt_, joint_vel_limit_, q_dot_min_);
+    // 读取目标更新周期，并自动调整跳变阈值
+    target_update_dt_ = node_->get_parameter("velocity_control.target_update_dt").as_double();
+    
+    // 自动计算跳变阈值：允许在更新周期内以最大速度运动，并给予3倍裕度
+    // 这样可以防止快速运动时触发IK不连续保护
+    double max_jump = default_vel_limit * target_update_dt_;
+    single_joint_jump_thresh_ = max_jump * 3.0; 
+    total_jump_thresh_ = single_joint_jump_thresh_ * 3.0;
+    
+    RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Parameters loaded: dt=%.3f, update_dt=%.3f, jump_thresh=%.3f",
+        dt_, target_update_dt_, single_joint_jump_thresh_);
 }
 
 VelocityServoController::~VelocityServoController() {}

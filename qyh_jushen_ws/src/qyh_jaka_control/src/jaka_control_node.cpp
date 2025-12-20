@@ -138,6 +138,12 @@ public:
         target_change_pos_threshold_ = get_parameter("velocity_control.target_change_position_threshold").as_double();
         target_change_ori_threshold_ = get_parameter("velocity_control.target_change_orientation_threshold").as_double();
         
+        // 🎯 新增参数：VR目标更新频率和周期
+        declare_parameter<double>("teleop_target_update_time_ms", 66.0);
+        declare_parameter<double>("velocity_control.target_update_dt", 0.066);
+        
+        teleop_target_update_time_ms_ = get_parameter("teleop_target_update_time_ms").as_double();
+        
         // 速度控制器将在构造函数完成后初始化（避免shared_from_this()问题）
         RCLCPP_INFO(get_logger(), "🎯 速度积分控制模式已启用");
         
@@ -713,7 +719,7 @@ private:
         // 🎯 频率控制：降至 ~15Hz (66ms)
         // VR输入(30Hz) + IK(30Hz) 没收益，只会增加抖动
         static rclcpp::Time left_last_ik_time(0, 0, RCL_ROS_TIME);
-        if ((now() - left_last_ik_time).seconds() < 0.066) {
+        if ((now() - left_last_ik_time).seconds() < (teleop_target_update_time_ms_ / 1000.0)) {
             return;
         }
         
@@ -792,7 +798,7 @@ private:
         
         // 🎯 频率控制：降至 ~15Hz (66ms)
         static rclcpp::Time right_last_ik_time(0, 0, RCL_ROS_TIME);
-        if ((now() - right_last_ik_time).seconds() < 0.066) {
+        if ((now() - right_last_ik_time).seconds() < (teleop_target_update_time_ms_ / 1000.0)) {
             return;
         }
 
@@ -1132,6 +1138,7 @@ private:
     // 目标变化死区（过滤VR手柄微小抖动）
     double target_change_pos_threshold_{0.002};   // 位置变化阈值（米）
     double target_change_ori_threshold_{0.035};   // 姿态变化阈值（四元数距离）
+    double teleop_target_update_time_ms_{66.0};   // VR目标更新频率 (ms)
     geometry_msgs::msg::PoseStamped left_last_target_;
     geometry_msgs::msg::PoseStamped right_last_target_;
     bool has_left_target_{false};

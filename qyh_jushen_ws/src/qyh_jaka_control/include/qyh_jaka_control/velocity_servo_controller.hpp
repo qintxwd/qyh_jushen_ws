@@ -141,6 +141,7 @@ private:
     double angular_gain_ = 1.0;
     double max_linear_vel_ = 0.5;
     double max_angular_vel_ = 1.0;
+    double target_update_dt_ = 0.066; // 目标更新周期 (s)
     
     // Branch-Safe Hybrid Servo Parameters
     double single_joint_jump_thresh_ = 0.5;  // 放宽以适应15Hz更新
