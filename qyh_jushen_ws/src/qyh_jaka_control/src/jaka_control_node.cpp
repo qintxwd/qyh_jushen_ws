@@ -55,7 +55,7 @@ const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
 }};
 
 const double SAFETY_MARGIN_POS = 0.0873;  // 5° 安全裕度
-const double SAFETY_MARGIN_VEL = 0.8;     // 安全起见，削减20%
+const double SAFETY_MARGIN_VEL = 0.95;    // 安全起见，削减5% (从20%放宽以支持VR快速运动)
 
 // 归一化角度到[-π, π]范围
 static inline double normalizeAngle(double angle) {
@@ -380,7 +380,7 @@ private:
         // 🔍 看门狗日志：确认主循环是否存活
         static int loop_watchdog = 0;
         if (++loop_watchdog % 125 == 0) { // 每秒打印一次
-             RCLCPP_INFO(get_logger(), "[MainLoop] Alive. ServoRunning: %d", servo_running_.load());
+             RCLCPP_INFO(get_logger(), "[MainLoop] Alive. ServoRunning: %d", (int)servo_running_.load());
         }
 
         auto start = std::chrono::high_resolution_clock::now();

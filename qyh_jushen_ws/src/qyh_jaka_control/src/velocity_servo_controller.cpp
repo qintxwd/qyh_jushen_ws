@@ -34,10 +34,10 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     // 读取目标更新周期，并自动调整跳变阈值
     target_update_dt_ = node_->get_parameter("velocity_control.target_update_dt").as_double();
     
-    // 自动计算跳变阈值：允许在更新周期内以最大速度运动，并给予3倍裕度
+    // 自动计算跳变阈值：允许在更新周期内以最大速度运动，并给予5倍裕度
     // 这样可以防止快速运动时触发IK不连续保护
     double max_jump = default_vel_limit * target_update_dt_;
-    single_joint_jump_thresh_ = max_jump * 3.0; 
+    single_joint_jump_thresh_ = max_jump * 5.0; 
     total_jump_thresh_ = single_joint_jump_thresh_ * 3.0;
     
     RCLCPP_INFO(node_->get_logger(), "[VelCtrl] Parameters loaded: dt=%.3f, update_dt=%.3f, jump_thresh=%.3f",
@@ -349,14 +349,18 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         // 相对真实位置再钳一次（防 Following Error）
         double real_delta = cmd - current_q_(i);
         
+        // 动态计算该关节的最大允许步长：取全局设定与该关节物理限速的较小值
+        // 这样既能利用 max_delta_q_ 允许高速关节快动，又能保护低速关节不超速
+        double joint_max_step = std::min(max_delta_q_, joint_vel_limit_[i] * dt_);
+
         // 增加日志：如果触发了安全钳位
-        if (std::abs(real_delta) > max_delta_q_) {
+        if (std::abs(real_delta) > joint_max_step) {
              RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 200, 
                 "[VelCtrl] ⚠️ Servo Clamp J%d! Req: %.4f > Max: %.4f. Cmd: %.4f, Curr: %.4f",
-                i, real_delta, max_delta_q_, cmd, current_q_(i));
+                i, real_delta, joint_max_step, cmd, current_q_(i));
         }
 
-        real_delta = std::clamp(real_delta, -max_delta_q_, max_delta_q_);
+        real_delta = std::clamp(real_delta, -joint_max_step, joint_max_step);
         
         // 反算最终指令
         next_joints[i] = current_q_(i) + real_delta;
