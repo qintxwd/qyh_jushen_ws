@@ -31,6 +31,7 @@
 #include <cmath>
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
+#include <sstream>
 
 using namespace std::chrono_literals;
 namespace fs = std::filesystem;
@@ -572,17 +573,32 @@ private:
                 // 仅在调试模式下开启，避免刷屏
                 static int log_counter = 0;
                 if (++log_counter % 10 == 0) { // 每10帧打印一次，约12.5Hz
-                    std::string left_cmd_str = "[";
-                    std::string right_cmd_str = "[";
+                    // std::string left_cmd_str = "[";
+                    // std::string right_cmd_str = "[";
+                    // for(int i=0; i<7; ++i) {
+                    //     char buf[32];
+                    //     snprintf(buf, sizeof(buf), "%.4f%s", left_next_joints[i], (i<6?",":""));
+                    //     left_cmd_str += buf;
+                    //     snprintf(buf, sizeof(buf), "%.4f%s", right_next_joints[i], (i<6?",":""));
+                    //     right_cmd_str += buf;
+                    // }
+                    // left_cmd_str += "]";
+                    // right_cmd_str += "]";
+                    std::stringstream left_ss, right_ss;
+                    left_ss << "[";
+                    right_ss << "[";
                     for(int i=0; i<7; ++i) {
-                        char buf[32];
-                        snprintf(buf, sizeof(buf), "%.4f%s", left_next_joints[i], (i<6?",":""));
-                        left_cmd_str += buf;
-                        snprintf(buf, sizeof(buf), "%.4f%s", right_next_joints[i], (i<6?",":""));
-                        right_cmd_str += buf;
+                        left_ss << std::fixed << std::setprecision(8) << left_cmd[i];
+                        right_ss << std::fixed << std::setprecision(8) << right_cmd[i];
+                        if (i < 6) {
+                            left_ss << ", ";
+                            right_ss << ", ";
+                        }
                     }
-                    left_cmd_str += "]";
-                    right_cmd_str += "]";
+                    left_ss << "]";
+                    right_ss << "]";
+                    std::string left_cmd_str = left_ss.str();
+                    std::string right_cmd_str = right_ss.str();
                     RCLCPP_INFO(get_logger(), "📤 CMD L:%s R:%s", left_cmd_str.c_str(), right_cmd_str.c_str());
                 }
 
