@@ -28,6 +28,7 @@ VelocityServoController::VelocityServoController(rclcpp::Node::SharedPtr node, c
     lambda_min_ = node_->get_parameter("velocity_control.lambda_min").as_double();
     position_deadzone_ = node_->get_parameter("velocity_control.position_deadzone").as_double();
     orientation_deadzone_ = node_->get_parameter("velocity_control.orientation_deadzone").as_double();
+    max_joint_accel_ = node_->get_parameter("velocity_control.max_joint_accel").as_double();
     joint_pos_min_ = node_->get_parameter("velocity_control.joint_pos_min").as_double_array();
     joint_pos_max_ = node_->get_parameter("velocity_control.joint_pos_max").as_double_array();
     
@@ -105,6 +106,7 @@ bool VelocityServoController::initialize(const std::string& urdf_path, const std
     joint_target_ref_.resize(chain_.getNrOfJoints(), 0.0);
     integrated_q_.resize(chain_.getNrOfJoints(), 0.0);
     sat_count_.resize(chain_.getNrOfJoints(), 0);
+    last_joint_velocity_.resize(chain_.getNrOfJoints(), 0.0);
     
     // 预分配Jacobian对象，避免每次计算时重新分配内存
     jac_ = KDL::Jacobian(chain_.getNrOfJoints());
@@ -334,9 +336,17 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         double qdot = error / follow_time_;
         qdot = std::clamp(qdot, -joint_vel_limit_[i], joint_vel_limit_[i]);
         
+        // ⭐ 加速度限制（方案B核心：保证jerk平滑）
+        double accel = (qdot - last_joint_velocity_[i]) / dt_;
+        if (std::abs(accel) > max_joint_accel_) {
+            qdot = last_joint_velocity_[i] + std::copysign(max_joint_accel_ * dt_, accel);
+        }
+        last_joint_velocity_[i] = qdot;  // 更新速度状态
+        
         // 微小速度死区
         if (std::abs(qdot) < q_dot_min_) {
             qdot = 0.0;
+            last_joint_velocity_[i] = 0.0;  // 死区内速度清零
         }
         
         // 位置积分
@@ -384,6 +394,10 @@ void VelocityServoController::reset() {
     has_target_ = false;
     first_update_ = true;
     has_initialized_command_ = false;  // 重置时清除指令初始化标志
+    
+    // 重置速度状态（加速度限制需要）
+    std::fill(last_joint_velocity_.begin(), last_joint_velocity_.end(), 0.0);
+    
     // Note: integrated_q_ will be re-initialized from robot state on next updateRobotState()
     // This ensures smooth restart without jumps
 }

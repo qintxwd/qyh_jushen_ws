@@ -157,11 +157,15 @@ private:
     
     // Servo层P控制增益
     double servo_kp_ = 5.0;          // 关节位置误差增益
+    double max_joint_accel_ = 50.0;  // 最大关节加速度 (rad/s²)
     
     // 关节限位（防止积分漂移）
     std::vector<double> joint_pos_min_;
     std::vector<double> joint_pos_max_;
     std::vector<double> joint_vel_limit_;
+    
+    // 速度状态（用于加速度限制）
+    std::vector<double> last_joint_velocity_;
     
     // 预分配Jacobian对象（性能优化）
     KDL::Jacobian jac_;
