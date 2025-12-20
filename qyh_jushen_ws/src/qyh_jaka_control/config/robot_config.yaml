@@ -8,6 +8,7 @@
 
     # 伺服控制参数
     cycle_time_ms: 8.0  # 8ms = 125Hz (推荐)
+    teleop_target_update_time_ms: 66.0  # 66ms = 15Hz (VR目标更新频率)
     use_cartesian: false  # true: 笛卡尔空间伺服, false: 关节空间伺服
     
     # 初始化姿态配置（弧度）
@@ -74,6 +75,7 @@
     velocity_control:
       # 控制周期与增益
       dt: 0.008  # 控制周期 (s), 对应125Hz
+      target_update_dt: 0.066  # 目标更新周期 (s), 对应15Hz
       linear_gain: 2.0  # 位置误差增益
       angular_gain: 1.0  # 姿态误差增益
       
