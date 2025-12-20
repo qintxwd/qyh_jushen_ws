@@ -115,8 +115,8 @@ public:
         declare_parameter<double>("velocity_control.max_linear_vel", 0.5);
         declare_parameter<double>("velocity_control.max_angular_vel", 1.0);
         declare_parameter<double>("velocity_control.joint_vel_limit", 1.5);
-        declare_parameter<double>("velocity_control.q_dot_min", 1e-4);
-        declare_parameter<double>("velocity_control.max_delta_q", 0.02);
+        declare_parameter<double>("velocity_control.q_dot_min", 0.003);  // 增大死区，减少微抖（从1e-4提升）
+        declare_parameter<double>("velocity_control.max_delta_q", 0.03);  // 放宽步长限制（从0.02提升）
         declare_parameter<double>("velocity_control.max_joint_accel", 50.0);  // rad/s²
         declare_parameter<double>("velocity_control.lambda_min", 1e-4);
         declare_parameter<double>("velocity_control.position_deadzone", 0.001);
@@ -781,6 +781,17 @@ private:
                 target_in_base.pose.position.z += left_z_offset_;
             }
             
+            // 🎯 指数平滑滤波（减少VR高频抖动）
+            if (has_left_target_) {
+                double alpha = 0.3;  // 平滑系数：0.3表示30%新值+70%旧值
+                target_in_base.pose.position.x = alpha * target_in_base.pose.position.x + 
+                                                  (1-alpha) * left_last_target_.pose.position.x;
+                target_in_base.pose.position.y = alpha * target_in_base.pose.position.y + 
+                                                  (1-alpha) * left_last_target_.pose.position.y;
+                target_in_base.pose.position.z = alpha * target_in_base.pose.position.z + 
+                                                  (1-alpha) * left_last_target_.pose.position.z;
+            }
+            
             // ② 目标变化检测（过滤微小抖动）
             if (has_left_target_) {
                 double pos_change = std::sqrt(
@@ -869,6 +880,17 @@ private:
                 target_in_base.pose.position.z += right_z_offset_;
             }
             
+            // 🎯 指数平滑滤波（减少VR高频抖动）
+            if (has_right_target_) {
+                double alpha = 0.3;  // 平滑系数：0.3表示30%新值+70%旧值
+                target_in_base.pose.position.x = alpha * target_in_base.pose.position.x + 
+                                                  (1-alpha) * right_last_target_.pose.position.x;
+                target_in_base.pose.position.y = alpha * target_in_base.pose.position.y + 
+                                                  (1-alpha) * right_last_target_.pose.position.y;
+                target_in_base.pose.position.z = alpha * target_in_base.pose.position.z + 
+                                                  (1-alpha) * right_last_target_.pose.position.z;
+            }
+            
             // ② 目标变化检测（过滤微小抖动）
             if (has_right_target_) {
                 double pos_change = std::sqrt(
@@ -880,7 +902,6 @@ private:
                 if (pos_change > 0.05) { // 5cm
                     RCLCPP_WARN(get_logger(), "[Right] ⚠️ Large VR Input Jump: %.4f m", pos_change);
                 }
-                    std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
                 
                 // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
                 if (pos_change < 0.003) { // 3mm

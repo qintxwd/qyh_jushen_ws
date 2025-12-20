@@ -359,13 +359,15 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         // 相对真实位置再钳一次（防 Following Error）
         double real_delta = cmd - current_q_(i);
         
-        // 动态计算该关节的最大允许步长：取全局设定与该关节物理限速的较小值
-        // 这样既能利用 max_delta_q_ 允许高速关节快动，又能保护低速关节不超速
-        double joint_max_step = std::min(max_delta_q_, joint_vel_limit_[i] * dt_);
+        // 🔧 修复：使用max_delta_q_作为主要限制，避免joint_vel_limit_*dt_过严
+        // 原因：joint_vel_limit_[0]*0.008=0.0126 rad太小，导致频繁clamp警告
+        // 改进：允许更大步长，由max_delta_q_（0.03）控制，配合加速度限制保证平滑
+        double safety_factor = 1.2;  // 安全裕度
+        double joint_max_step = max_delta_q_ * safety_factor;
 
         // 增加日志：如果触发了安全钳位
         if (std::abs(real_delta) > joint_max_step) {
-             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 200, 
+             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 500, 
                 "[VelCtrl] ⚠️ Servo Clamp J%d! Req: %.4f > Max: %.4f. Cmd: %.4f, Curr: %.4f",
                 i, real_delta, joint_max_step, cmd, current_q_(i));
         }
