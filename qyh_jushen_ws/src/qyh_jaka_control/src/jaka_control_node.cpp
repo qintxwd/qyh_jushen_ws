@@ -880,7 +880,6 @@ private:
                 if (pos_change > 0.05) { // 5cm
                     RCLCPP_WARN(get_logger(), "[Right] ⚠️ Large VR Input Jump: %.4f m", pos_change);
                 }
-                    std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
                 
                 // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
                 if (pos_change < 0.003) { // 3mm
