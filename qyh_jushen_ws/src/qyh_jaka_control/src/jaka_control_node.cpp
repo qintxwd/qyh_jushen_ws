@@ -668,6 +668,16 @@ private:
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
             "[Status] Servo: %s, Rate: %.1f Hz, Latency: %.2f ms",
             servo_msg.mode.c_str(), servo_msg.publish_rate_hz, servo_msg.latency_ms);
+        
+        // 🔍 IK统计信息（每5秒打印一次）
+        if (servo_running_ && (left_ik_total_count_ > 0 || right_ik_total_count_ > 0)) {
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                "[IK Stats] Left: %u jumps / %u total (%.1f%%), Right: %u jumps / %u total (%.1f%%)",
+                left_ik_jump_count_.load(), left_ik_total_count_.load(),
+                left_ik_total_count_ > 0 ? (100.0 * left_ik_jump_count_ / left_ik_total_count_) : 0.0,
+                right_ik_jump_count_.load(), right_ik_total_count_.load(),
+                right_ik_total_count_ > 0 ? (100.0 * right_ik_jump_count_ / right_ik_total_count_) : 0.0);
+        }
 
         // ==================== 2. 机器人状态 ====================
         auto robot_state_msg = qyh_jaka_control_msgs::msg::RobotState();
@@ -838,22 +848,50 @@ private:
             }
             
             // ③ IK求解（30Hz，只在这里执行）
+            // 🔒 IK Accept Gate Step 1: 选择连续性检查的seed
+            // 优先使用上一次被接受的IK解，而不是integrated_q（可能已被错误目标拖偏）
             std::vector<double> seed_joints(7);
-            // 🎯 策略：使用 integrated_q_ 作为 seed，保证 IK 连续性
-            if (!left_vel_controller_->getIntegratedQ(seed_joints)) {
+            if (has_left_last_ik_) {
+                seed_joints = left_last_accepted_ik_;
+                RCLCPP_DEBUG(get_logger(), "[Left VR] Using last_accepted_ik as seed");
+            } else if (!left_vel_controller_->getIntegratedQ(seed_joints)) {
                 // 如果还没有 integrated_q_ (刚启动)，则使用真实反馈
                 for (int i = 0; i < 7; ++i) {
                     seed_joints[i] = cached_left_joints_.jVal[i];
                 }
             }
             
+            // 🔍 调试：记录seed关节角度
+            RCLCPP_DEBUG(get_logger(), "[Left] IK Seed: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                seed_joints[0], seed_joints[1], seed_joints[2], seed_joints[3],
+                seed_joints[4], seed_joints[5], seed_joints[6]);
+            
             std::vector<double> joint_target;
             bool ik_ok = left_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
+            
+            // 🔍 调试：记录IK结果和跳变量
+            if (ik_ok) {
+                double max_jump = 0.0;
+                int max_jump_idx = -1;
+                for (size_t i = 0; i < 7; ++i) {
+                    double jump = std::abs(joint_target[i] - seed_joints[i]);
+                    if (jump > max_jump) {
+                        max_jump = jump;
+                        max_jump_idx = i;
+                    }
+                }
+                RCLCPP_DEBUG(get_logger(), "[Left] IK Result: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f] MaxJump=J%d:%.4f rad",
+                    joint_target[0], joint_target[1], joint_target[2], joint_target[3],
+                    joint_target[4], joint_target[5], joint_target[6], max_jump_idx, max_jump);
+                
+                left_ik_total_count_++;
+            }
             
             // 🎯 策略：Branch-Safe Check
             if (!ik_ok) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Left] ❌ IK Failed for target pose");
                 left_ik_fail_count_++;
+                left_vel_controller_->holdCurrent();  // 🔒 IK失败时立即holdCurrent，不要继续追错误目标
                 if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
                     RCLCPP_ERROR(get_logger(), 
                         "[Left] 🛑 Continuous IK failures (%d times), stopping servo for safety!", 
@@ -862,10 +900,39 @@ private:
                 }
                 return;
             }
-
+            // 🔒 IK Accept Gate Step 3: 检查IK连续性（防止关节突变）
             if (!left_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
                 // 详细日志已在 checkIKContinuity 内部打印
-                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Left] ❌ IK Continuity Check Failed - Motion Aborted");
+                RCLCPP_ERROR(get_logger(), "[Left] ❌ IK Continuity Check Failed - Motion Aborted");
+                // 打印VR目标位姿信息，帮助定位问题
+                RCLCPP_ERROR(get_logger(), "  VR Target: pos=[%.4f, %.4f, %.4f] ori=[%.4f, %.4f, %.4f, %.4f]",
+                    target_in_base.pose.position.x, target_in_base.pose.position.y, target_in_base.pose.position.z,
+                    target_in_base.pose.orientation.x, target_in_base.pose.orientation.y,
+                    target_in_base.pose.orientation.z, target_in_base.pose.orientation.w);
+                left_ik_jump_count_++;
+                left_ik_fail_count_++;
+                left_vel_controller_->holdCurrent();  // 🔒 跳变时立即holdCurrent
+                if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
+                    RCLCPP_ERROR(get_logger(), 
+                        "[Left] 🛑 Continuous IK jump failures (%d times), stopping servo for safety!", 
+                        left_ik_fail_count_);
+                    stopServoInternal();
+                }
+                return;
+            }
+            
+            // 🔒 IK Accept Gate Step 4: 只有通过所有检查的IK才被接受
+            left_ik_fail_count_ = 0;  // 重置失败计数器
+            left_last_accepted_ik_ = joint_target;  // 保存为下次的seed
+            has_left_last_ik_ = truer_->checkIKContinuity(seed_joints, joint_target)) {
+                // 详细日志已在 checkIKContinuity 内部打印
+                RCLCPP_ERROR(get_logger(), "[Left] ❌ IK Continuity Check Failed - Motion Aborted");
+                // 打印VR目标位姿信息，帮助定位问题
+                RCLCPP_ERROR(get_logger(), "  VR Target: pos=[%.4f, %.4f, %.4f] ori=[%.4f, %.4f, %.4f, %.4f]",
+                    target_in_base.pose.position.x, target_in_base.pose.position.y, target_in_base.pose.position.z,
+                    target_in_base.pose.orientation.x, target_in_base.pose.orientation.y,
+                    target_in_base.pose.orientation.z, target_in_base.pose.orientation.w);
+                left_ik_jump_count_++;
                 left_ik_fail_count_++;
                 if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
                     RCLCPP_ERROR(get_logger(), 
@@ -969,22 +1036,50 @@ private:
             }
             
             // ③ IK求解（30Hz，只在这里执行）
+            // 🔒 IK Accept Gate Step 1: 选择连续性检查的seed
+            // 优先使用上一次被接受的IK解，而不是integrated_q（可能已被错误目标拖偏）
             std::vector<double> seed_joints(7);
-            // 🎯 策略：使用 integrated_q_ 作为 seed，保证 IK 连续性
-            if (!right_vel_controller_->getIntegratedQ(seed_joints)) {
+            if (has_right_last_ik_) {
+                seed_joints = right_last_accepted_ik_;
+                RCLCPP_DEBUG(get_logger(), "[Right VR] Using last_accepted_ik as seed");
+            } else if (!right_vel_controller_->getIntegratedQ(seed_joints)) {
                 // 如果还没有 integrated_q_ (刚启动)，则使用真实反馈
                 for (int i = 0; i < 7; ++i) {
                     seed_joints[i] = cached_right_joints_.jVal[i];
                 }
             }
             
+            // 🔍 调试：记录seed关节角度
+            RCLCPP_DEBUG(get_logger(), "[Right] IK Seed: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                seed_joints[0], seed_joints[1], seed_joints[2], seed_joints[3],
+                seed_joints[4], seed_joints[5], seed_joints[6]);
+            
             std::vector<double> joint_target;
             bool ik_ok = right_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
+            
+            // 🔍 调试：记录IK结果和跳变量
+            if (ik_ok) {
+                double max_jump = 0.0;
+                int max_jump_idx = -1;
+                for (size_t i = 0; i < 7; ++i) {
+                    double jump = std::abs(joint_target[i] - seed_joints[i]);
+                    if (jump > max_jump) {
+                        max_jump = jump;
+                        max_jump_idx = i;
+                    }
+                }
+                RCLCPP_DEBUG(get_logger(), "[Right] IK Result: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f] MaxJump=J%d:%.4f rad",
+                    joint_target[0], joint_target[1], joint_target[2], joint_target[3],
+                    joint_target[4], joint_target[5], joint_target[6], max_jump_idx, max_jump);
+                
+                right_ik_total_count_++;
+            }
             
             // 🎯 策略：Branch-Safe Check
             if (!ik_ok) {
                 RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Right] ❌ IK Failed for target pose");
                 right_ik_fail_count_++;
+                right_vel_controller_->holdCurrent();  // 🔒 IK失败时立即holdCurrent，不要继续追错误目标
                 if (right_ik_fail_count_ >= max_continuous_ik_failures_) {
                     RCLCPP_ERROR(get_logger(), 
                         "[Right] 🛑 Continuous IK failures (%d times), stopping servo for safety!", 
@@ -993,11 +1088,38 @@ private:
                 }
                 return;
             }
+            
+            // 🔒 IK Accept Gate Step 2: J4符号锁（防止分支翻转）
+            if (has_right_last_ik_ && seed_joints.size() > 4 && joint_target.size() > 4) {
+                if (std::signbit(joint_target[4]) != std::signbit(seed_joints[4])) {
+                    RCLCPP_ERROR(get_logger(), 
+                        "[Right VR] ❌ J4 branch flip detected (%.4f → %.4f), rejecting",
+                        seed_joints[4], joint_target[4]);
+                    right_ik_jump_count_++;
+                    right_ik_fail_count_++;
+                    right_vel_controller_->holdCurrent();
+                    if (right_ik_fail_count_ >= max_continuous_ik_failures_) {
+                        RCLCPP_ERROR(get_logger(), 
+                            "[Right VR] 🚨 Continuous IK failures (%d), auto-stopping servo mode", 
+                            right_ik_fail_count_);
+                        stopServoInternal();
+                    }
+                    return;
+                }
+            }
 
+            // 🔒 IK Accept Gate Step 3: 检查IK连续性（防止关节突变）
             if (!right_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
                 // 详细日志已在 checkIKContinuity 内部打印
-                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Right] ❌ IK Continuity Check Failed - Motion Aborted");
+                RCLCPP_ERROR(get_logger(), "[Right] ❌ IK Continuity Check Failed - Motion Aborted");
+                // 打印VR目标位姿信息，帮助定位问题
+                RCLCPP_ERROR(get_logger(), "  VR Target: pos=[%.4f, %.4f, %.4f] ori=[%.4f, %.4f, %.4f, %.4f]",
+                    target_in_base.pose.position.x, target_in_base.pose.position.y, target_in_base.pose.position.z,
+                    target_in_base.pose.orientation.x, target_in_base.pose.orientation.y,
+                    target_in_base.pose.orientation.z, target_in_base.pose.orientation.w);
+                right_ik_jump_count_++;
                 right_ik_fail_count_++;
+                right_vel_controller_->holdCurrent();  // 🔒 跳变时立即holdCurrent
                 if (right_ik_fail_count_ >= max_continuous_ik_failures_) {
                     RCLCPP_ERROR(get_logger(), 
                         "[Right] 🛑 Continuous IK jump failures (%d times), stopping servo for safety!", 
@@ -1007,8 +1129,10 @@ private:
                 return;
             }
             
-            // ✅ IK成功，重置错误计数器
-            right_ik_fail_count_ = 0;
+            // 🔒 IK Accept Gate Step 4: 只有通过所有检查的IK才被接受
+            right_ik_fail_count_ = 0;  // 重置失败计数器
+            right_last_accepted_ik_ = joint_target;  // 保存为下次的seed
+            has_right_last_ik_ = true;
 
             // ✅ 只有成功 IK 才更新时间
             right_last_ik_time = now();
@@ -1177,6 +1301,8 @@ private:
                 left_vel_controller_->updateRobotState(left_joints);
                 left_vel_controller_->reset();
                 left_init_success = true;
+                // 重置IK失败计数器
+                left_ik_fail_count_ = 0;
                 RCLCPP_INFO(get_logger(), "[Servo] ✓ Left controller initialized from current position");
             } else {
                 RCLCPP_WARN(get_logger(), "[Servo] ✗ Failed to initialize left controller");
@@ -1192,6 +1318,8 @@ private:
                 right_vel_controller_->updateRobotState(right_joints);
                 right_vel_controller_->reset();
                 right_init_success = true;
+                // 重置IK失败计数器
+                right_ik_fail_count_ = 0;
                 RCLCPP_INFO(get_logger(), "[Servo] ✓ Right controller initialized from current position");
             } else {
                 RCLCPP_WARN(get_logger(), "[Servo] ✗ Failed to initialize right controller");
@@ -1206,9 +1334,21 @@ private:
                 // 初始化命令索引
                 cmd_index_.store(0);
                 
-                // 重置 IK 错误计数器
+                // 重置 IK 错误计数器和统计信息
                 left_ik_fail_count_ = 0;
                 right_ik_fail_count_ = 0;
+                left_ik_jump_count_ = 0;
+                right_ik_jump_count_ = 0;
+                left_ik_total_count_ = 0;
+                right_ik_total_count_ = 0;
+                
+                // 🔒 重置 IK Accept Gate 状态
+                has_left_last_ik_ = false;
+                has_right_last_ik_ = false;
+                left_last_accepted_ik_.clear();
+                right_last_accepted_ik_.clear();
+                
+                RCLCPP_INFO(get_logger(), "[Servo] 📊 IK statistics reset");
                 
                 // 立即启动伺服模式，主循环会自动发送静止指令
                 servo_running_ = true;
@@ -1303,7 +1443,19 @@ private:
     // IK连续失败保护
     int left_ik_fail_count_{0};
     int right_ik_fail_count_{0};
-    const int max_continuous_ik_failures_{3};  // 连续失0次IK失败后退出伺服
+    const int max_continuous_ik_failures_{3};  // 连续3次IK失败后退出伺服
+    
+    // IK跳变统计（调试用）
+    std::atomic<uint32_t> left_ik_jump_count_{0};
+    std::atomic<uint32_t> right_ik_jump_count_{0};
+    std::atomic<uint32_t> left_ik_total_count_{0};
+    std::atomic<uint32_t> right_ik_total_count_{0};
+    
+    // 🔒 IK Accept Gate：上一次被接受的IK解（用于连续性检查）
+    std::vector<double> left_last_accepted_ik_;
+    std::vector<double> right_last_accepted_ik_;
+    bool has_left_last_ik_{false};
+    bool has_right_last_ik_{false};
     
     // ROS接口
     rclcpp::Publisher<qyh_jaka_control_msgs::msg::JakaServoStatus>::SharedPtr status_pub_;

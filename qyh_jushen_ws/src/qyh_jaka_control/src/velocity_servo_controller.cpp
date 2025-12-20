@@ -226,10 +226,6 @@ void VelocityServoController::updateTargetGovernor() {
     }
 }
 
-
-
-
-
 void VelocityServoController::holdCurrent() {
     std::lock_guard<std::mutex> lock(state_mutex_);
     
