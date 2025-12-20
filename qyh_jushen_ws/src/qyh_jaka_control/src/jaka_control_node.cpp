@@ -800,6 +800,23 @@ private:
                                                   (1-alpha) * left_last_target_.pose.position.y;
                 target_in_base.pose.position.z = alpha * target_in_base.pose.position.z + 
                                                   (1-alpha) * left_last_target_.pose.position.z;
+
+                // 🎯 姿态低通：四元数 slerp（VR手柄姿态最抖，直接用会导致腕部关节高频抖）
+                {
+                    const double alpha_ori = 0.2;  // 建议 0.15~0.25
+                    tf2::Quaternion q_last, q_now;
+                    tf2::fromMsg(left_last_target_.pose.orientation, q_last);
+                    tf2::fromMsg(target_in_base.pose.orientation, q_now);
+
+                    // 确保走最短弧（避免q与-q导致的反向插值）
+                    if (q_last.dot(q_now) < 0.0) {
+                        q_now = tf2::Quaternion(-q_now.x(), -q_now.y(), -q_now.z(), -q_now.w());
+                    }
+
+                    tf2::Quaternion q_filt = q_last.slerp(q_now, alpha_ori);
+                    q_filt.normalize();
+                    target_in_base.pose.orientation = tf2::toMsg(q_filt);
+                }
                 
                 // 🔧 增加位置变化率限制（防止VR快速移动导致IK跳变）
                 double max_pos_change_per_update = 0.05;  // 每次更新最多5cm
@@ -900,6 +917,26 @@ private:
                 }
                 return;
             }
+
+            // 🔒 IK Accept Gate Step 2: J4符号锁（防止分支翻转）
+            if (has_left_last_ik_ && seed_joints.size() > 4 && joint_target.size() > 4) {
+                if (std::signbit(joint_target[4]) != std::signbit(seed_joints[4])) {
+                    RCLCPP_ERROR(get_logger(),
+                        "[Left VR] ❌ J4 branch flip detected (%.4f → %.4f), rejecting",
+                        seed_joints[4], joint_target[4]);
+                    left_ik_jump_count_++;
+                    left_ik_fail_count_++;
+                    left_vel_controller_->holdCurrent();
+                    if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
+                        RCLCPP_ERROR(get_logger(),
+                            "[Left VR] 🚨 Continuous IK failures (%d), auto-stopping servo mode",
+                            left_ik_fail_count_);
+                        stopServoInternal();
+                    }
+                    return;
+                }
+            }
+
             // 🔒 IK Accept Gate Step 3: 检查IK连续性（防止关节突变）
             if (!left_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
                 // 详细日志已在 checkIKContinuity 内部打印
@@ -924,33 +961,15 @@ private:
             // 🔒 IK Accept Gate Step 4: 只有通过所有检查的IK才被接受
             left_ik_fail_count_ = 0;  // 重置失败计数器
             left_last_accepted_ik_ = joint_target;  // 保存为下次的seed
-            has_left_last_ik_ = truer_->checkIKContinuity(seed_joints, joint_target)) {
-                // 详细日志已在 checkIKContinuity 内部打印
-                RCLCPP_ERROR(get_logger(), "[Left] ❌ IK Continuity Check Failed - Motion Aborted");
-                // 打印VR目标位姿信息，帮助定位问题
-                RCLCPP_ERROR(get_logger(), "  VR Target: pos=[%.4f, %.4f, %.4f] ori=[%.4f, %.4f, %.4f, %.4f]",
-                    target_in_base.pose.position.x, target_in_base.pose.position.y, target_in_base.pose.position.z,
-                    target_in_base.pose.orientation.x, target_in_base.pose.orientation.y,
-                    target_in_base.pose.orientation.z, target_in_base.pose.orientation.w);
-                left_ik_jump_count_++;
-                left_ik_fail_count_++;
-                if (left_ik_fail_count_ >= max_continuous_ik_failures_) {
-                    RCLCPP_ERROR(get_logger(), 
-                        "[Left] 🛑 Continuous IK jump failures (%d times), stopping servo for safety!", 
-                        left_ik_fail_count_);
-                    stopServoInternal();
-                }
-                return;
-            }
+            has_left_last_ik_ = true;
             
-            // ✅ IK成功，重置错误计数器
-            left_ik_fail_count_ = 0;
             // ✅ 只有成功 IK 才更新时间
             left_last_ik_time = now();
-            
+
             // ④ 设置关节目标（Servo层会连续追踪）
             left_vel_controller_->setJointTargetRef(joint_target);
-            
+
+            // 保存滤波后的目标（base_link坐标系），用于下一次滤波/变化检测
             left_last_target_ = target_in_base;
             has_left_target_ = true;
             
@@ -988,6 +1007,22 @@ private:
                                                   (1-alpha) * right_last_target_.pose.position.y;
                 target_in_base.pose.position.z = alpha * target_in_base.pose.position.z + 
                                                   (1-alpha) * right_last_target_.pose.position.z;
+
+                // 🎯 姿态低通：四元数 slerp
+                {
+                    const double alpha_ori = 0.2;  // 建议 0.15~0.25
+                    tf2::Quaternion q_last, q_now;
+                    tf2::fromMsg(right_last_target_.pose.orientation, q_last);
+                    tf2::fromMsg(target_in_base.pose.orientation, q_now);
+
+                    if (q_last.dot(q_now) < 0.0) {
+                        q_now = tf2::Quaternion(-q_now.x(), -q_now.y(), -q_now.z(), -q_now.w());
+                    }
+
+                    tf2::Quaternion q_filt = q_last.slerp(q_now, alpha_ori);
+                    q_filt.normalize();
+                    target_in_base.pose.orientation = tf2::toMsg(q_filt);
+                }
                 
                 // 🔧 增加位置变化率限制（防止VR快速移动导致IK跳变）
                 double max_pos_change_per_update = 0.05;  // 每次更新最多5cm
@@ -1140,6 +1175,7 @@ private:
             // ④ 设置关节目标（Servo层会连续追踪）
             right_vel_controller_->setJointTargetRef(joint_target);
             
+            // 保存滤波后的目标（base_link坐标系），用于下一次滤波/变化检测
             right_last_target_ = target_in_base;
             has_right_target_ = true;
             
