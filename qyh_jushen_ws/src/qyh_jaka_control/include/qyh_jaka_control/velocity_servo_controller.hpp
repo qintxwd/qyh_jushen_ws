@@ -143,8 +143,8 @@ private:
     double max_angular_vel_ = 1.0;
     
     // Branch-Safe Hybrid Servo Parameters
-    double single_joint_jump_thresh_ = 0.15;
-    double total_jump_thresh_ = 0.4;
+    double single_joint_jump_thresh_ = 0.5;  // 放宽以适应15Hz更新
+    double total_jump_thresh_ = 1.5;         // 放宽以适应15Hz更新
     double follow_time_ = 0.25;
 
     // 安全参数（可配置）

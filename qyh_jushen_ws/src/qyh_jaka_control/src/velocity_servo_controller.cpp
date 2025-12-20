@@ -2,6 +2,7 @@
 #include <urdf/model.h>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 
 namespace qyh_jaka_control {
 
@@ -175,8 +176,8 @@ void VelocityServoController::updateTargetGovernor() {
     for (size_t i = 0; i < n_joints; ++i) {
         // 限制目标变化率 (Target Governor)
         // 这里的 dt_ 是 Servo 周期 (0.008s)
-        // 允许的最大步长 = 0.15 * max_vel * dt (降低到 0.15 以获得更平滑的参考)
-        double max_step = 0.15 * joint_vel_limit_[i] * dt_;
+        // 允许的最大步长 = 0.8 * max_vel * dt (提高到 0.8 以允许更快跟随)
+        double max_step = 0.8 * joint_vel_limit_[i] * dt_;
         
         double diff = joint_target_ref_[i] - joint_target_[i];
         joint_target_[i] += std::clamp(diff, -max_step, max_step);
