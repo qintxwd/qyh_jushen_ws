@@ -556,6 +556,24 @@ private:
                     RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] edgServoJ(1) returned");
                 }
                 
+                // 🔍 调试日志：打印每一帧发送给机械臂的关节值
+                // 仅在调试模式下开启，避免刷屏
+                static int log_counter = 0;
+                if (++log_counter % 10 == 0) { // 每10帧打印一次，约12.5Hz
+                    std::string left_cmd_str = "[";
+                    std::string right_cmd_str = "[";
+                    for(int i=0; i<7; ++i) {
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), "%.4f%s", left_next_joints[i], (i<6?",":""));
+                        left_cmd_str += buf;
+                        snprintf(buf, sizeof(buf), "%.4f%s", right_next_joints[i], (i<6?",":""));
+                        right_cmd_str += buf;
+                    }
+                    left_cmd_str += "]";
+                    right_cmd_str += "]";
+                    RCLCPP_INFO(get_logger(), "📤 CMD L:%s R:%s", left_cmd_str.c_str(), right_cmd_str.c_str());
+                }
+
                 // 统一发送，保证双臂同步
                 RCLCPP_DEBUG_THROTTLE(get_logger(), *get_clock(), 5000, "[MainLoop] Calling edgSend()...");
                 uint32_t index = cmd_index_.load();
@@ -746,6 +764,11 @@ private:
                 if (pos_change < 0.003) { // 3mm
                      target_in_base.pose.orientation = left_last_target_.pose.orientation;
                 }
+
+                // 🔍 调试日志：检测VR输入的大幅跳变
+                if (pos_change > 0.05) { // 5cm
+                    RCLCPP_WARN(get_logger(), "[Left] ⚠️ Large VR Input Jump: %.4f m", pos_change);
+                }
                 
                 double ori_change = std::sqrt(
                     std::pow(target_in_base.pose.orientation.x - left_last_target_.pose.orientation.x, 2) +
@@ -774,9 +797,14 @@ private:
             bool ik_ok = left_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
             
             // 🎯 策略：Branch-Safe Check
-            if (!ik_ok || !left_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
-                // ❗ IK失败或跳变：什么都不做，Servo层会继续追踪上一个有效目标
-                // 不要 holdCurrent()，否则会急停
+            if (!ik_ok) {
+                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Left] ❌ IK Failed for target pose");
+                return;
+            }
+
+            if (!left_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
+                // 详细日志已在 checkIKContinuity 内部打印
+                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Left] ❌ IK Continuity Check Failed - Motion Aborted");
                 return;
             }
             // ✅ 只有成功 IK 才更新时间
@@ -819,6 +847,12 @@ private:
                     std::pow(target_in_base.pose.position.x - right_last_target_.pose.position.x, 2) +
                     std::pow(target_in_base.pose.position.y - right_last_target_.pose.position.y, 2) +
                     std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
+
+                // 🔍 调试日志：检测VR输入的大幅跳变
+                if (pos_change > 0.05) { // 5cm
+                    RCLCPP_WARN(get_logger(), "[Right] ⚠️ Large VR Input Jump: %.4f m", pos_change);
+                }
+                    std::pow(target_in_base.pose.position.z - right_last_target_.pose.position.z, 2));
                 
                 // 🎯 策略：位置变化很小时，锁死姿态（防止手抖导致末端乱转）
                 if (pos_change < 0.003) { // 3mm
@@ -852,9 +886,14 @@ private:
             bool ik_ok = right_vel_controller_->solveIK(target_in_base.pose, seed_joints, joint_target);
             
             // 🎯 策略：Branch-Safe Check
-            if (!ik_ok || !right_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
-                // ❗ IK失败或跳变：什么都不做，Servo层会继续追踪上一个有效目标
-                // 不要 holdCurrent()，否则会急停
+            if (!ik_ok) {
+                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Right] ❌ IK Failed for target pose");
+                return;
+            }
+
+            if (!right_vel_controller_->checkIKContinuity(seed_joints, joint_target)) {
+                // 详细日志已在 checkIKContinuity 内部打印
+                RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "[Right] ❌ IK Continuity Check Failed - Motion Aborted");
                 return;
             }
 

@@ -170,14 +170,41 @@ bool VelocityServoController::checkIKContinuity(const std::vector<double>& seed,
     if (seed.size() != result.size()) return false;
 
     double sum_jump = 0.0;
+    std::string debug_info = "";
+    bool jump_detected = false;
+
     for (size_t i = 0; i < seed.size(); ++i) {
         double d = std::abs(result[i] - seed[i]);
+        // 记录每个关节的跳变值，保留4位小数
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "J%zu:%.4f ", i, d);
+        debug_info += buffer;
+
         if (d > single_joint_jump_thresh_) {
-            return false;   // ❌ 单关节跳解
+            RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] ❌ Joint %zu JUMP! Diff: %.4f > Thresh: %.4f", 
+                i, d, single_joint_jump_thresh_);
+            jump_detected = true;
         }
         sum_jump += d;
     }
-    return sum_jump < total_jump_thresh_;
+    
+    if (jump_detected) {
+        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] Jump Details: %s", debug_info.c_str());
+        return false;
+    }
+
+    if (sum_jump >= total_jump_thresh_) {
+        RCLCPP_ERROR(node_->get_logger(), "[VelCtrl] ❌ Total JUMP! Sum: %.4f > Thresh: %.4f. Details: %s", 
+            sum_jump, total_jump_thresh_, debug_info.c_str());
+        return false;
+    }
+    
+    // 警告：如果接近阈值 (50%)，打印日志供分析
+    if (sum_jump > total_jump_thresh_ * 0.5) {
+        RCLCPP_WARN(node_->get_logger(), "[VelCtrl] ⚠️ Large Motion (Sum: %.4f). Details: %s", sum_jump, debug_info.c_str());
+    }
+
+    return true;
 }
 
 void VelocityServoController::updateTargetGovernor() {
@@ -321,6 +348,14 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         // 🔪 刀3：Servo层最终安全钳（Final Safety Clamp）
         // 相对真实位置再钳一次（防 Following Error）
         double real_delta = cmd - current_q_(i);
+        
+        // 增加日志：如果触发了安全钳位
+        if (std::abs(real_delta) > max_delta_q_) {
+             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 200, 
+                "[VelCtrl] ⚠️ Servo Clamp J%d! Req: %.4f > Max: %.4f. Cmd: %.4f, Curr: %.4f",
+                i, real_delta, max_delta_q_, cmd, current_q_(i));
+        }
+
         real_delta = std::clamp(real_delta, -max_delta_q_, max_delta_q_);
         
         // 反算最终指令
