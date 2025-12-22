@@ -226,19 +226,17 @@ void VelocityServoController::updateTargetGovernor() {
     }
 }
 
-
-
-
-
 void VelocityServoController::holdCurrent() {
     std::lock_guard<std::mutex> lock(state_mutex_);
     
     // IK失败时冻结在当前位置
     for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
         joint_target_ref_[i] = current_q_(i);
-        // joint_target_ 也会在 Governor 中慢慢追过来
+        joint_target_[i] = current_q_(i);  // 立即重置 Governor 目标
+        last_joint_velocity_[i] = 0.0;     // 立即清零速度状态
+        // integrated_q_ 保持不变，让它自然平滑过渡
     }
-    RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Holding current position");
+    RCLCPP_DEBUG(node_->get_logger(), "[VelCtrl] Holding current position (Reset Velocity)");
     has_target_ = true;
 }
 
@@ -326,12 +324,16 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
     for (unsigned int i = 0; i < n_joints; ++i) {
         // Soft sync integrated_q_ to real joint (anti drift)
         // 防止积分器长期漂移，将其限制在真实位置的邻域内
-        double sync_thresh = (i >= 4) ? 0.02 : 0.05;
-        integrated_q_[i] = std::clamp(
-            integrated_q_[i],
-            current_q_(i) - sync_thresh,
-            current_q_(i) + sync_thresh
-        );
+        // 🔧 增大阈值：允许正常的伺服滞后 (Following Error)
+        double sync_thresh = (i >= 4) ? 0.15 : 0.25; 
+        
+        // 🔧 修复：仅在偏差过大时重置积分器（Anti-windup）
+        // 避免每帧clamp导致的震荡
+        if (std::abs(integrated_q_[i] - current_q_(i)) > sync_thresh) {
+             RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                "[VelCtrl] J%d sync reset! Diff: %.4f > %.4f", i, integrated_q_[i] - current_q_(i), sync_thresh);
+             integrated_q_[i] = current_q_(i);
+        }
 
         // Hybrid Velocity Servo: 追 integrated_q -> target
         double error = joint_target_[i] - integrated_q_[i];
