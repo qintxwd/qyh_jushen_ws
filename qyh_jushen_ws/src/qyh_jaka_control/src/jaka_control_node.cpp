@@ -109,18 +109,27 @@ public:
         declare_parameter<double>("ik_solver.right_z_offset", 0.217950931);
         
         // 声明速度控制器参数（供 VelocityServoController 使用）
-        declare_parameter<double>("velocity_control.dt", 0.008);
+        // 说明：以下部分参数支持“省略/自动推导”，减少手动配置成本与配错风险。
+        // - velocity_control.dt: 若<=0，则自动使用 cycle_time_ms_ / 1000
+        // - velocity_control.target_update_dt: 若<=0，则自动使用 teleop_target_update_time_ms / 1000
+        // - velocity_control.q_dot_min: 若<=0，则自动使用推荐值 0.003
+        // - velocity_control.max_delta_q: 若<=0，则自动使用推荐值 0.03
+        declare_parameter<double>("velocity_control.dt", 0.0);
         declare_parameter<double>("velocity_control.linear_gain", 2.0);
         declare_parameter<double>("velocity_control.angular_gain", 1.0);
         declare_parameter<double>("velocity_control.max_linear_vel", 0.5);
         declare_parameter<double>("velocity_control.max_angular_vel", 1.0);
         declare_parameter<double>("velocity_control.joint_vel_limit", 1.5);
-        declare_parameter<double>("velocity_control.q_dot_min", 0.003);  // 增大死区，减少微抖（从1e-4提升）
-        declare_parameter<double>("velocity_control.max_delta_q", 0.03);  // 放宽步长限制（从0.02提升）
+        declare_parameter<double>("velocity_control.q_dot_min", 0.0);  // <=0时使用推荐默认值
+        declare_parameter<double>("velocity_control.max_delta_q", 0.0);  // <=0时使用推荐默认值
         declare_parameter<double>("velocity_control.max_joint_accel", 50.0);  // rad/s²
         declare_parameter<double>("velocity_control.lambda_min", 1e-4);
         declare_parameter<double>("velocity_control.position_deadzone", 0.001);
         declare_parameter<double>("velocity_control.orientation_deadzone", 0.017);
+
+        // IK关节解低通：对“已通过Gate的IK解”做关节空间指数平滑，抑制微小来回抖动
+        // 1.0=不滤波；建议 0.4~0.8
+        declare_parameter<double>("velocity_control.joint_target_alpha", 0.6);
         
         // 目标变化死区：过滤VR手柄的微小抖动，避免不必要的指令更新
         declare_parameter<double>("velocity_control.target_change_position_threshold", 0.002);  // 2mm
@@ -138,12 +147,46 @@ public:
         
         target_change_pos_threshold_ = get_parameter("velocity_control.target_change_position_threshold").as_double();
         target_change_ori_threshold_ = get_parameter("velocity_control.target_change_orientation_threshold").as_double();
+
+        joint_target_alpha_ = get_parameter("velocity_control.joint_target_alpha").as_double();
         
         // 🎯 新增参数：VR目标更新频率和周期
         declare_parameter<double>("teleop_target_update_time_ms", 66.0);
-        declare_parameter<double>("velocity_control.target_update_dt", 0.066);
+        declare_parameter<double>("velocity_control.target_update_dt", 0.0);
         
         teleop_target_update_time_ms_ = get_parameter("teleop_target_update_time_ms").as_double();
+
+        // -------- 自动推导/回填部分 velocity_control 参数（可省略） --------
+        {
+            double dt = get_parameter("velocity_control.dt").as_double();
+            if (dt <= 0.0) {
+                dt = std::max(1e-4, cycle_time_ms_ / 1000.0);
+                set_parameter(rclcpp::Parameter("velocity_control.dt", dt));
+                RCLCPP_INFO(get_logger(), "[VelCtrl] Auto set velocity_control.dt=%.6f (from cycle_time_ms=%.3f)", dt, cycle_time_ms_);
+            }
+
+            double target_update_dt = get_parameter("velocity_control.target_update_dt").as_double();
+            if (target_update_dt <= 0.0) {
+                target_update_dt = std::max(1e-4, teleop_target_update_time_ms_ / 1000.0);
+                set_parameter(rclcpp::Parameter("velocity_control.target_update_dt", target_update_dt));
+                RCLCPP_INFO(get_logger(), "[VelCtrl] Auto set velocity_control.target_update_dt=%.6f (from teleop_target_update_time_ms=%.3f)",
+                    target_update_dt, teleop_target_update_time_ms_);
+            }
+
+            double q_dot_min = get_parameter("velocity_control.q_dot_min").as_double();
+            if (q_dot_min <= 0.0) {
+                q_dot_min = 0.003;
+                set_parameter(rclcpp::Parameter("velocity_control.q_dot_min", q_dot_min));
+                RCLCPP_INFO(get_logger(), "[VelCtrl] Auto set velocity_control.q_dot_min=%.6f", q_dot_min);
+            }
+
+            double max_delta_q = get_parameter("velocity_control.max_delta_q").as_double();
+            if (max_delta_q <= 0.0) {
+                max_delta_q = 0.03;
+                set_parameter(rclcpp::Parameter("velocity_control.max_delta_q", max_delta_q));
+                RCLCPP_INFO(get_logger(), "[VelCtrl] Auto set velocity_control.max_delta_q=%.6f", max_delta_q);
+            }
+        }
         
         // 速度控制器将在构造函数完成后初始化（避免shared_from_this()问题）
         RCLCPP_INFO(get_logger(), "🎯 速度积分控制模式已启用");
@@ -918,12 +961,24 @@ private:
                 return;
             }
 
-            // 🔒 IK Accept Gate Step 2: J4符号锁（防止分支翻转）
+            // 🔒 IK Accept Gate Step 2: J4“分支翻转”检测（防止7DoF解空间跳分支）
+            // 重要：不能用纯 signbit 锁死，否则在 0 附近的小幅过零（例如 0.002→-0.006）会被误判。
+            // 这里仅在“远离0且跳变足够大”时才拒绝。
             if (has_left_last_ik_ && seed_joints.size() > 4 && joint_target.size() > 4) {
-                if (std::signbit(joint_target[4]) != std::signbit(seed_joints[4])) {
+                const double seed_j4 = seed_joints[4];
+                const double tgt_j4 = joint_target[4];
+                double diff = tgt_j4 - seed_j4;
+                if (diff > M_PI) diff -= 2.0 * M_PI;
+                if (diff < -M_PI) diff += 2.0 * M_PI;
+
+                const bool sign_flip = (std::signbit(tgt_j4) != std::signbit(seed_j4));
+                const double min_abs_far_from_zero = 0.15;  // rad (~8.6deg)
+                const double min_jump_to_consider = 0.50;    // rad (~28.6deg)
+
+                if (sign_flip && std::abs(seed_j4) > min_abs_far_from_zero && std::abs(tgt_j4) > min_abs_far_from_zero && std::abs(diff) > min_jump_to_consider) {
                     RCLCPP_ERROR(get_logger(),
-                        "[Left VR] ❌ J4 branch flip detected (%.4f → %.4f), rejecting",
-                        seed_joints[4], joint_target[4]);
+                        "[Left VR] ❌ J4 branch flip detected (%.4f → %.4f, diff=%.4f), rejecting",
+                        seed_j4, tgt_j4, diff);
                     left_ik_jump_count_++;
                     left_ik_fail_count_++;
                     left_vel_controller_->holdCurrent();
@@ -959,6 +1014,18 @@ private:
             }
             
             // 🔒 IK Accept Gate Step 4: 只有通过所有检查的IK才被接受
+            // ✅ 关节空间低通：对IK结果做指数平滑（类似“半波/滞回”抑制来回抖）
+            // 注意：在 Gate 之后做，避免“用滤波掩盖大跳变”。
+            if (has_left_last_ik_) {
+                const double a = std::clamp(joint_target_alpha_, 0.0, 1.0);
+                for (size_t i = 0; i < joint_target.size(); ++i) {
+                    double diff = joint_target[i] - seed_joints[i];
+                    if (diff > M_PI) diff -= 2.0 * M_PI;
+                    if (diff < -M_PI) diff += 2.0 * M_PI;
+                    joint_target[i] = seed_joints[i] + a * diff;
+                }
+            }
+
             left_ik_fail_count_ = 0;  // 重置失败计数器
             left_last_accepted_ik_ = joint_target;  // 保存为下次的seed
             has_left_last_ik_ = true;
@@ -1124,18 +1191,29 @@ private:
                 return;
             }
             
-            // 🔒 IK Accept Gate Step 2: J4符号锁（防止分支翻转）
+            // 🔒 IK Accept Gate Step 2: J4“分支翻转”检测（防止7DoF解空间跳分支）
+            // 重要：0 附近的小幅过零不能误判为翻分支。
             if (has_right_last_ik_ && seed_joints.size() > 4 && joint_target.size() > 4) {
-                if (std::signbit(joint_target[4]) != std::signbit(seed_joints[4])) {
-                    RCLCPP_ERROR(get_logger(), 
-                        "[Right VR] ❌ J4 branch flip detected (%.4f → %.4f), rejecting",
-                        seed_joints[4], joint_target[4]);
+                const double seed_j4 = seed_joints[4];
+                const double tgt_j4 = joint_target[4];
+                double diff = tgt_j4 - seed_j4;
+                if (diff > M_PI) diff -= 2.0 * M_PI;
+                if (diff < -M_PI) diff += 2.0 * M_PI;
+
+                const bool sign_flip = (std::signbit(tgt_j4) != std::signbit(seed_j4));
+                const double min_abs_far_from_zero = 0.15;  // rad
+                const double min_jump_to_consider = 0.50;    // rad
+
+                if (sign_flip && std::abs(seed_j4) > min_abs_far_from_zero && std::abs(tgt_j4) > min_abs_far_from_zero && std::abs(diff) > min_jump_to_consider) {
+                    RCLCPP_ERROR(get_logger(),
+                        "[Right VR] ❌ J4 branch flip detected (%.4f → %.4f, diff=%.4f), rejecting",
+                        seed_j4, tgt_j4, diff);
                     right_ik_jump_count_++;
                     right_ik_fail_count_++;
                     right_vel_controller_->holdCurrent();
                     if (right_ik_fail_count_ >= max_continuous_ik_failures_) {
-                        RCLCPP_ERROR(get_logger(), 
-                            "[Right VR] 🚨 Continuous IK failures (%d), auto-stopping servo mode", 
+                        RCLCPP_ERROR(get_logger(),
+                            "[Right VR] 🚨 Continuous IK failures (%d), auto-stopping servo mode",
                             right_ik_fail_count_);
                         stopServoInternal();
                     }
@@ -1165,6 +1243,17 @@ private:
             }
             
             // 🔒 IK Accept Gate Step 4: 只有通过所有检查的IK才被接受
+            // ✅ 关节空间低通：对IK结果做指数平滑（类似“半波/滞回”抑制来回抖）
+            if (has_right_last_ik_) {
+                const double a = std::clamp(joint_target_alpha_, 0.0, 1.0);
+                for (size_t i = 0; i < joint_target.size(); ++i) {
+                    double diff = joint_target[i] - seed_joints[i];
+                    if (diff > M_PI) diff -= 2.0 * M_PI;
+                    if (diff < -M_PI) diff += 2.0 * M_PI;
+                    joint_target[i] = seed_joints[i] + a * diff;
+                }
+            }
+
             right_ik_fail_count_ = 0;  // 重置失败计数器
             right_last_accepted_ik_ = joint_target;  // 保存为下次的seed
             has_right_last_ik_ = true;
@@ -1470,6 +1559,7 @@ private:
     // 目标变化死区（过滤VR手柄微小抖动）
     double target_change_pos_threshold_{0.002};   // 位置变化阈值（米）
     double target_change_ori_threshold_{0.035};   // 姿态变化阈值（四元数距离）
+    double joint_target_alpha_{0.6};  // IK关节解低通系数
     double teleop_target_update_time_ms_{66.0};   // VR目标更新频率 (ms)
     geometry_msgs::msg::PoseStamped left_last_target_;
     geometry_msgs::msg::PoseStamped right_last_target_;
