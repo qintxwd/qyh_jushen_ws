@@ -79,11 +79,11 @@ ros2 launch qyh_dual_arm_teleop teleop.launch.py &
 TELEOP_PID=$!
 sleep 2
 
-# 3. 启动 JAKA Control
-echo -e "${GREEN}[3/3] 启动 JAKA Control...${NC}"
-ros2 launch qyh_jaka_control jaka_control.launch.py robot_ip:=$ROBOT_IP &
-JAKA_PID=$!
-sleep 3
+# # 3. 启动 JAKA Control
+# echo -e "${GREEN}[3/3] 启动 JAKA Control...${NC}"
+# ros2 launch qyh_jaka_control jaka_control.launch.py robot_ip:=$ROBOT_IP &
+# JAKA_PID=$!
+# sleep 3
 
 echo ""
 echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
