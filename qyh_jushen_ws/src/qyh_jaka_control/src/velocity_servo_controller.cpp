@@ -342,7 +342,7 @@ bool VelocityServoController::computeNextCommand(std::vector<double>& next_joint
         double qdot = error / follow_time_;
         qdot = std::clamp(qdot, -joint_vel_limit_[i], joint_vel_limit_[i]);
         
-        // ⭐ 加速度限制（方案B核心：保证jerk平滑）
+        // 加速度限制 jerk平滑
         double accel = (qdot - last_joint_velocity_[i]) / dt_;
         if (std::abs(accel) > max_joint_accel_) {
             qdot = last_joint_velocity_[i] + std::copysign(max_joint_accel_ * dt_, accel);

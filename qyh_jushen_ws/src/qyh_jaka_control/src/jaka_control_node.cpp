@@ -330,9 +330,9 @@ public:
             RCLCPP_INFO(get_logger(), "Disabling servo mode...");
             jaka_interface_.servoMoveEnable(false, -1);
             
-            // 3. 设置滤波器为none
-            RCLCPP_INFO(get_logger(), "Setting filter to none...");
-            jaka_interface_.setFilterNone();
+            // 3. 设置滤波器为低通
+            RCLCPP_INFO(get_logger(), "Setting filter to low pass...");
+            jaka_interface_.setFilterJointLPF(0.5); // 0=none, 0.5=low
             
             // 🔧 新增：在上电前设置负载
             RCLCPP_INFO(get_logger(), "Loading and setting payload configuration...");
