@@ -741,6 +741,29 @@ private:
         robot_state_msg.robot_ip = robot_ip_;
         robot_state_msg.servo_mode_enabled = servo_running_;
         
+        // 🔧 实时查询机器人状态（而不是使用缓存的powered_/enabled_变量）
+        if (connected_) {
+            RobotState state;
+            if (jaka_interface_.getRobotState(state)) {
+                robot_state_msg.powered_on = state.poweredOn;
+                robot_state_msg.enabled = state.servoEnabled;
+                robot_state_msg.in_estop = state.estoped;
+                
+                // 同步更新缓存变量（供服务回调使用）
+                powered_ = state.poweredOn;
+                enabled_ = state.servoEnabled;
+            } else {
+                // 查询失败时使用缓存值
+                robot_state_msg.powered_on = powered_;
+                robot_state_msg.enabled = enabled_;
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                    "[Status] Failed to query robot state, using cached values");
+            }
+        } else {
+            robot_state_msg.powered_on = false;
+            robot_state_msg.enabled = false;
+        }
+        
         // ⚡ 始终使用缓存数据（mainLoop现在总是更新缓存）
         if (has_cached_state_) {
             robot_state_msg.powered_on = powered_;
