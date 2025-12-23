@@ -298,6 +298,17 @@ public:
             "/jaka/get_payload",
             std::bind(&qyh_jaka_control::JakaServiceHandlers::handleGetPayload, service_handlers_.get(), 
                       std::placeholders::_1, std::placeholders::_2));
+        
+        // Services (Jog Control)
+        srv_jog_ = create_service<qyh_jaka_control_msgs::srv::Jog>(
+            "/jaka/jog",
+            std::bind(&qyh_jaka_control::JakaServiceHandlers::handleJog, service_handlers_.get(), 
+                      std::placeholders::_1, std::placeholders::_2));
+        
+        srv_jog_stop_ = create_service<qyh_jaka_control_msgs::srv::JogStop>(
+            "/jaka/jog_stop",
+            std::bind(&qyh_jaka_control::JakaServiceHandlers::handleJogStop, service_handlers_.get(), 
+                      std::placeholders::_1, std::placeholders::_2));
 
         // Initialization
         connected_ = false;
@@ -1611,6 +1622,10 @@ private:
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetToolOffset>::SharedPtr srv_set_tool_offset_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::SetPayload>::SharedPtr srv_set_payload_;
     rclcpp::Service<qyh_jaka_control_msgs::srv::GetPayload>::SharedPtr srv_get_payload_;
+    
+    // 点动控制服务
+    rclcpp::Service<qyh_jaka_control_msgs::srv::Jog>::SharedPtr srv_jog_;
+    rclcpp::Service<qyh_jaka_control_msgs::srv::JogStop>::SharedPtr srv_jog_stop_;
 
     rclcpp::TimerBase::SharedPtr main_timer_;
     rclcpp::TimerBase::SharedPtr status_timer_;

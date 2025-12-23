@@ -14,9 +14,9 @@ int8 MOVE_CONTINUOUS = 0  # 连续运动 (按住持续运动，松开调用 jog_
 int8 MOVE_STEP = 1        # 步进运动 (移动固定距离)
 int8 move_mode
 
-# 坐标系类型
-int8 COORD_JOINT = 0      # 关节空间
-int8 COORD_BASE = 1       # 基坐标系 (世界坐标系)
+# 坐标系类型 (与 JAKA SDK CoordType 枚举对应)
+int8 COORD_BASE = 0       # 基坐标系 (世界坐标系)
+int8 COORD_JOINT = 1      # 关节空间
 int8 COORD_TOOL = 2       # 工具坐标系
 int8 coord_type
 

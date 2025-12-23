@@ -120,4 +120,95 @@ void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::Get
     }
 }
 
+// ==================== 点动控制服务 ====================
+void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res)
+{
+    RCLCPP_INFO(node_->get_logger(), "Jog: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
+        req->robot_id, req->axis_num, req->move_mode, req->coord_type, req->velocity, req->position);
+    
+    // 检查机器人状态
+    if (!connected_) {
+        res->success = false;
+        res->message = "Robot not connected";
+        return;
+    }
+    
+    if (!enabled_) {
+        res->success = false;
+        res->message = "Robot not enabled";
+        return;
+    }
+    
+    if (servo_running_) {
+        res->success = false;
+        res->message = "Cannot jog while servo is running";
+        return;
+    }
+    
+    // 将 1-based 索引转换为 0-based
+    int axis_index = req->axis_num - 1;
+    
+    bool success = false;
+    
+    // 根据坐标系类型选择点动方式
+    if (req->coord_type == 1) {  // COORD_JOINT=1 关节空间
+        if (req->move_mode == 0) {  // MOVE_CONTINUOUS 连续运动
+            int direction = (req->velocity > 0) ? 1 : -1;
+            success = jaka_interface_.jogJointContinuous(
+                req->robot_id, 
+                axis_index, 
+                direction,
+                std::abs(req->velocity) * 30.0  // 将 rad/s 转换为速度百分比近似值
+            );
+        } else {  // MOVE_STEP 步进运动
+            success = jaka_interface_.jogJoint(
+                req->robot_id,
+                axis_index,
+                req->position * 180.0 / M_PI,  // 弧度转角度
+                std::abs(req->velocity) * 30.0
+            );
+        }
+    } else {  // 笛卡尔空间 (COORD_BASE=0, COORD_TOOL=2)
+        // coord_type 直接使用请求值，已经与 JAKA SDK CoordType 枚举对齐
+        int coord_type = req->coord_type;
+        
+        if (req->move_mode == 0) {  // MOVE_CONTINUOUS 连续运动
+            int direction = (req->velocity > 0) ? 1 : -1;
+            success = jaka_interface_.jogCartesianContinuous(
+                req->robot_id,
+                axis_index,
+                direction,
+                std::abs(req->velocity) * 10.0,  // 将 mm/s 转换为速度百分比近似值
+                coord_type
+            );
+        } else {  // MOVE_STEP 步进运动
+            double step = req->position;
+            // 对于旋转轴 (3,4,5)，需要转换为角度
+            if (axis_index >= 3) {
+                step = req->position * 180.0 / M_PI;
+            }
+            success = jaka_interface_.jogCartesian(
+                req->robot_id,
+                axis_index,
+                step,
+                std::abs(req->velocity) * 10.0,
+                coord_type
+            );
+        }
+    }
+    
+    res->success = success;
+    res->message = success ? "Jog command sent" : "Jog command failed";
+}
+
+void JakaServiceHandlers::handleJogStop(const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req, qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res)
+{
+    RCLCPP_INFO(node_->get_logger(), "Jog Stop: robot=%d axis=%d", req->robot_id, req->axis_num);
+    
+    bool success = jaka_interface_.jogStop(req->robot_id);
+    
+    res->success = success;
+    res->message = success ? "Jog stopped" : "Jog stop failed";
+}
+
 } // namespace qyh_jaka_control
