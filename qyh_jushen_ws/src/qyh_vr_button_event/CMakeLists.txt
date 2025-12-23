@@ -29,10 +29,10 @@ endif()
 
 ament_package()
 
-add_executable(qyh_vr_button_event_node
+add_executable(qyh_vr_button_event
   src/qyh_vr_button_event.cpp)
 
-ament_target_dependencies(qyh_vr_button_event_node
+ament_target_dependencies(qyh_vr_button_event
   rclcpp
   std_msgs
   sensor_msgs
@@ -42,5 +42,11 @@ ament_target_dependencies(qyh_vr_button_event_node
   qyh_standard_robot_msgs)
 
 install(TARGETS
-  qyh_vr_button_event_node
+  qyh_vr_button_event
   DESTINATION lib/${PROJECT_NAME})
+
+# 安装launch和config文件夹
+install(DIRECTORY
+  launch
+  config
+  DESTINATION share/${PROJECT_NAME}/)
