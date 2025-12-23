@@ -26,6 +26,7 @@ private:
   int baudrate_;
   int slave_id_;
   bool is_connected_;
+  bool auto_activate_;
 
   // Gripper state
   qyh_gripper_msgs::msg::GripperState current_state_;

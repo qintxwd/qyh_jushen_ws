@@ -24,12 +24,14 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   this->declare_parameter<int>("baudrate", 115200);
   this->declare_parameter<int>("slave_id", 1);
   this->declare_parameter<double>("publish_rate", 20.0);
+  this->declare_parameter<bool>("auto_activate", true);
   
   // Get parameters
   device_port_ = this->get_parameter("device_port").as_string();
   baudrate_ = this->get_parameter("baudrate").as_int();
   slave_id_ = this->get_parameter("slave_id").as_int();
   double publish_rate = this->get_parameter("publish_rate").as_double();
+  auto_activate_ = this->get_parameter("auto_activate").as_bool();
   
   RCLCPP_INFO(this->get_logger(), "Starting Gripper Control Node");
   RCLCPP_INFO(this->get_logger(), "Device: %s, Baudrate: %d, Slave ID: %d",
@@ -88,6 +90,18 @@ bool GripperControlNode::connect_modbus()
     
     RCLCPP_INFO(this->get_logger(), "Successfully connected to gripper");
     is_connected_ = true;
+    
+    // 自动激活（如果配置启用）
+    if (auto_activate_) {
+      RCLCPP_INFO(this->get_logger(), "Auto-activation enabled, waiting 2 seconds...");
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+      if (activate_gripper()) {
+        RCLCPP_INFO(this->get_logger(), "Auto-activation completed successfully");
+      } else {
+        RCLCPP_WARN(this->get_logger(), "Auto-activation failed");
+      }
+    }
+    
     return true;
     
   } catch (const modbus::Exception & e) {
