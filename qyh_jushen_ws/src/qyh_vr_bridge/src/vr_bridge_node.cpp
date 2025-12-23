@@ -245,6 +245,20 @@ private:
     void process_packet(const ControllerDataPacket& packet)
     {
         auto now = this->now();
+        // Debug: log buttons bitmask changes to help map which bits belong to which controller
+        if (packet.buttons_bitmask != prev_buttons_bitmask_) {
+            uint32_t bm = packet.buttons_bitmask;
+            std::string bits;
+            for (int i = 0; i < 32; ++i) {
+                if (bm & (1u << i)) {
+                    if (!bits.empty()) bits += ",";
+                    bits += std::to_string(i);
+                }
+            }
+            if (bits.empty()) bits = "(none)";
+            RCLCPP_INFO(this->get_logger(), "buttons_bitmask changed: 0x%08x set_bits=%s", bm, bits.c_str());
+            prev_buttons_bitmask_ = bm;
+        }
         std::vector<geometry_msgs::msg::TransformStamped> transforms;
         
         // 调试输出计数
@@ -303,13 +317,13 @@ private:
             map_position(vr_x, vr_y, vr_z,
                         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
             
-            // 调试输出
-            if (should_log) {
-                RCLCPP_INFO(this->get_logger(), 
-                    "[LEFT] PICO: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
-                    vr_x, vr_y, vr_z,
-                    t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
-            }
+            // // 调试输出
+            // if (should_log) {
+            //     RCLCPP_INFO(this->get_logger(), 
+            //         "[LEFT] PICO: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
+            //         vr_x, vr_y, vr_z,
+            //         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
+            // }
             
             // 四元数坐标对齐（不做额外旋转补偿）
             tf2::Quaternion q = map_quaternion(
@@ -337,7 +351,10 @@ private:
             joy.header.stamp = now;
             joy.axes = {packet.left_joystick[0], packet.left_joystick[1],
                        packet.left_trigger, packet.left_grip};
+            // 左手柄buttons: A/B/X/Y/Menu/JoyClick（与右手统一）
             joy.buttons = {
+                (packet.buttons_bitmask & (1 << 0)) ? 1 : 0,   // A
+                (packet.buttons_bitmask & (1 << 1)) ? 1 : 0,   // B
                 (packet.buttons_bitmask & (1 << 2)) ? 1 : 0,   // X
                 (packet.buttons_bitmask & (1 << 3)) ? 1 : 0,   // Y
                 (packet.buttons_bitmask & (1 << 4)) ? 1 : 0,   // Menu
@@ -366,13 +383,13 @@ private:
             map_position(vr_x, vr_y, vr_z,
                         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
             
-            // 调试输出
-            if (should_log) {
-                RCLCPP_INFO(this->get_logger(), 
-                    "[RIGHT] PICO: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
-                    vr_x, vr_y, vr_z,
-                    t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
-            }
+            // // 调试输出
+            // if (should_log) {
+            //     RCLCPP_INFO(this->get_logger(), 
+            //         "[RIGHT] PICO: [%.3f, %.3f, %.3f] -> ROS: [%.3f, %.3f, %.3f]",
+            //         vr_x, vr_y, vr_z,
+            //         t.transform.translation.x, t.transform.translation.y, t.transform.translation.z);
+            // }
             
             // 四元数坐标对齐（不做额外旋转补偿）
             tf2::Quaternion q = map_quaternion(
@@ -400,11 +417,14 @@ private:
             joy.header.stamp = now;
             joy.axes = {packet.right_joystick[0], packet.right_joystick[1],
                        packet.right_trigger, packet.right_grip};
+            // 右手柄buttons: A/B/X/Y/Menu/JoyClick（与左手统一，X/Y/Menu/JoyClick按bit位）
             joy.buttons = {
                 (packet.buttons_bitmask & (1 << 0)) ? 1 : 0,   // A
                 (packet.buttons_bitmask & (1 << 1)) ? 1 : 0,   // B
-                (packet.buttons_bitmask & (1 << 5)) ? 1 : 0,   // Home
-                (packet.buttons_bitmask & (1 << 11)) ? 1 : 0   // Joy Click
+                (packet.buttons_bitmask & (1 << 2)) ? 1 : 0,   // X
+                (packet.buttons_bitmask & (1 << 3)) ? 1 : 0,   // Y
+                (packet.buttons_bitmask & (1 << 4)) ? 1 : 0,   // Menu
+                (packet.buttons_bitmask & (1 << 10)) ? 1 : 0   // Joy Click
             };
             right_controller_joy_pub_->publish(joy);
         }
@@ -419,6 +439,9 @@ private:
     int udp_port_;
     std::thread recv_thread_;
     std::atomic<bool> running_;
+
+    // previous buttons bitmask for debugging
+    uint32_t prev_buttons_bitmask_ = 0;
 
     // Publishers - 原始controller数据
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr head_pose_pub_;

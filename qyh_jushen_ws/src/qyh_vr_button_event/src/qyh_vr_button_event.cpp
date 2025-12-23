@@ -262,7 +262,6 @@ private:
     // When leaning: send 45.0; when upright: send 0.0; to stop send current angle.
     double desired_angle;
     // 只在状态变化时发送
-    double desired_angle;
     if (lx < -deadzone) {
       if (!waist_leanning_) {
         desired_angle = 45.0; // lean forward

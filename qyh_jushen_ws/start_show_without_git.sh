@@ -130,7 +130,7 @@ PIDS+=($!)
 # 夹爪控制节点
 echo "🚀 启动夹爪控制节点..."
 # 因为目前只有左夹爪，所以只启动左夹爪节点
-ros2 launch qyh_gripper_control gripper_control_left.launch.py &
+ros2 launch qyh_gripper_control gripper.launch.py &
 PIDS+=($!)
 
 # 腰部控制节点
