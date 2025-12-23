@@ -74,10 +74,16 @@ VR_BRIDGE_PID=$!
 sleep 2
 
 # 2. 启动 Teleop
-echo -e "${GREEN}[2/3] 启动 Teleop...${NC}"
+echo -e "${GREEN}[2/4] 启动 Teleop...${NC}"
 ros2 launch qyh_dual_arm_teleop teleop.launch.py &
 TELEOP_PID=$!
 sleep 2
+
+# 3. 启动 VR Button Event
+echo -e "${GREEN}[3/4] 启动 VR Button Event...${NC}"
+ros2 launch qyh_vr_button_event qyh_vr_button_event.launch.py &
+BUTTON_EVENT_PID=$!
+sleep 1
 
 # # 3. 启动 JAKA Control
 # echo -e "${GREEN}[3/3] 启动 JAKA Control...${NC}"
@@ -91,9 +97,10 @@ echo -e "${GREEN}║                      所有节点已启动!                
 echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "节点状态:"
-echo -e "  - VR Bridge:    PID ${VR_BRIDGE_PID}"
-echo -e "  - Teleop:       PID ${TELEOP_PID}"
-echo -e "  - JAKA Control: PID ${JAKA_PID}"
+echo -e "  - VR Bridge:        PID ${VR_BRIDGE_PID}"
+echo -e "  - Teleop:           PID ${TELEOP_PID}"
+echo -e "  - VR Button Event:  PID ${BUTTON_EVENT_PID}"
+echo -e "  - JAKA Control:     PID ${JAKA_PID}"
 echo ""
 echo -e "${YELLOW}数据流:${NC}"
 echo -e "  VR → vr_bridge → teleop → jaka_control → Robot"
