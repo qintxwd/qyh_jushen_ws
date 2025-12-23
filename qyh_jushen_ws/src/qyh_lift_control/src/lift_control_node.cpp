@@ -13,9 +13,7 @@ LiftControlNode::LiftControlNode(const rclcpp::NodeOptions & options)
 : Node("lift_control_node", options),
   modbus_ctx_(nullptr),
   is_connected_(false),
-  is_enabled_(false),
-  shutdown_requested_(false),
-  shutdown_in_progress_(false)
+  is_enabled_(false)
 {
   // 声明参数
   this->declare_parameter<std::string>("plc_ip", "192.168.1.88");
@@ -154,17 +152,6 @@ bool LiftControlNode::read_lift_state()
     current_state_.alarm = (coils[ModbusAddress::COIL_ALARM] != 0);
     current_state_.position_reached = (coils[ModbusAddress::COIL_POSITION_REACHED] != 0);
     
-    // 检查硬件关机按钮状态
-    bool hw_shutdown = (coils[ModbusAddress::COIL_SHUTDOWN] != 0);
-    current_state_.shutdown_requested = hw_shutdown || shutdown_requested_;
-    
-    // 如果检测到硬件关机请求且还没有开始关机流程
-    if (hw_shutdown && !shutdown_in_progress_) {
-      RCLCPP_WARN(this->get_logger(), "Hardware shutdown button pressed! Initiating system shutdown...");
-      shutdown_in_progress_ = true;
-      // 在新线程中执行关机，避免阻塞状态读取
-      std::thread(&LiftControlNode::execute_system_shutdown, this).detach();
-    }
 
     is_enabled_ = current_state_.enabled;
 
@@ -365,47 +352,6 @@ bool LiftControlNode::stop_move()
   return write_coil(ModbusAddress::COIL_GO_STOP, false);
 }
 
-bool LiftControlNode::request_shutdown()
-{
-  RCLCPP_WARN(this->get_logger(), "Software shutdown requested!");
-  
-  if (shutdown_in_progress_) {
-    RCLCPP_INFO(this->get_logger(), "Shutdown already in progress");
-    return true;
-  }
-  
-  // 写关机线圈通知PLC
-  if (!write_coil(ModbusAddress::COIL_SHUTDOWN, true)) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to write shutdown coil to PLC");
-    return false;
-  }
-  
-  shutdown_requested_ = true;
-  shutdown_in_progress_ = true;
-  
-  // 在新线程中执行关机
-  std::thread(&LiftControlNode::execute_system_shutdown, this).detach();
-  
-  return true;
-}
-
-void LiftControlNode::execute_system_shutdown()
-{
-  RCLCPP_WARN(this->get_logger(), "Executing system shutdown in 3 seconds...");
-  
-  // 等待3秒让Web页面有时间显示关机提示
-  std::this_thread::sleep_for(std::chrono::seconds(3));
-  
-  RCLCPP_WARN(this->get_logger(), "System shutdown NOW!");
-  
-  // 执行系统关机命令
-  int result = std::system("sudo shutdown -h now");
-  
-  if (result != 0) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to execute shutdown command, code: %d", result);
-  }
-}
-
 void LiftControlNode::handle_control(
   const qyh_lift_msgs::srv::LiftControl::Request::SharedPtr request,
   qyh_lift_msgs::srv::LiftControl::Response::SharedPtr response)
@@ -457,10 +403,6 @@ void LiftControlNode::handle_control(
       response->message = response->success ? "Movement stopped" : "Failed to stop movement";
       break;
 
-    case LiftControl::Request::CMD_SHUTDOWN:
-      response->success = request_shutdown();
-      response->message = response->success ? "System shutdown initiated" : "Failed to initiate shutdown";
-      break;
 
     default:
       response->success = false;

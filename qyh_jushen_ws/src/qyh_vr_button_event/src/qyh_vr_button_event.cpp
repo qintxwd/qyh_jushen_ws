@@ -34,6 +34,7 @@ public:
     this->declare_parameter<double>("max_vx", 0.6);
     this->declare_parameter<double>("max_w", 1.2);
     this->declare_parameter<double>("deadzone", 0.2);
+    this->declare_parameter<double>("waist_stop_offset_deg", 2.0);
     this->declare_parameter<int>("joy_timeout_ms", 500);
     this->declare_parameter<int>("check_timer_ms", 100);
     this->declare_parameter<int>("chassis_keepalive_ms", 100);
@@ -49,6 +50,7 @@ public:
     max_vx_ = this->get_parameter("max_vx").as_double();
     max_w_ = this->get_parameter("max_w").as_double();
     deadzone_ = this->get_parameter("deadzone").as_double();
+    waist_stop_offset_deg_ = this->get_parameter("waist_stop_offset_deg").as_double();
     joy_timeout_ms_ = this->get_parameter("joy_timeout_ms").as_int();
     check_timer_ms_ = this->get_parameter("check_timer_ms").as_int();
     chassis_keepalive_ms_ = this->get_parameter("chassis_keepalive_ms").as_int();
@@ -259,9 +261,9 @@ private:
   {
     const double deadzone = 0.2;
     // Our waist does not support direction/stop commands — send absolute angles.
-    // When leaning: send 45.0; when upright: send 0.0; to stop send current angle.
+    // When leaning: send 45.0; when upright: send 0.0; to stop send current angle with a small offset
     double desired_angle;
-    // 只在状态变化时发送
+    // only send on state change
     if (lx < -deadzone) {
       if (!waist_leanning_) {
         desired_angle = 45.0; // lean forward
@@ -269,6 +271,7 @@ private:
         sendWaistCommand(5 /*CMD_GO_ANGLE*/, static_cast<float>(desired_angle), false);
         last_sent_waist_angle_ = desired_angle;
         waist_leanning_ = true;
+        waist_moving_dir_ = +1;
       }
     } else if (lx > deadzone) {
       if (waist_leanning_ || last_sent_waist_angle_ != 0.0) {
@@ -277,16 +280,22 @@ private:
         sendWaistCommand(5 /*CMD_GO_ANGLE*/, static_cast<float>(desired_angle), false);
         last_sent_waist_angle_ = desired_angle;
         waist_leanning_ = false;
+        waist_moving_dir_ = -1;
       }
     } else {
-      // 只有在waist_leanning_为true时才发送stop
-      if (waist_leanning_) {
-        desired_angle = waist_current_angle_;
-        RCLCPP_INFO(this->get_logger(), "Waist joystick center: stop (current angle %.2f)", waist_current_angle_);
-        sendWaistCommand(5 /*CMD_GO_ANGLE*/, static_cast<float>(desired_angle), false);
-        last_sent_waist_angle_ = desired_angle;
-        waist_leanning_ = false;
-      }
+        // If we were moving (either direction), send a compensated stop angle
+        if (waist_moving_dir_ != 0) {
+          desired_angle = waist_current_angle_;
+          double compensated = desired_angle + waist_stop_offset_deg_ * static_cast<double>(waist_moving_dir_);
+          // clamp to [0,45]
+          if (compensated < 0.0) compensated = 0.0;
+          if (compensated > 45.0) compensated = 45.0;
+          RCLCPP_INFO(this->get_logger(), "Waist joystick center: stop (read %.2f dir %d -> send compensated %.2f)", desired_angle, waist_moving_dir_, compensated);
+          sendWaistCommand(5 /*CMD_GO_ANGLE*/, static_cast<float>(compensated), false);
+          last_sent_waist_angle_ = compensated;
+          waist_moving_dir_ = 0;
+          waist_leanning_ = false;
+        }
     }
   }
 
@@ -331,7 +340,10 @@ private:
   std::string waist_state_topic_;
   double waist_current_angle_ = 0.0;
   double last_sent_waist_angle_ = -9999.0;
+  // +1 = moving toward larger angle (leaning -> 45), -1 = moving toward smaller angle (upright -> 0)
+  int waist_moving_dir_ = 0;
   double deadzone_ = 0.2;
+  double waist_stop_offset_deg_ = 2.0;
   int joy_timeout_ms_ = 500;
   int check_timer_ms_ = 100;
   int chassis_keepalive_ms_ = 100;
@@ -388,13 +400,17 @@ private:
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Left joystick timeout - stopping lift");
       }
 
-      // stop waist if leaning
-      if (waist_leanning_) {
-        // send CMD_STOP to stop motion
-        sendWaistCommand(9 /*CMD_STOP*/, 0.0f, false);
+      // stop waist if it was moving
+      if (waist_moving_dir_ != 0) {
+        double desired_angle = waist_current_angle_;
+        double compensated = desired_angle + waist_stop_offset_deg_ * static_cast<double>(waist_moving_dir_);
+        if (compensated < 0.0) compensated = 0.0;
+        if (compensated > 45.0) compensated = 45.0;
+        sendWaistCommand(5 /*CMD_GO_ANGLE*/, static_cast<float>(compensated), false);
+        waist_moving_dir_ = 0;
         waist_leanning_ = false;
-        last_sent_waist_angle_ = -9999.0;
-        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Left joystick timeout - stopping waist");
+        last_sent_waist_angle_ = compensated;
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Left joystick timeout - stopping waist (sent compensated angle)");
       }
     }
   }

@@ -1,0 +1,9 @@
+# 升降电机控制参数
+lift_control_node:
+  ros__parameters:
+    # PLC 连接参数
+    plc_ip: "192.168.1.88"
+    plc_port: 502
+
+    # 状态发布频率 (Hz)
+    publish_rate: 10.0
