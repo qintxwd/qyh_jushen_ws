@@ -1,4 +1,4 @@
-#include "qyh_gripper_control/gripper_control_node.hpp"
+#include "gripper_control_node.hpp"
 #include <rclcpp/rclcpp.hpp>
 
 int main(int argc, char * argv[])

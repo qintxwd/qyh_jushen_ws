@@ -6,13 +6,13 @@ import os
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('qyh_gripper_control')
-    config_file = os.path.join(pkg_share, 'config', 'gripper_right.yaml')
+    config_file = os.path.join(pkg_share, 'config', 'gripper.yaml')
     
     gripper_node = Node(
         package='qyh_gripper_control',
         executable='gripper_control_node',
-        name='right_gripper_control',
-        namespace='right',
+        name='gripper_control_node',
+        namespace='',
         parameters=[config_file],
         output='screen'
     )

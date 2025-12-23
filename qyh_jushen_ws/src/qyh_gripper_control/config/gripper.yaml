@@ -5,3 +5,5 @@
     slave_id: 1
     publish_rate: 20.0
     auto_activate: true
+    left_slave_id: 2
+    right_slave_id: 1

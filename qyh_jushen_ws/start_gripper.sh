@@ -22,6 +22,6 @@ export RCUTILS_LOGGING_BUFFERED_STREAM=1
 export RCUTILS_COLORIZED_OUTPUT=1
 
 echo "🚀 启动夹爪控制节点..."
-ros2 launch qyh_gripper_control gripper_control_right.launch.py
+ros2 launch qyh_gripper_control gripper.launch.py
 
 
