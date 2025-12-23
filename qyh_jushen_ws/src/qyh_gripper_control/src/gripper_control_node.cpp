@@ -233,23 +233,29 @@ bool GripperControlNode::read_gripper_state(bool left)
 
 bool GripperControlNode::activate_gripper(bool left)
 {
-  std::lock_guard<std::mutex> lock(modbus_mutex_);
   if (!modbus_ctx_) return false;
-
-  // 设置目标从站
-  modbus_ctx_->set_slave(left ? left_slave_id_ : right_slave_id_);
 
   try {
     RCLCPP_INFO(this->get_logger(), "Activating %s gripper...", left ? "left" : "right");
 
-    // 步骤 1: 复位
-    modbus_ctx_->write_register(REG_CONTROL, 0x0000);
+    // 步骤 1: 复位 (仅在写入时短暂加锁)
+    {
+      std::lock_guard<std::mutex> lock(modbus_mutex_);
+      if (!modbus_ctx_) return false;
+      modbus_ctx_->set_slave(left ? left_slave_id_ : right_slave_id_);
+      modbus_ctx_->write_register(REG_CONTROL, 0x0000);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // 步骤 2: 激活
-    modbus_ctx_->write_register(REG_CONTROL, 0x0001);
+    // 步骤 2: 激活 (再次短暂加锁)
+    {
+      std::lock_guard<std::mutex> lock(modbus_mutex_);
+      if (!modbus_ctx_) return false;
+      modbus_ctx_->set_slave(left ? left_slave_id_ : right_slave_id_);
+      modbus_ctx_->write_register(REG_CONTROL, 0x0001);
+    }
 
-    // 步骤 3: 等待激活完成
+    // 步骤 3: 等待激活完成 -- 使用 read_gripper_state()，它会自行加锁
     for (int i = 0; i < 50; i++) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       if (read_gripper_state(left) && (left ? left_is_activated_ : right_is_activated_)) {
