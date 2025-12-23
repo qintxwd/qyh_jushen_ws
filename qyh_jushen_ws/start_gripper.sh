@@ -21,13 +21,7 @@ export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_
 export RCUTILS_LOGGING_BUFFERED_STREAM=1
 export RCUTILS_COLORIZED_OUTPUT=1
 
-echo "🚀 启动升降电机控制节点..."
-ros2 launch qyh_gripper_control gripper_control_left.launch.py
+echo "🚀 启动夹爪控制节点..."
+ros2 launch qyh_gripper_control gripper_control_right.launch.py
 
-# # 启动jaka臂控制节点
-# echo "🚀 启动JAKA臂控制节点..."
-# ros2 launch qyh_jaka_control jaka_control.launch.py
 
-# # 启动底盘控制节点
-# echo "🚀 启动底盘控制节点..."
-# ros2 launch qyh_standard_robot standard_robot.launch.py
