@@ -27,7 +27,6 @@ find_package(yaml-cpp REQUIRED)
 
 # Include directories
 include_directories(
-  include
   ./thirdparty/include
   ${orocos_kdl_INCLUDE_DIRS}
 )
@@ -41,32 +40,6 @@ endif()
 # Set RPATH so the executable can find the shared library at runtime
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/${PROJECT_NAME}/thirdparty")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-# Libraries
-add_library(jaka_interface src/jaka_interface.cpp)
-ament_target_dependencies(jaka_interface
-  rclcpp
-  geometry_msgs
-  tf2
-  tf2_geometry_msgs
-)
-target_link_libraries(jaka_interface
-  ${JAKA_API_LIB}
-)
-
-add_library(velocity_servo_controller src/velocity_servo_controller.cpp)
-ament_target_dependencies(velocity_servo_controller
-  rclcpp
-  geometry_msgs
-  sensor_msgs
-  orocos_kdl
-  kdl_parser
-  urdf
-  trac_ik_lib
-)
-target_link_libraries(velocity_servo_controller
-  ${orocos_kdl_LIBRARIES}
-)
 
 # Main control node (unified: basic + servo + VR)
 add_executable(jaka_control_node 
@@ -89,41 +62,15 @@ ament_target_dependencies(jaka_control_node
   trac_ik_lib
 )
 target_link_libraries(jaka_control_node
-  jaka_interface
-  velocity_servo_controller
   ${JAKA_API_LIB}
   ${orocos_kdl_LIBRARIES}
   yaml-cpp
-)
-
-# Bridge node for teleoperation (subscribes to /left_arm/joint_command, /right_arm/joint_command)
-# add_executable(jaka_bridge_node src/jaka_bridge_node.cpp)
-# ament_target_dependencies(jaka_bridge_node
-#   rclcpp
-#   std_srvs
-#   sensor_msgs
-# )
-# target_link_libraries(jaka_bridge_node
-#   jaka_interface velocity_servo_controller
-#   smooth_servo_bridge
-#   ${JAKA_API_LIB}
-# )
-
-install(TARGETS jaka_interface velocity_servo_controller
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
 )
 
 install(TARGETS
   jaka_control_node
   # jaka_bridge_node
   DESTINATION lib/${PROJECT_NAME}
-)
-
-install(DIRECTORY
-  include/
-  DESTINATION include
 )
 
 install(DIRECTORY
