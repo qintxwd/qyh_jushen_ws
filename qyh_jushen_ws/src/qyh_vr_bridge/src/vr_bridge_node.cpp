@@ -115,11 +115,11 @@ public:
         // Publishers - 使用 controller 命名（原始VR数据）
         head_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/head/pose", 10);
         left_controller_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/left_controller/pose", 10);
-        left_controller_pose_raw_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>("/vr/left_controller/pose_raw", 10);
+        left_controller_pose_raw_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/left_controller/pose_raw", 10);
         left_controller_joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/vr/left_controller/joy", 10);
         left_controller_active_pub_ = this->create_publisher<std_msgs::msg::Bool>("/vr/left_controller/active", 10);
         right_controller_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/right_controller/pose", 10);
-        right_controller_pose_raw_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>("/vr/right_controller/pose_raw", 10);
+        right_controller_pose_raw_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/vr/right_controller/pose_raw", 10);
         right_controller_joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/vr/right_controller/joy", 10);
         right_controller_active_pub_ = this->create_publisher<std_msgs::msg::Bool>("/vr/right_controller/active", 10);
 
@@ -365,16 +365,14 @@ private:
             left_controller_joy_pub_->publish(joy);
 
             //发布其原始的xyz和rpy数据，不做任何变换
-            std_msgs::msg::Float64MultiArray raw_msg;
-            raw_msg.data = {
-                static_cast<double>(packet.left_position[0]),
-                static_cast<double>(packet.left_position[1]),
-                static_cast<double>(packet.left_position[2]),
-                static_cast<double>(packet.left_orientation[0]),
-                static_cast<double>(packet.left_orientation[1]),
-                static_cast<double>(packet.left_orientation[2]),
-                static_cast<double>(packet.left_orientation[3])
-            };
+            geometry_msgs::msg::PoseStamped raw_msg;
+            raw_msg.pose.position.x = packet.left_position[0];
+            raw_msg.pose.position.y = packet.left_position[1];
+            raw_msg.pose.position.z = packet.left_position[2];
+            raw_msg.pose.orientation.x = packet.left_orientation[0];
+            raw_msg.pose.orientation.y = packet.left_orientation[1];
+            raw_msg.pose.orientation.z = packet.left_orientation[2];
+            raw_msg.pose.orientation.w = packet.left_orientation[3];
             left_controller_pose_raw_pub_->publish(raw_msg);
         }
 
@@ -444,16 +442,14 @@ private:
             right_controller_joy_pub_->publish(joy);
 
             //发布其原始的xyz和rpy数据，不做任何变换
-            std_msgs::msg::Float64MultiArray raw_msg;
-            raw_msg.data = {
-                static_cast<double>(packet.right_position[0]),
-                static_cast<double>(packet.right_position[1]),
-                static_cast<double>(packet.right_position[2]),
-                static_cast<double>(packet.right_orientation[0]),
-                static_cast<double>(packet.right_orientation[1]),
-                static_cast<double>(packet.right_orientation[2]),
-                static_cast<double>(packet.right_orientation[3])
-            };
+            geometry_msgs::msg::PoseStamped raw_msg;
+            raw_msg.pose.position.x = packet.right_position[0];
+            raw_msg.pose.position.y = packet.right_position[1];
+            raw_msg.pose.position.z = packet.right_position[2];
+            raw_msg.pose.orientation.x = packet.right_orientation[0];
+            raw_msg.pose.orientation.y = packet.right_orientation[1];
+            raw_msg.pose.orientation.z = packet.right_orientation[2];
+            raw_msg.pose.orientation.w = packet.right_orientation[3];
             right_controller_pose_raw_pub_->publish(raw_msg);
         }
 
@@ -474,11 +470,11 @@ private:
     // Publishers - 原始controller数据
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr head_pose_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr left_controller_pose_pub_;
-    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr left_controller_pose_raw_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr left_controller_pose_raw_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr left_controller_joy_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr left_controller_active_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr right_controller_pose_pub_;
-    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr right_controller_pose_raw_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr right_controller_pose_raw_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr right_controller_joy_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr right_controller_active_pub_;
 
