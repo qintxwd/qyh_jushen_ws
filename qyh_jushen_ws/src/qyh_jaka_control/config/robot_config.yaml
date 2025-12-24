@@ -4,11 +4,10 @@
     # 机器人连接参数
     robot_ip: "192.168.2.200"
     auto_connect: true
-    auto_initialize: false  # 启动后自动初始化（上电→使能→初始姿态→VR跟随）
 
     # 伺服控制参数
-    cycle_time_ms: 8.0  # 8ms = 125Hz (推荐)
-    teleop_target_update_time_ms: 66.0  # 66ms = 15Hz (VR目标更新频率)
+    cycle_time: 0.008  # 8ms = 125Hz (推荐)
+    teleop_target_update_time: 0.05  # 50ms = 20Hz (VR目标更新频率)
     use_cartesian: false  # true: 笛卡尔空间伺服, false: 关节空间伺服
     
     # 初始化姿态配置（弧度）

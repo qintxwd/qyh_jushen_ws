@@ -177,10 +177,6 @@ ros2 run qyh_jaka_control_gui jaka_gui
 
 ## ROS接口
 
-### 订阅的话题
-- `/jaka/servo/status` (JakaServoStatus) - 伺服状态
-- `/jaka/vr/status` (VRFollowStatus) - VR跟随状态
-
 ### 发布的话题
 - `/jaka/servo/joint_cmd` (JakaDualJointServo) - 关节空间指令
 - `/jaka/servo/cartesian_cmd` (JakaDualCartesianServo) - 笛卡尔空间指令

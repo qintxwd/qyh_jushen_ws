@@ -27,7 +27,7 @@ class JakaServiceHandlers {
 public:
     JakaServiceHandlers(
         rclcpp::Node* node,
-        JakaInterface& jaka_interface,
+        std::shared_ptr<JAKAZuRobot> robot,
         std::atomic<bool>& connected,
         std::atomic<bool>& powered,
         std::atomic<bool>& enabled,
@@ -46,9 +46,7 @@ public:
     // 伺服控制服务
     void handleStartServo(const qyh_jaka_control_msgs::srv::StartServo::Request::SharedPtr req, qyh_jaka_control_msgs::srv::StartServo::Response::SharedPtr res);
     void handleStopServo(const qyh_jaka_control_msgs::srv::StopServo::Request::SharedPtr req, qyh_jaka_control_msgs::srv::StopServo::Response::SharedPtr res);
-    void handleBridgeStartServo(const std_srvs::srv::Trigger::Request::SharedPtr req, std_srvs::srv::Trigger::Response::SharedPtr res);
-    void handleBridgeStopServo(const std_srvs::srv::Trigger::Request::SharedPtr req, std_srvs::srv::Trigger::Response::SharedPtr res);
-    
+
     // 运动控制服务
     void handleMoveJ(const qyh_jaka_control_msgs::srv::MoveJ::Request::SharedPtr req, qyh_jaka_control_msgs::srv::MoveJ::Response::SharedPtr res);
     void handleMoveL(const qyh_jaka_control_msgs::srv::MoveL::Request::SharedPtr req, qyh_jaka_control_msgs::srv::MoveL::Response::SharedPtr res);
@@ -56,13 +54,14 @@ public:
     void handleSetPayload(const qyh_jaka_control_msgs::srv::SetPayload::Request::SharedPtr req, qyh_jaka_control_msgs::srv::SetPayload::Response::SharedPtr res);
     void handleGetPayload(const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr req, qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res);
     
-    // 点动控制服务
-    void handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res);
-    void handleJogStop(const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req, qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res);
+    // // 点动控制服务
+    // void handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res);
+    // void handleJogStop(const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req, qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res);
 
 private:
     rclcpp::Node* node_;
-    JakaInterface& jaka_interface_;
+    // JakaInterface& jaka_interface_;
+    std::shared_ptr<JAKAZuRobot> robot_;
     std::atomic<bool>& connected_;
     std::atomic<bool>& powered_;
     std::atomic<bool>& enabled_;

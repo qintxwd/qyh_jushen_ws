@@ -63,8 +63,6 @@ VR手柄 → qyh_vr_calibration → qyh_teleoperation_controller → qyh_jaka_co
 
 ### 发布话题 (Published Topics)
 
-- `/jaka/servo/status` (`qyh_jaka_control_msgs/msg/JakaServoStatus`)
-    - 伺服控制回路的实时状态（10Hz）。
 - `/jaka/robot_state` (`qyh_jaka_control_msgs/msg/RobotState`)
     - 机器人完整状态（包括关节位置、笛卡尔位姿、错误信息等，10Hz）。
 - `/joint_states` (`sensor_msgs/msg/JointState`)

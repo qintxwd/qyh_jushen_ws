@@ -381,17 +381,6 @@ geometry_msgs/Pose right_pose # 右臂目标位姿
 bool is_abs                   # True=绝对位姿, False=相对增量
 ```
 
-#### JakaServoStatus.msg
-```
-string mode                   # 控制模式："joint", "cartesian", "idle"
-bool is_abs                   # 是否绝对模式
-int32 cycle_time_ns           # 控制周期（纳秒）
-float64 publish_rate_hz       # 实际发布频率
-float64 latency_ms            # 控制延迟（毫秒）
-float64 packet_loss_rate      # 丢包率估计
-int32 error_code              # 错误码（0=正常）
-string error_message          # 错误描述
-```
 
 #### RobotState.msg
 ```
@@ -524,7 +513,7 @@ float64 recording_duration    # 录制时长（秒）
 **话题（发布）**:
 - `/robot_state` (qyh_jaka_control_msgs/RobotState) - 机器人状态，125Hz
 - `/joint_states` (sensor_msgs/JointState) - 关节状态
-- `/jaka/servo_status` (qyh_jaka_control_msgs/JakaServoStatus) - 伺服状态
+
 
 **服务**:
 - `/jaka/start_servo` (qyh_jaka_control_msgs/StartServo) - 启动伺服
@@ -580,7 +569,6 @@ ros2 topic echo /robot_state
 
 **订阅话题**:
 - `/robot_state` (qyh_jaka_control_msgs/RobotState) - 机器人状态
-- `/jaka/servo_status` (qyh_jaka_control_msgs/JakaServoStatus) - 伺服状态
 
 **发布话题**:
 - `/jaka/dual_joint_servo` (qyh_jaka_control_msgs/JakaDualJointServo) - 关节伺服命令

@@ -13,7 +13,6 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/JakaDualJointServo.msg"
   "msg/JakaDualCartesianServo.msg"
-  "msg/JakaServoStatus.msg"
   "msg/VRPose.msg"
   "msg/VRFollowStatus.msg"
   "msg/RobotState.msg"

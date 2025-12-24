@@ -17,15 +17,6 @@
 - `geometry_msgs/Pose right_pose`: 右臂目标位姿。
 - `bool is_abs`: 是否为绝对位姿控制。
 
-### JakaServoStatus.msg
-伺服控制回路的实时状态反馈。
-- `string mode`: 当前控制模式（如 "joint", "cartesian"）。
-- `bool is_abs`: 当前是否为绝对模式。
-- `int32 cycle_time_ns`: 控制周期（纳秒）。
-- `float64 publish_rate_hz`: 实际发布频率（Hz）。
-- `float64 latency_ms`: 控制回路延迟（毫秒）。
-- `float64 packet_loss_rate`: 丢包率估计。
-- `int32 error_code`: 错误码（0表示正常）。
 
 ### VRPose.msg
 VR控制器的位姿数据。

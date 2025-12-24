@@ -25,7 +25,6 @@ from geometry_msgs.msg import Pose
 from qyh_jaka_control_msgs.msg import (
     JakaDualJointServo,
     JakaDualCartesianServo,
-    JakaServoStatus,
     RobotState
 )
 from qyh_jaka_control_msgs.srv import (
@@ -57,9 +56,6 @@ class JakaControlNode(Node):
             JakaDualCartesianServo, '/jaka/servo/cartesian_cmd', 1)
 
         # Subscribers
-        self.status_sub = self.create_subscription(
-            JakaServoStatus, '/jaka/servo/status',
-            self.status_callback, 10)
         self.robot_state_sub = self.create_subscription(
             RobotState, '/jaka/robot_state',
             self.robot_state_callback, 10)
