@@ -10,6 +10,7 @@ import math
 import numpy as np
 from std_msgs.msg import String
 
+
 # def make_transform_matrix(translation, rpy):
 #     """根据平移和欧拉角生成 4x4 变换矩阵"""
 #     t = np.eye(4)
@@ -78,7 +79,7 @@ from std_msgs.msg import String
 # -----------------------
 # 输出结果
 # -----------------------
-print("目标 lt 位姿 (T_lt_target):\n", T_lt_target)
+#print("目标 lt 位姿 (T_lt_target):\n", T_lt_target)
 
 class QyhTeleopNode(Node):
     def __init__(self):
@@ -91,57 +92,86 @@ class QyhTeleopNode(Node):
         self.left_pose_sub = self.create_subscription(PoseStamped, '/vr/left_controller/pose', self.vr_left_pose_callback, 10)
         self.left_joy_sub = self.create_subscription(Joy, '/vr/left_controller/joy', self.left_joy_callback, 10)
         self.left_tcp_sub = self.create_subscription(JointState, '/left_arm/tcp_pose', self.left_tcp_pose_callback, 10)
-        self.left_joint_sub = self.create_subscription(JointState, '/left_arm/joint_states', self.left_joint_states_callback, 10)
 
         # clutch thresholds
         self.grip_engage = 0.6
         self.grip_release = 0.3
-
+        
+        # state machine
+        self.left_clutch_state = 'IDLE'
         # current values
         self.left_grip_value_ = 0.0
         self.cur_tcp_position = [0.0, 0.0, 0.0]
         self.cur_tcp_rotm = np.eye(3)
-
-        # state machine: IDLE, ENGAGING, TRACKING, RELEASING
-        self.left_clutch_state = 'IDLE'
-
-        # initial references for tracking
-        self.init_left_vr_pose = None
-        self.leftarm_init_pos = None
-        self.leftarm_init_rot = None
+        self.tcp_ready = False
+        
+        # -30 degree yaw transform
+        self.T_base_base_left = self.make_transform_matrix(
+            translation=[0, 0, 0],
+            rpy=[0, 0, -math.pi / 6]
+        )
+        
+        # lt -> forward_lt
+        self.T_lt_forward = self.make_transform_matrix(
+            translation=[0, 0, 0],
+            rpy=[0, -math.pi / 2, -math.pi / 2]
+        )
+        
+         # ---------- 增量模式缓存 ----------
+        self.T_vr_start_base_raw = None
+        self.T_tcp_start_forward = None
 
         self.get_logger().info('qyh_teleop node started')
+    # ----------------------------------------------------
+    # 基础矩阵工具
+    # ----------------------------------------------------
 
+    def make_transform_matrix(self, translation, rpy):
+        T = np.eye(4)
+        T[:3, :3] = R.from_euler('xyz', rpy).as_matrix()
+        T[:3, 3] = translation
+        return T
+
+    def invert_transform(self, T):
+        R_inv = T[:3, :3].T
+        t_inv = -R_inv @ T[:3, 3]
+        T_inv = np.eye(4)
+        T_inv[:3, :3] = R_inv
+        T_inv[:3, 3] = t_inv
+        return T_inv
+
+    # ----------------------------------------------------
+    # 回调
+    # ----------------------------------------------------
     def left_joy_callback(self, msg):
         if hasattr(msg, 'axes') and len(msg.axes) > 3:
             self.left_grip_value_ = float(msg.axes[3])
 
-    def left_joint_states_callback(self, msg):
-        try:
-            self.cur_joint_val = list(msg.position)
-        except Exception:
-            self.cur_joint_val = []
 
     def left_tcp_pose_callback(self, msg):
+        mm_to_m = 0.001
         try:
-            if len(msg.position) >= 3:
-                self.cur_tcp_position = [msg.position[0], msg.position[1], msg.position[2]]
             if len(msg.position) >= 7:
-                rotation = R.from_quat([msg.position[4], msg.position[5], msg.position[6], msg.position[3]]) #msg.position[3~6]:w x y z
-                self.cur_tcp_rotm = rotation.as_matrix()
-                # # log received tcp pose (quaternion in x,y,z,w order used with scipy Rotation)
-                # try:
-                #     q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
-                #     self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}. roll/pitch/yaw(deg)=({math.degrees(rotation.as_euler('xyz')[0]):.1f}, {math.degrees(rotation.as_euler('xyz')[1]):.1f}, {math.degrees(rotation.as_euler('xyz')[2]):.1f})")
-                # except Exception:
-                #     pass
+                self.cur_tcp_position = [
+                    msg.position[0] * mm_to_m,
+                    msg.position[1] * mm_to_m,
+                    msg.position[2] * mm_to_m
+                ]
+                q = [
+                    msg.position[4],
+                    msg.position[5],
+                    msg.position[6],
+                    msg.position[3]
+                ]  # x y z w
+                self.cur_tcp_rotm = R.from_quat(q).as_matrix()
+                self.tcp_ready = True
         except Exception:
             pass
 
     def vr_left_pose_callback(self, msg):
-        grip_value = getattr(self, 'left_grip_value_', 0.0)
-        clutch_pressed = grip_value > self.grip_engage
-        clutch_released = grip_value < self.grip_release
+        grip = self.left_grip_value_
+        pressed = grip > self.grip_engage
+        released = grip < self.grip_release
         
         # # log received vr pose and
         # msgRotation = R.from_quat([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
@@ -152,104 +182,108 @@ class QyhTeleopNode(Node):
         #                            f"grip={grip_value:.2f}")
         # except Exception:
         #     pass
-
+                
+        if not self.tcp_ready:
+            self.get_logger().warn("TCP pose not ready, ignore clutch")
+            return
+        
+        # 1.将msg转换成T_vr_base[np.eye(4)]
+         # VR 当前（base_link）
+        T_vr_now_base = self.make_transform_matrix(
+            translation=[
+                msg.pose.position.x,
+                msg.pose.position.y,
+                msg.pose.position.z
+            ],
+            rpy=R.from_quat([
+                msg.pose.orientation.x,
+                msg.pose.orientation.y,
+                msg.pose.orientation.z,
+                msg.pose.orientation.w
+            ]).as_euler('xyz')
+        )
+        
         state = self.left_clutch_state
 
+
+        # ---------- 状态机 ----------
+
         if state == 'IDLE':
-            if clutch_pressed:
-                state = 'ENGAGING'
-                self.get_logger().info(f"[LEFT] Clutch ENGAGING (grip={grip_value:.2f})")
-        elif state == 'ENGAGING':
-            state = 'TRACKING'
-            meter_to_mm = 1000.0
-            px = msg.pose.position.x * meter_to_mm
-            py = msg.pose.position.y * meter_to_mm
-            pz = msg.pose.position.z * meter_to_mm
-            q = [msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w]
-            roll, pitch, yaw = R.from_quat(q).as_euler('xyz', degrees=False)
-            self.init_left_vr_pose = [px, py, pz, roll, pitch, yaw]
-
-            self.leftarm_init_pos = list(self.cur_tcp_position)
-            self.leftarm_init_rot = np.array(self.cur_tcp_rotm)
-            self.get_logger().info('[LEFT] Tracking started')
-        elif state == 'TRACKING':
-            if clutch_released:
-                state = 'RELEASING'
-                self.get_logger().info(f"[LEFT] Clutch RELEASED (grip={grip_value:.2f})")
-        elif state == 'RELEASING':
-            state = 'IDLE'
-
-        self.left_clutch_state = state
-
-        if state != 'TRACKING':
+            if pressed:
+                self.left_clutch_state = 'ENGAGING'
             return
 
+        if state == 'ENGAGING':
+            # 1️⃣ 冻结 VR 起点
+            self.T_vr_start_base_raw = T_vr_now_base
+
+            # 2️⃣ 冻结机械臂起点（forward_lt）
+            T_lt_start = self.make_transform_matrix(
+                self.cur_tcp_position,
+                R.from_matrix(self.cur_tcp_rotm).as_euler('xyz')
+            )
+            self.T_tcp_start_forward = T_lt_start @ self.T_lt_forward
+
+            self.left_clutch_state = 'TRACKING'
+            self.get_logger().info('[LEFT] Tracking started')
+            return
+
+        if state == 'TRACKING':
+            if released:
+                self.left_clutch_state = 'IDLE'
+                self.get_logger().info('[LEFT] Clutch RELEASED')
+                return
+        
+        if self.left_clutch_state != 'TRACKING':
+            return
+        if self.T_vr_start_base_raw is None or self.T_tcp_start_forward is None:
+            return
+        # ---------- 增量计算 ----------
+
+        # VR → base_link_left
+        T_vr_now_left = self.invert_transform(
+            self.T_base_base_left
+        ) @ T_vr_now_base
+
+        T_vr_start_left = self.invert_transform(
+            self.T_base_base_left
+        ) @ self.T_vr_start_base_raw
+
+        # 对齐到 forward_lt
+        T_vr_now_forward = T_vr_now_left @ self.invert_transform(self.T_lt_forward)
+        T_vr_start_forward = T_vr_start_left @ self.invert_transform(self.T_lt_forward)
+
+        # ⭐ 增量
+        delta_T = T_vr_now_forward @ self.invert_transform(T_vr_start_forward)
+
+        # 应用到机械臂起点
+        T_forward_target = delta_T @ self.T_tcp_start_forward
+        T_lt_target = T_forward_target @ self.T_lt_forward
+
+        # ---------- 输出 ----------
+        pos = T_lt_target[:3, 3]
+        rotvec = R.from_matrix(T_lt_target[:3, :3]).as_rotvec()
         meter_to_mm = 1000.0
-        vx = msg.pose.position.x * meter_to_mm
-        vy = msg.pose.position.y * meter_to_mm
-        vz = msg.pose.position.z * meter_to_mm
-        q = [msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w]
-        roll, pitch, yaw = R.from_quat(q).as_euler('xyz', degrees=False)
+        out_pose = [
+            pos[0] *  meter_to_mm,
+            pos[1] *  meter_to_mm,
+            pos[2] *  meter_to_mm,
+            rotvec[0],
+            rotvec[1], 
+            rotvec[2]
+        ]
+        self.get_logger().info(
+            f"Δpos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
+            f"Δrot(rad)=({out_pose[3]:.3f},{out_pose[4]:.3f},{out_pose[5]:.3f})"
+        )
+        self.publish_servo_p_command(out_pose)
 
-        left_vr_pose = [vx, vy, vz, roll, pitch, yaw]
+    # ----------------------------------------------------
 
-        left_diff = [a - b for a, b in zip(left_vr_pose, self.init_left_vr_pose)]
-
-        def euler_to_rotation_matrix(rx, ry, rz):
-            cx = math.cos(rx); sx = math.sin(rx)
-            cy = math.cos(ry); sy = math.sin(ry)
-            cz = math.cos(rz); sz = math.sin(rz)
-            Rx = np.array([[1,0,0],[0,cx,-sx],[0,sx,cx]])
-            Ry = np.array([[cy,0,sy],[0,1,0],[-sy,0,cy]])
-            Rz = np.array([[cz,-sz,0],[sz,cz,0],[0,0,1]])
-            return Ry.dot(Rx.dot(Rz))
-
-        left_init_rot = euler_to_rotation_matrix(-self.init_left_vr_pose[3], -self.init_left_vr_pose[4], self.init_left_vr_pose[5])
-        left_rot = euler_to_rotation_matrix(-left_vr_pose[3], -left_vr_pose[4], left_vr_pose[5])
-        left_rotvr_diff = left_rot.dot(np.linalg.inv(left_init_rot))
-
-        def scale_rotation_matrix_axis_angle(rotation_matrix, scale_factor):
-            rot = R.from_matrix(rotation_matrix)
-            rotvec = rot.as_rotvec()
-            scaled = R.from_rotvec(rotvec * scale_factor)
-            return scaled.as_matrix()
-
-        rotation_scale_factor = 1.0
-        if rotation_scale_factor != 1.0:
-            left_rotvr_diff = scale_rotation_matrix_axis_angle(left_rotvr_diff, rotation_scale_factor)
-
-        vr_rot = np.array([[0,0,-1],[-1,0,0],[0,1,0]])
-        left_diff_base = vr_rot.dot(left_rotvr_diff).dot(np.linalg.inv(vr_rot))
-
-        def rotation_matrix_z(angle):
-            c = math.cos(angle); s = math.sin(angle)
-            return np.array([[c,-s,0],[s,c,0],[0,0,1]])
-
-        z_rot = rotation_matrix_z(math.radians(-30))
-        left_diff_base = z_rot.dot(left_diff_base).dot(np.linalg.inv(z_rot))
-
-        leftarm_finalrot = left_diff_base.dot(self.leftarm_init_rot)
-        euler_angles_xyz_fixed = R.from_matrix(leftarm_finalrot).as_euler('xyz', degrees=False)
-
-        next_pose = [0.0]*6
-        next_pose[0] = self.leftarm_init_pos[0] + left_diff[2]
-        next_pose[1] = self.leftarm_init_pos[1] - left_diff[0]
-        next_pose[2] = self.leftarm_init_pos[2] + left_diff[1]
-        next_pose[3] = euler_angles_xyz_fixed[0]
-        next_pose[4] = euler_angles_xyz_fixed[1]
-        next_pose[5] = euler_angles_xyz_fixed[2]
-        # log the reference tcp and the computed next pose
-        try:
-            self.get_logger().info(f"[LEFT] leftarm_init_pos={self.leftarm_init_pos} next_pose={next_pose} degrees:({math.degrees(next_pose[3]):.1f}, {math.degrees(next_pose[4]):.1f}, {math.degrees(next_pose[5]):.1f})")
-        except Exception:
-            pass
-
-        self.publish_servo_p_command(next_pose)
-
-    def publish_servo_p_command(self, joint_positions):
+    def publish_servo_p_command(self, pose):
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.position = joint_positions
+        msg.position = pose
         self.left_servo_pub.publish(msg)
 
 def main(args=None):
@@ -262,5 +296,5 @@ def main(args=None):
     node.destroy_node()
     rclpy.shutdown()
 
+
 if __name__ == '__main__':
-    main()
