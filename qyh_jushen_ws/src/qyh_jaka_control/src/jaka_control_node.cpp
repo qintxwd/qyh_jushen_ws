@@ -160,7 +160,7 @@ JakaControlNode::JakaControlNode()
         
         // 3. 设置滤波器为低通
         RCLCPP_INFO(get_logger(), "Setting filter to low pass...");
-        robot_->servo_move_use_joint_LPF(0.5); // 0=none, 0.5=low
+        robot_->servo_move_use_joint_LPF(1.0); // 0=none, 0.5=low
         
         // 🔧 新增：在上电前设置负载
         RCLCPP_INFO(get_logger(), "Loading and setting payload configuration...");
@@ -336,7 +336,7 @@ void JakaControlNode::right_timer_callback()
     {
         for (int i = 0; i < 7; i++)
         {
-            msg_joint_state.velocity.push_back((msg_joint_state.position[i] - msg_pre_left_joint_state[i]) / cycle_time_);
+            msg_joint_state.velocity.push_back((msg_joint_state.position[i] - msg_pre_right_joint_state[i]) / cycle_time_);
         }
     }else{
         for (int i = 0; i < 7; i++)
@@ -354,10 +354,10 @@ void JakaControlNode::right_timer_callback()
     right_joint_state_pub_->publish(msg_joint_state);
     right_tcp_pose_pub_->publish(msg_tcp_pose);
 
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-        "Right TCP Pose: [x=%.2f, y=%.2f, z=%.2f, roll=%.2f, pitch=%.2f, yaw=%.2f]",
-        msg_tcp_pose.position[0], msg_tcp_pose.position[1], msg_tcp_pose.position[2],
-        rad2deg(cached_right_pose_.rpy.rx), rad2deg(cached_right_pose_.rpy.ry), rad2deg(cached_right_pose_.rpy.rz));
+    // RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+    //     "Right TCP Pose: [x=%.2f, y=%.2f, z=%.2f, roll=%.2f, pitch=%.2f, yaw=%.2f]",
+    //     msg_tcp_pose.position[0], msg_tcp_pose.position[1], msg_tcp_pose.position[2],
+    //     rad2deg(cached_right_pose_.rpy.rx), rad2deg(cached_right_pose_.rpy.ry), rad2deg(cached_right_pose_.rpy.rz));
 
     int status[2] = {-3, -3};
     int errorcode[2] = {-1, -1};
@@ -377,6 +377,9 @@ void JakaControlNode::right_timer_callback()
 
 void JakaControlNode::command_p_timer_callback()
 {
+    if (!connected_ || !powered_ || !enabled_ || !servo_running_) {
+        return;
+    }
     auto current_time = this->get_clock()->now();
 
     //状态评估
@@ -469,27 +472,25 @@ void JakaControlNode::command_p_timer_callback()
     dual_msg.position[10] = target_right.rpy.ry;
     dual_msg.position[11] = target_right.rpy.rz;
 
+    // 输出合并命令，便于排查数据流（200ms节流）
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
+        "[CommandTimer] publishing dual command: [lx=%.3f,ly=%.3f,lz=%.3f,lr=%.3f,lp=%.3f,lyw=%.3f, rx=%.3f,ry=%.3f,rz=%.3f,rr=%.3f,rp=%.3f,ryw=%.3f]",
+        dual_msg.position[0], dual_msg.position[1], dual_msg.position[2], dual_msg.position[3], dual_msg.position[4], dual_msg.position[5],
+        dual_msg.position[6], dual_msg.position[7], dual_msg.position[8], dual_msg.position[9], dual_msg.position[10], dual_msg.position[11]);
+
     dual_arm_command_p_publisher_->publish(dual_msg);
 }
 
 // 接收合并后的12维消息并原子地发送到机器人
 void JakaControlNode::command_p_callback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
-    if (!msg) return;
+    if (!msg || !connected_ || !powered_ || !enabled_ || !servo_running_) {
+        return;
+    }
+
     // 检查长度
     if (msg->position.size() != 12) {
         RCLCPP_ERROR(this->get_logger(), "command_p_callback: expected 12 positions, got %zu", msg->position.size());
-        return;
-    }
-
-    if (!connected_ || !powered_ || !enabled_) {
-        RCLCPP_WARN(this->get_logger(), "Robot not ready for servo commands (connected/powered/enabled)");
-        return;
-    }
-
-    // 即使servo未运行，我们还是可以把命令组合好。实际发送前检查servo_running_。
-    if (!servo_running_) {
-        RCLCPP_DEBUG(this->get_logger(), "Servo not running, skipping robot send");
         return;
     }
 
@@ -511,11 +512,18 @@ void JakaControlNode::command_p_callback(const sensor_msgs::msg::JointState::Sha
         pose_right.rpy.rz = msg->position[11];
 
         // 原子发送：先将两个edg_servo_p压入缓冲，然后一次edg_send
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
+            "[CommandCallback] sending to robot: left rpy=[%.6f, %.6f, %.6f], right rpy=[%.6f, %.6f, %.6f]",
+            pose_left.rpy.rx, pose_left.rpy.ry, pose_left.rpy.rz,
+            pose_right.rpy.rx, pose_right.rpy.ry, pose_right.rpy.rz);
+
         robot_->edg_servo_p(0, &pose_left, ABS, 1);
         robot_->edg_servo_p(1, &pose_right, ABS, 1);
         int ret = robot_->edg_send();
         if (ret != 0) {
             RCLCPP_ERROR(this->get_logger(), "edg_send failed with code %d", ret);
+        } else {
+            RCLCPP_DEBUG(this->get_logger(), "edg_send OK");
         }
     } catch (const std::exception &e) {
         RCLCPP_ERROR(this->get_logger(), "Exception in command_p_callback: %s", e.what());
@@ -612,6 +620,10 @@ void JakaControlNode::publishStatus()
 
 void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
+    if(!connected_ || !powered_ || !enabled_ || !servo_running_) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] Robot not ready to receive commands");
+        return;
+    }
     if (msg->position.size() != 6) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] invalid position size: %zu", msg->position.size());
         return;
@@ -626,10 +638,19 @@ void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::Sha
     left_last_command_p_time_ = this->now();
     left_input_state_ = ServoInputState::ACTIVE;
     left_last_target_pose_ = left_command_servo_p_val;  // 同步一次
+
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
+        "[LeftServoP] recv pos: x=%.3f y=%.3f z=%.3f rpy=[%.6f, %.6f, %.6f]",
+        left_command_servo_p_val.tran.x, left_command_servo_p_val.tran.y, left_command_servo_p_val.tran.z,
+        left_command_servo_p_val.rpy.rx, left_command_servo_p_val.rpy.ry, left_command_servo_p_val.rpy.rz);
 }
     
 void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
+    if(!connected_ || !powered_ || !enabled_ || !servo_running_) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] Robot not ready to receive commands");
+        return;
+    }
     if (msg->position.size() != 6) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[RightServoP] invalid position size: %zu", msg->position.size());
         return;
@@ -643,6 +664,11 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
     right_last_command_p_time_ = this->now();
     right_input_state_ = ServoInputState::ACTIVE;
     right_last_target_pose_ = right_command_servo_p_val;  // 同步一次
+
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
+        "[RightServoP] recv pos: x=%.3f y=%.3f z=%.3f rpy=[%.6f, %.6f, %.6f]",
+        right_command_servo_p_val.tran.x, right_command_servo_p_val.tran.y, right_command_servo_p_val.tran.z,
+        right_command_servo_p_val.rpy.rx, right_command_servo_p_val.rpy.ry, right_command_servo_p_val.rpy.rz);
 }
 
 
@@ -755,25 +781,27 @@ bool JakaControlNode::startServoInternal() {
     
     RCLCPP_INFO(get_logger(), "[Servo] Step 2/5: Enabling servo for left arm (id=0)...");
     // 显式启用双臂伺服 (0:左臂, 1:右臂)
-    bool success = true;
-    robot_->servo_move_use_joint_LPF(0.5); // 0=none, 0.5=low
-    success &= robot_->servo_move_enable(true, 0);
-    if (!success) {
+    errno_t ret = true;
+    robot_->servo_move_use_joint_LPF(1.0); // 0=none, 0.5=low
+    ret = robot_->servo_move_enable(true, 0);
+    if (ret != ERR_SUCC) {
+        //获取错误码并打印
+        RCLCPP_ERROR(get_logger(), "[Servo] Error enabling left arm servo (err=%d)", ret);
         RCLCPP_ERROR(get_logger(), "[Servo] Failed to enable left arm servo!");
         return false;
     }
     RCLCPP_INFO(get_logger(), "[Servo] Left arm servo enabled successfully");
     
     RCLCPP_INFO(get_logger(), "[Servo] Step 3/5: Enabling servo for right arm (id=1)...");
-    success &= robot_->servo_move_enable(true, 1);
-    if (!success) {
+    ret = robot_->servo_move_enable(true, 1);
+    if (ret != ERR_SUCC) {
         RCLCPP_ERROR(get_logger(), "[Servo] Failed to enable right arm servo!");
         robot_->servo_move_enable(false, 0);  // 回滚左臂
         return false;
     }
     RCLCPP_INFO(get_logger(), "[Servo] Right arm servo enabled successfully");
     
-    if (success) {
+    if (ret == ERR_SUCC) {
 
         RCLCPP_INFO(get_logger(), "[Servo] Step 4/5: Initializing controllers from current positions...");
         
@@ -787,7 +815,8 @@ bool JakaControlNode::startServoInternal() {
         left_last_target_pose_ = cached_left_pose_;
         right_last_target_pose_ = cached_right_pose_;
 
-        
+        servo_running_ = true;
+
         return true;
     }
     // 如果失败，尝试回滚
@@ -803,17 +832,17 @@ bool JakaControlNode::stopServoInternal() {
     servo_running_ = false;
     
     RCLCPP_INFO(get_logger(), "[Servo] Disabling left arm servo...");
-    bool success = true;
-    success &= robot_->servo_move_enable(false, 0);
+    errno_t ret = true;
+    ret = robot_->servo_move_enable(false, 0);
     RCLCPP_INFO(get_logger(), "[Servo] Disabling right arm servo...");
-    success &= robot_->servo_move_enable(false, 1);
+    ret = robot_->servo_move_enable(false, 1);
     
-    if (success) {
+    if (ret == ERR_SUCC) {
         RCLCPP_INFO(get_logger(), "[Servo] === Servo Mode Stopped ===");
     } else {
         RCLCPP_ERROR(get_logger(), "[Servo] Failed to stop servo cleanly");
     }
-    return success;
+    return ret == ERR_SUCC;
 }
     
 
