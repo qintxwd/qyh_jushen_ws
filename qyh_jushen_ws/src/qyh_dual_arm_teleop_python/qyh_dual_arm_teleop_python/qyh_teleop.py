@@ -10,6 +10,76 @@ import math
 import numpy as np
 from std_msgs.msg import String
 
+# def make_transform_matrix(translation, rpy):
+#     """根据平移和欧拉角生成 4x4 变换矩阵"""
+#     t = np.eye(4)
+#     t[:3, :3] = R.from_euler('xyz', rpy).as_matrix()
+#     t[:3, 3] = translation
+#     return t
+
+# def invert_transform(T):
+#     """4x4 变换矩阵求逆"""
+#     R_inv = T[:3, :3].T
+#     t_inv = -R_inv @ T[:3, 3]
+#     T_inv = np.eye(4)
+#     T_inv[:3, :3] = R_inv
+#     T_inv[:3, 3] = t_inv
+#     return T_inv
+
+# # -----------------------
+# # 已知变换
+# # -----------------------
+# # VR在base_link下
+# T_vr_base = make_transform_matrix(
+#     translation=[0.5, 0.2, 1.0],   # 例子
+#     rpy=[0, 0, 0]
+# )
+
+# # base_link -> base_link_left (固定-30° yaw)
+# T_base_base_left = make_transform_matrix(
+#     translation=[0, 0, 0], 
+#     rpy=[0, 0, -np.pi/6]
+# )
+
+# # lt -> forward_lt (固定旋转)
+# T_lt_forward = make_transform_matrix(
+#     translation=[0,0,0],
+#     rpy=[0, -np.pi/2, -np.pi/2]
+# )
+
+# # 当前机械臂读取到的 lt 位姿 (在 base_link_left 下)
+# T_lt_current = make_transform_matrix(
+#     translation=[0.6, 0.0, 0.8],   # 例子
+#     rpy=[0, 0, 0]
+# )
+
+# # -----------------------
+# # 计算逻辑
+# # -----------------------
+
+# # 1️⃣ VR 转到 base_link_left
+# T_vr_left = invert_transform(T_base_base_left) @ T_vr_base
+
+# # 2️⃣ 对齐到 forward_lt
+# T_vr_forward_aligned = T_vr_left @ invert_transform(T_lt_forward)
+
+# # 3️⃣ 当前 forward_lt 位姿
+# T_forward_current = T_lt_current @ T_lt_forward
+
+# # 4️⃣ 计算增量 Δ
+# delta_T = T_vr_forward_aligned @ invert_transform(T_forward_current)
+
+# # 5️⃣ 计算目标 forward_lt
+# T_forward_target = delta_T @ T_forward_current
+
+# # 6️⃣ 计算目标 lt 位姿
+# T_lt_target = T_forward_target @ T_lt_forward
+
+# -----------------------
+# 输出结果
+# -----------------------
+print("目标 lt 位姿 (T_lt_target):\n", T_lt_target)
+
 class QyhTeleopNode(Node):
     def __init__(self):
         super().__init__('qyh_teleop')
