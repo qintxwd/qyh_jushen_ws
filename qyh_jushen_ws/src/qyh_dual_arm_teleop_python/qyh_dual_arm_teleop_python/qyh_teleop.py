@@ -60,11 +60,11 @@ class QyhTeleopNode(Node):
                 rotation = R.from_quat([msg.position[4], msg.position[5], msg.position[6], msg.position[3]]) #msg.position[3~6]:w x y z
                 self.cur_tcp_rotm = rotation.as_matrix()
                 # log received tcp pose (quaternion in x,y,z,w order used with scipy Rotation)
-                # try:
-                #     q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
-                #     self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}")
-                # except Exception:
-                #     pass
+                try:
+                    q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
+                    self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}. roll/pitch/yaw(deg)=({math.degrees(rotation.as_euler('xyz')[0]):.1f}, {math.degrees(rotation.as_euler('xyz')[1]):.1f}, {math.degrees(rotation.as_euler('xyz')[2]):.1f})")
+                except Exception:
+                    pass
         except Exception:
             pass
 
