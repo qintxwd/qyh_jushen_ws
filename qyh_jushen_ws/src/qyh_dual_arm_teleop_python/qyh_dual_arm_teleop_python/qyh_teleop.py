@@ -60,11 +60,11 @@ class QyhTeleopNode(Node):
                 rotation = R.from_quat([msg.position[4], msg.position[5], msg.position[6], msg.position[3]]) #msg.position[3~6]:w x y z
                 self.cur_tcp_rotm = rotation.as_matrix()
                 # log received tcp pose (quaternion in x,y,z,w order used with scipy Rotation)
-                try:
-                    q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
-                    self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}")
-                except Exception:
-                    pass
+                # try:
+                #     q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
+                #     self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}")
+                # except Exception:
+                #     pass
         except Exception:
             pass
 
@@ -72,6 +72,14 @@ class QyhTeleopNode(Node):
         grip_value = getattr(self, 'left_grip_value_', 0.0)
         clutch_pressed = grip_value > self.grip_engage
         clutch_released = grip_value < self.grip_release
+        
+        # # log received vr pose
+        # try:
+        #     self.get_logger().info(f"[LEFT] vr_pose received position=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f}) "
+        #                            f"orientation=({msg.pose.orientation.x:.3f}, {msg.pose.orientation.y:.3f}, {msg.pose.orientation.z:.3f}, {msg.pose.orientation.w:.3f}) "
+        #                            f"grip={grip_value:.2f}")
+        # except Exception:
+        #     pass
 
         state = self.left_clutch_state
 
@@ -160,7 +168,7 @@ class QyhTeleopNode(Node):
         next_pose[5] = euler_angles_xyz_fixed[2]
         # log the reference tcp and the computed next pose
         try:
-            self.get_logger().info(f"[LEFT] leftarm_init_pos={self.leftarm_init_pos} next_pose={next_pose}")
+            self.get_logger().info(f"[LEFT] leftarm_init_pos={self.leftarm_init_pos} next_pose={next_pose} degrees:({math.degrees(next_pose[3]):.1f}, {math.degrees(next_pose[4]):.1f}, {math.degrees(next_pose[5]):.1f})")
         except Exception:
             pass
 

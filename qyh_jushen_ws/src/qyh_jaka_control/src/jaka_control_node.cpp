@@ -3,6 +3,10 @@
 using namespace std::chrono_literals;
 namespace fs = std::filesystem;
 
+// helper: degrees -> radians
+static inline double deg2rad(double d) { return d * M_PI / 180.0; }
+static inline double rad2deg(double d) { return d * 180.0 / M_PI; }
+
 JakaControlNode::JakaControlNode() 
     : Node("jaka_control_node")
 {
@@ -47,6 +51,8 @@ JakaControlNode::JakaControlNode()
     dual_arm_command_p_subscriber_ = create_subscription<sensor_msgs::msg::JointState>(
         "/dual_arm/command_servo_p", 10,
         std::bind(&JakaControlNode::command_p_callback, this, std::placeholders::_1));
+
+    robot_ = std::make_shared<JAKAZuRobot>();
     
     // 创建服务处理器（负责所有服务回调）
     service_handlers_ = std::make_unique<qyh_jaka_control::JakaServiceHandlers>(
@@ -196,7 +202,7 @@ JakaControlNode::JakaControlNode()
     left_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::left_timer_callback, this));
     right_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::right_timer_callback, this));
     command_p_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::command_p_timer_callback, this));
-    status_timer_ = create_wall_timer(100ms, std::bind(&JakaControlNode::publishStatus, this));
+    status_timer_ = create_wall_timer(200ms, std::bind(&JakaControlNode::publishStatus, this));
     // jog_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(jog_time_ * 1000)),std::bind(&JakaControlNode::jog_timer_callback, this));
     
     RCLCPP_INFO(get_logger(), "=== JAKA Unified Control Node Initialized ===");
@@ -230,6 +236,9 @@ void JakaControlNode::left_timer_callback()
     // edg_get_stat 单位mm和rad
     if (robot_->edg_get_stat(0, &cached_left_joints_, &cached_left_pose_) == ERR_SUCC) // 0 for left arm
     {
+        cached_left_pose_.rpy.rx = deg2rad(cached_left_pose_.rpy.rx);
+        cached_left_pose_.rpy.ry = deg2rad(cached_left_pose_.rpy.ry);
+        cached_left_pose_.rpy.rz = deg2rad(cached_left_pose_.rpy.rz);
         // joint vals
         msg_joint_state.position.assign(cached_left_joints_.jVal, cached_left_joints_.jVal + 7);
         tf2::Quaternion quaternion;
@@ -267,6 +276,11 @@ void JakaControlNode::left_timer_callback()
 
     left_joint_state_pub_->publish(msg_joint_state);
     left_tcp_pose_pub_->publish(msg_tcp_pose);
+    // 每隔1秒输出一次msg_tcp_pose内容，方便调试
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+        "Left TCP Pose: [x=%.2f, y=%.2f, z=%.2f, roll=%.2f, pitch=%.2f, yaw=%.2f]",
+        msg_tcp_pose.position[0], msg_tcp_pose.position[1], msg_tcp_pose.position[2],
+        rad2deg(cached_left_pose_.rpy.rx), rad2deg(cached_left_pose_.rpy.ry), rad2deg(cached_left_pose_.rpy.rz));
 
     int status[2] = {-3, -3};
     int errorcode[2] = {-1, -1};
@@ -300,6 +314,9 @@ void JakaControlNode::right_timer_callback()
     // be careful! cartesian read rpy in degrees, but requires radius to control servo p
     if (robot_->edg_get_stat(1, &cached_right_joints_, &cached_right_pose_) == ERR_SUCC) // 1 for right arm
     {
+        cached_right_pose_.rpy.rx = deg2rad(cached_right_pose_.rpy.rx);
+        cached_right_pose_.rpy.ry = deg2rad(cached_right_pose_.rpy.ry);
+        cached_right_pose_.rpy.rz = deg2rad(cached_right_pose_.rpy.rz);
         // joint vals
         msg_joint_state.position.assign(cached_right_joints_.jVal, cached_right_joints_.jVal + 7);
         tf2::Quaternion quaternion;
@@ -336,6 +353,11 @@ void JakaControlNode::right_timer_callback()
 
     right_joint_state_pub_->publish(msg_joint_state);
     right_tcp_pose_pub_->publish(msg_tcp_pose);
+
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+        "Right TCP Pose: [x=%.2f, y=%.2f, z=%.2f, roll=%.2f, pitch=%.2f, yaw=%.2f]",
+        msg_tcp_pose.position[0], msg_tcp_pose.position[1], msg_tcp_pose.position[2],
+        rad2deg(cached_right_pose_.rpy.rx), rad2deg(cached_right_pose_.rpy.ry), rad2deg(cached_right_pose_.rpy.rz));
 
     int status[2] = {-3, -3};
     int errorcode[2] = {-1, -1};
@@ -516,7 +538,7 @@ void JakaControlNode::publishStatus()
     // 🔧 实时查询机器人状态（而不是使用缓存的powered_/enabled_变量）
     if (connected_) {
         RobotState state;
-        if (robot_->get_robot_state(&state)) {
+        if (robot_->get_robot_state(&state) == ERR_SUCC) {
             robot_state_msg.powered_on = state.poweredOn;
             robot_state_msg.enabled = state.servoEnabled;
             robot_state_msg.in_estop = state.estoped;
