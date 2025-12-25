@@ -11,7 +11,7 @@
 #include "qyh_jaka_control_msgs/srv/get_payload.hpp"
 #include "qyh_jaka_control_msgs/srv/jog.hpp"
 #include "qyh_jaka_control_msgs/srv/jog_stop.hpp"
-#include "jaka_interface.hpp"
+#include "JAKAZuRobot.h"
 
 namespace qyh_jaka_control {
 

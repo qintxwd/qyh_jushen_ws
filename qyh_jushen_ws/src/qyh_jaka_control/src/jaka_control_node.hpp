@@ -1,11 +1,8 @@
-#include "jaka_interface.hpp"
-#include "velocity_servo_controller.hpp"
 #include "jaka_service_handlers.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
-#include <qyh_jaka_control_msgs/msg/jaka_servo_status.hpp>
 #include <qyh_jaka_control_msgs/msg/robot_state.hpp>
 #include <deque>
 #include <algorithm>

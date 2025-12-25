@@ -574,12 +574,12 @@ void JakaControlNode::publishStatus()
         robot_state_msg.in_error = (error[0] || error[1]);
         if (robot_state_msg.in_error) {
             ErrorCode error_code;
-            if (robot_->get_last_error(error_code)) {
+            if (robot_->get_last_error(&error_code) == ERR_SUCC) {
                 robot_state_msg.error_message = error_code.message;
-                if(error_code.code != 0) {
+                if (error_code.code != 0) {
                     RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 5000,
-                        "[Status] Robot in error state: Code %d, Message: %s",
-                        error_code.code, error_code.message.c_str());
+                        "[Status] Robot in error state: Code %ld, Message: %s",
+                        error_code.code, error_code.message);
                 }
             }
         }
@@ -677,19 +677,31 @@ bool JakaControlNode::loadAndSetPayloadFromConfig() {
         
         // 设置负载到机器人（centroid_x默认150mm，即夹爪质心在末端前方15cm）
         RCLCPP_INFO(get_logger(), "Setting payload to robot...");
-        
-        bool left_success = robot_->setPayload(0, left_mass, 150.0);
+
+        PayLoad left_payload;
+        left_payload.mass = left_mass;
+        left_payload.centroid.x = 150.0;
+        left_payload.centroid.y = 0.0;
+        left_payload.centroid.z = 0.0;
+        errno_t lret = robot_->robot_set_tool_payload(0, &left_payload);
+        bool left_success = (lret == ERR_SUCC);
         if (left_success) {
             RCLCPP_INFO(get_logger(), "  ✓ Left arm payload set: %.2f kg", left_mass);
         } else {
-            RCLCPP_ERROR(get_logger(), "  ✗ Failed to set left arm payload");
+            RCLCPP_ERROR(get_logger(), "  ✗ Failed to set left arm payload (err=%d)", lret);
         }
-        
-        bool right_success = robot_->setPayload(1, right_mass, 150.0);
+
+        PayLoad right_payload;
+        right_payload.mass = right_mass;
+        right_payload.centroid.x = 150.0;
+        right_payload.centroid.y = 0.0;
+        right_payload.centroid.z = 0.0;
+        errno_t rret = robot_->robot_set_tool_payload(1, &right_payload);
+        bool right_success = (rret == ERR_SUCC);
         if (right_success) {
             RCLCPP_INFO(get_logger(), "  ✓ Right arm payload set: %.2f kg", right_mass);
         } else {
-            RCLCPP_ERROR(get_logger(), "  ✗ Failed to set right arm payload");
+            RCLCPP_ERROR(get_logger(), "  ✗ Failed to set right arm payload (err=%d)", rret);
         }
         
         // 等待设置生效
@@ -722,6 +734,7 @@ bool JakaControlNode::startServoInternal() {
     RCLCPP_INFO(get_logger(), "[Servo] Step 2/5: Enabling servo for left arm (id=0)...");
     // 显式启用双臂伺服 (0:左臂, 1:右臂)
     bool success = true;
+    robot_->servo_move_use_joint_LPF(0.5); // 0=none, 0.5=low
     success &= robot_->servo_move_enable(true, 0);
     if (!success) {
         RCLCPP_ERROR(get_logger(), "[Servo] Failed to enable left arm servo!");
@@ -786,8 +799,7 @@ int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<JakaControlNode>();
-    // 在shared_ptr创建完成后初始化速度控制器
-    node->initVelocityControllers();
+    // initVelocityControllers removed (not present in this class)
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

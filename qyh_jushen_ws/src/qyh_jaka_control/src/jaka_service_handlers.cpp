@@ -1,5 +1,7 @@
-#include "qyh_jaka_control/jaka_service_handlers.hpp"
+#include "jaka_service_handlers.hpp"
 #include <cmath>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 namespace qyh_jaka_control {
 
@@ -159,8 +161,10 @@ void JakaServiceHandlers::handleMoveJ(const qyh_jaka_control_msgs::srv::MoveJ::R
     auto &is_block = req->is_block;
 
     if (joint_positions.size() != 14 && joint_positions.size() != 7) {
-        RCLCPP_ERROR(logger_, "Invalid joint positions size: %zu, expected 7 or 14", joint_positions.size());
-        return false;
+        res->success = false;
+        res->message = "Invalid joint positions size: expected 7 or 14";
+        RCLCPP_ERROR(node_->get_logger(), "Invalid joint positions size: %zu, expected 7 or 14", joint_positions.size());
+        return;
     }
 
     JointValue jpos[2];
@@ -184,10 +188,11 @@ void JakaServiceHandlers::handleMoveJ(const qyh_jaka_control_msgs::srv::MoveJ::R
     double vel[2] = {velocity, velocity};
     double acc[2] = {acceleration, acceleration};
     
-    errno_t ret = robot_->robot_run_multi_movj(robot_id, modes, is_block, jpos, vel, acc);    
-    res.success = (ret == ERR_SUCC);
-    if(!res.success) {
-        RCLCPP_ERROR(logger_, "MoveJ failed with error code: %d", ret);
+    errno_t ret = robot_->robot_run_multi_movj(robot_id, modes, is_block, jpos, vel, acc);
+    res->success = (ret == ERR_SUCC);
+    if(!res->success) {
+        RCLCPP_ERROR(node_->get_logger(), "MoveJ failed with error code: %d", ret);
+        res->message = "MoveJ failed";
     }
 }
 
@@ -210,9 +215,10 @@ void JakaServiceHandlers::handleMoveL(const qyh_jaka_control_msgs::srv::MoveL::R
     double acc[2] = {acceleration, acceleration};
 
     errno_t ret = robot_->robot_run_multi_movl(robot_id, modes, is_block, poses, vel, acc);
-    res.success = (ret == ERR_SUCC);
-    if(!res.success) {
-        RCLCPP_ERROR(logger_, "MoveL failed with error code: %d", ret);
+    res->success = (ret == ERR_SUCC);
+    if(!res->success) {
+        RCLCPP_ERROR(node_->get_logger(), "MoveL failed with error code: %d", ret);
+        res->message = "MoveL failed";
     }
 }
 
@@ -224,7 +230,8 @@ void JakaServiceHandlers::handleSetToolOffset(const qyh_jaka_control_msgs::srv::
     errno_t ret = robot_->robot_set_tool_offset(robot_id, jaka_offset);
     res->success = (ret == ERR_SUCC);
     if(!res->success) {
-        RCLCPP_ERROR(logger_, "SetToolOffset failed with error code: %d", ret);
+        RCLCPP_ERROR(node_->get_logger(), "SetToolOffset failed with error code: %d", ret);
+        res->message = "SetToolOffset failed";
     }
 }
 
@@ -239,10 +246,15 @@ void JakaServiceHandlers::handleSetPayload(const qyh_jaka_control_msgs::srv::Set
     payload.centroid.y = 0.0;
     payload.centroid.z = centroid_x;// 默认150mm (15cm向前)
     
-    RCLCPP_INFO(logger_, "Setting payload for robot %d: mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
+    RCLCPP_INFO(node_->get_logger(), "Setting payload for robot %d: mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
                 robot_id, mass, centroid_x, payload.centroid.y, payload.centroid.z);
-    
+
     errno_t ret = robot_->robot_set_tool_payload(robot_id, &payload);
+    res->success = (ret == ERR_SUCC);
+    if(!res->success) {
+        RCLCPP_ERROR(node_->get_logger(), "SetPayload failed with error code: %d", ret);
+        res->message = "SetPayload failed";
+    }
 }
 
 void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::GetPayload::Request::SharedPtr req, qyh_jaka_control_msgs::srv::GetPayload::Response::SharedPtr res) {
@@ -257,18 +269,22 @@ void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::Get
     //     res->centroid_z = centroid_z;
     // }
 
+    auto &robot_id = req->robot_id;
     PayLoad payload;
     errno_t ret = robot_->robot_get_tool_payload(&payload);
-    
+
     if (ret == ERR_SUCC) {
         res->mass = payload.mass;
         res->centroid_x = payload.centroid.x;
         res->centroid_y = payload.centroid.y;
         res->centroid_z = payload.centroid.z;
-        RCLCPP_INFO(logger_, "Got payload for robot %d: mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
+        RCLCPP_INFO(node_->get_logger(), "Got payload for robot %d: mass=%.2f kg, centroid=(%.1f, %.1f, %.1f) mm",
                     robot_id, res->mass, res->centroid_x, res->centroid_y, res->centroid_z);
-    }else{
-        RCLCPP_ERROR(logger_, "GetPayload failed with error code: %d", ret);
+        res->success = true;
+    } else {
+        RCLCPP_ERROR(node_->get_logger(), "GetPayload failed with error code: %d", ret);
+        res->success = false;
+        res->message = "GetPayload failed";
     }
 }
 

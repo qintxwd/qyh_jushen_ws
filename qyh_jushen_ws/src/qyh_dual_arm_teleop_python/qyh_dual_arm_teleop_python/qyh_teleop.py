@@ -24,7 +24,7 @@ class QyhTeleopNode(Node):
         self.left_joint_sub = self.create_subscription(JointState, '/left_arm/joint_states', self.left_joint_states_callback, 10)
 
         # clutch thresholds
-        self.grip_engage = 0.5
+        self.grip_engage = 0.6
         self.grip_release = 0.3
 
         # current values
@@ -57,8 +57,14 @@ class QyhTeleopNode(Node):
             if len(msg.position) >= 3:
                 self.cur_tcp_position = [msg.position[0], msg.position[1], msg.position[2]]
             if len(msg.position) >= 7:
-                rotation = R.from_quat([msg.position[4],msg.position[5],msg.position[6],msg.position[3]])                
+                rotation = R.from_quat([msg.position[4], msg.position[5], msg.position[6], msg.position[3]]) #msg.position[3~6]:w x y z
                 self.cur_tcp_rotm = rotation.as_matrix()
+                # log received tcp pose (quaternion in x,y,z,w order used with scipy Rotation)
+                try:
+                    q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
+                    self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}")
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -152,6 +158,11 @@ class QyhTeleopNode(Node):
         next_pose[3] = euler_angles_xyz_fixed[0]
         next_pose[4] = euler_angles_xyz_fixed[1]
         next_pose[5] = euler_angles_xyz_fixed[2]
+        # log the reference tcp and the computed next pose
+        try:
+            self.get_logger().info(f"[LEFT] leftarm_init_pos={self.leftarm_init_pos} next_pose={next_pose}")
+        except Exception:
+            pass
 
         self.publish_servo_p_command(next_pose)
 
