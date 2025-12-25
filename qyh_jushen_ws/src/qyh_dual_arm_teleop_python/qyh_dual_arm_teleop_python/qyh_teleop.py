@@ -18,7 +18,7 @@ class QyhTeleopNode(Node):
         self.left_servo_pub = self.create_publisher(JointState, '/teleop/left/servo_p', 10)
 
         # subscribers
-        self.left_pose_sub = self.create_subscription(PoseStamped, '/vr/left_controller/pose_raw', self.vr_left_pose_callback, 10)
+        self.left_pose_sub = self.create_subscription(PoseStamped, '/vr/left_controller/pose', self.vr_left_pose_callback, 10)
         self.left_joy_sub = self.create_subscription(Joy, '/vr/left_controller/joy', self.left_joy_callback, 10)
         self.left_tcp_sub = self.create_subscription(JointState, '/left_arm/tcp_pose', self.left_tcp_pose_callback, 10)
         self.left_joint_sub = self.create_subscription(JointState, '/left_arm/joint_states', self.left_joint_states_callback, 10)
@@ -59,12 +59,12 @@ class QyhTeleopNode(Node):
             if len(msg.position) >= 7:
                 rotation = R.from_quat([msg.position[4], msg.position[5], msg.position[6], msg.position[3]]) #msg.position[3~6]:w x y z
                 self.cur_tcp_rotm = rotation.as_matrix()
-                # log received tcp pose (quaternion in x,y,z,w order used with scipy Rotation)
-                try:
-                    q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
-                    self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}. roll/pitch/yaw(deg)=({math.degrees(rotation.as_euler('xyz')[0]):.1f}, {math.degrees(rotation.as_euler('xyz')[1]):.1f}, {math.degrees(rotation.as_euler('xyz')[2]):.1f})")
-                except Exception:
-                    pass
+                # # log received tcp pose (quaternion in x,y,z,w order used with scipy Rotation)
+                # try:
+                #     q_xyz_w = [msg.position[4], msg.position[5], msg.position[6], msg.position[3]]
+                #     self.get_logger().info(f"[LEFT] tcp_pose received position={self.cur_tcp_position} quat(x,y,z,w)={q_xyz_w}. roll/pitch/yaw(deg)=({math.degrees(rotation.as_euler('xyz')[0]):.1f}, {math.degrees(rotation.as_euler('xyz')[1]):.1f}, {math.degrees(rotation.as_euler('xyz')[2]):.1f})")
+                # except Exception:
+                #     pass
         except Exception:
             pass
 
@@ -73,10 +73,12 @@ class QyhTeleopNode(Node):
         clutch_pressed = grip_value > self.grip_engage
         clutch_released = grip_value < self.grip_release
         
-        # # log received vr pose
+        # # log received vr pose and
+        # msgRotation = R.from_quat([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
         # try:
         #     self.get_logger().info(f"[LEFT] vr_pose received position=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f}) "
         #                            f"orientation=({msg.pose.orientation.x:.3f}, {msg.pose.orientation.y:.3f}, {msg.pose.orientation.z:.3f}, {msg.pose.orientation.w:.3f}) "
+        #                            f"rpy=({math.degrees(msgRotation.as_euler('xyz')[0]):.1f}, {math.degrees(msgRotation.as_euler('xyz')[1]):.1f}, {math.degrees(msgRotation.as_euler('xyz')[2]):.1f}) "
         #                            f"grip={grip_value:.2f}")
         # except Exception:
         #     pass
@@ -142,7 +144,7 @@ class QyhTeleopNode(Node):
             scaled = R.from_rotvec(rotvec * scale_factor)
             return scaled.as_matrix()
 
-        rotation_scale_factor = 0.5
+        rotation_scale_factor = 1.0
         if rotation_scale_factor != 1.0:
             left_rotvr_diff = scale_rotation_matrix_axis_angle(left_rotvr_diff, rotation_scale_factor)
 
