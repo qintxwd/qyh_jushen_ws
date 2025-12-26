@@ -117,9 +117,15 @@ class QyhTeleopNode(Node):
             rpy=[0, -math.pi / 2, -math.pi / 2]
         )
         
-         # ---------- 增量模式缓存 ----------
-        self.T_vr_start_base_raw = None
-        self.T_tcp_start_forward = None
+        # Pico手柄 → 人体手势坐标系
+        self.T_vr_human_align = self.make_transform_matrix(
+            translation=[0, 0, 0],
+            rpy=[0, -math.radians(35), 0]
+        )
+        
+        # ---------- 增量模式缓存 ----------
+        self.T_vr_start_base = None          # 冻结时刻的 VR（base_link）
+        self.T_tcp_start_forward = None      # 冻结时刻的 TCP（forward_lt）
 
         self.get_logger().info('qyh_teleop node started')
     # ----------------------------------------------------
@@ -203,6 +209,9 @@ class QyhTeleopNode(Node):
             ]).as_euler('xyz')
         )
         
+        # Pico → 人体手势对齐（必须在冻结/增量前）
+        T_vr_now_base = T_vr_now_base @ self.T_vr_human_align
+        
         state = self.left_clutch_state
 
 
@@ -215,7 +224,7 @@ class QyhTeleopNode(Node):
 
         if state == 'ENGAGING':
             # 1️⃣ 冻结 VR 起点
-            self.T_vr_start_base_raw = T_vr_now_base
+            self.T_vr_start_base = T_vr_now_base
 
             # 2️⃣ 冻结机械臂起点（forward_lt）
             T_lt_start = self.make_transform_matrix(
@@ -236,7 +245,7 @@ class QyhTeleopNode(Node):
         
         if self.left_clutch_state != 'TRACKING':
             return
-        if self.T_vr_start_base_raw is None or self.T_tcp_start_forward is None:
+        if self.T_vr_start_base is None or self.T_tcp_start_forward is None:
             return
         # ---------- 增量计算 ----------
 
@@ -247,7 +256,7 @@ class QyhTeleopNode(Node):
 
         T_vr_start_left = self.invert_transform(
             self.T_base_base_left
-        ) @ self.T_vr_start_base_raw
+        ) @ self.T_vr_start_base
 
         # 对齐到 forward_lt
         T_vr_now_forward = T_vr_now_left @ self.invert_transform(self.T_lt_forward)
@@ -273,8 +282,8 @@ class QyhTeleopNode(Node):
             rotvec[2]
         ]
         self.get_logger().info(
-            f"Δpos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
-            f"Δrot(rad)=({out_pose[3]:.3f},{out_pose[4]:.3f},{out_pose[5]:.3f})"
+            f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
+            f"target_rot(rad)=({out_pose[3]:.3f},{out_pose[4]:.3f},{out_pose[5]:.3f})"
         )
         self.publish_servo_p_command(out_pose)
 
