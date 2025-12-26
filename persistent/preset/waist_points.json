@@ -1,0 +1,29 @@
+[
+  {
+    "id": "upright",
+    "name": "竖直",
+    "description": "腰部竖直站立",
+    "angle": 0.0,
+    "is_builtin": true,
+    "created_at": "2025-12-26T13:15:13.286633",
+    "updated_at": "2025-12-26T13:15:13.286662"
+  },
+  {
+    "id": "lean_15",
+    "name": "前倾15度",
+    "description": "腰部前倾15度",
+    "angle": 15.0,
+    "is_builtin": true,
+    "created_at": "2025-12-26T13:15:13.286683",
+    "updated_at": "2025-12-26T13:15:13.286688"
+  },
+  {
+    "id": "lean_30",
+    "name": "前倾30度",
+    "description": "腰部前倾30度",
+    "angle": 30.0,
+    "is_builtin": true,
+    "created_at": "2025-12-26T13:15:13.286697",
+    "updated_at": "2025-12-26T13:15:13.286700"
+  }
+]

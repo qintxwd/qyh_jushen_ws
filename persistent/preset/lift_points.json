@@ -1,0 +1,29 @@
+[
+  {
+    "id": "lowest",
+    "name": "最低",
+    "description": "升降最低位置",
+    "height": 0.0,
+    "is_builtin": true,
+    "created_at": "2025-12-26T13:15:13.265271",
+    "updated_at": "2025-12-26T13:15:13.265299"
+  },
+  {
+    "id": "middle",
+    "name": "中间",
+    "description": "升降中间位置",
+    "height": 250.0,
+    "is_builtin": true,
+    "created_at": "2025-12-26T13:15:13.265320",
+    "updated_at": "2025-12-26T13:15:13.265325"
+  },
+  {
+    "id": "highest",
+    "name": "最高",
+    "description": "升降最高位置",
+    "height": 500.0,
+    "is_builtin": true,
+    "created_at": "2025-12-26T13:15:13.265333",
+    "updated_at": "2025-12-26T13:15:13.265337"
+  }
+]

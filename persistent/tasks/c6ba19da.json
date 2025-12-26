@@ -12,26 +12,7 @@
     },
     "children": [
       {
-        "id": "node_1765353829495_6",
-        "type": "ArmMoveJ",
-        "params": {
-          "side": "both",
-          "velocity": 0.5,
-          "acceleration": 0.3,
-          "pose_name": "point_32b48024"
-        },
-        "children": []
-      },
-      {
-        "id": "node_1765353835647_8",
-        "type": "Wait",
-        "params": {
-          "duration": 5
-        },
-        "children": []
-      },
-      {
-        "id": "node_1765353832400_7",
+        "id": "node_1766727469129_5",
         "type": "ArmMoveJ",
         "params": {
           "side": "both",
@@ -42,15 +23,72 @@
         "children": []
       },
       {
+        "id": "node_1765353835647_8",
+        "type": "Wait",
+        "params": {
+          "duration": 3
+        },
+        "children": []
+      },
+      {
+        "id": "node_1766727470826_6",
+        "type": "ArmMoveJ",
+        "params": {
+          "side": "both",
+          "velocity": 0.5,
+          "acceleration": 0.3,
+          "pose_name": "point_32b48024"
+        },
+        "children": []
+      },
+      {
         "id": "node_1765353837792_9",
         "type": "Wait",
         "params": {
-          "duration": 5
+          "duration": 3
+        },
+        "children": []
+      },
+      {
+        "id": "node_1766727472879_7",
+        "type": "ArmMoveJ",
+        "params": {
+          "side": "both",
+          "velocity": 0.5,
+          "acceleration": 0.3,
+          "pose_name": "point_77b0d8c1"
+        },
+        "children": []
+      },
+      {
+        "id": "node_1766727454424_4",
+        "type": "Wait",
+        "params": {
+          "duration": 3
+        },
+        "children": []
+      },
+      {
+        "id": "node_1766727642560_1",
+        "type": "ArmMoveJ",
+        "params": {
+          "side": "both",
+          "velocity": 0.5,
+          "acceleration": 0.3,
+          "pose_name": "point_32b48024"
+        },
+        "children": []
+      },
+      {
+        "id": "node_1766727652972_2",
+        "type": "Wait",
+        "params": {
+          "duration": 1
         },
         "children": []
       }
     ]
   },
   "created_at": "2025-12-10T16:04:45.437928",
-  "updated_at": "2025-12-10T16:04:45.437928"
+  "updated_at": "2025-12-26T13:41:06.799134"
 }
