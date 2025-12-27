@@ -118,14 +118,20 @@ class QyhTeleopNode(Node):
         )
         
         # Pico手柄 → 人体手势坐标系
+        # self.T_vr_human_align = self.make_transform_matrix(
+        #     translation=[0, 0, 0],
+        #     rpy=[0, -math.radians(35), 0]
+        # )
         self.T_vr_human_align = self.make_transform_matrix(
             translation=[0, 0, 0],
-            rpy=[0, -math.radians(35), 0]
+            rpy=[0, 0, 0]
         )
         
         # ---------- 增量模式缓存 ----------
         self.T_vr_start_base = None          # 冻结时刻的 VR（base_link）
         self.T_tcp_start_forward = None      # 冻结时刻的 TCP（forward_lt）
+        
+        # self.last_rotation = None  # 使用Rotation对象跟踪，避免Euler多值性
 
         self.get_logger().info('qyh_teleop node started')
     # ----------------------------------------------------
@@ -155,6 +161,10 @@ class QyhTeleopNode(Node):
 
 
     def left_tcp_pose_callback(self, msg):
+        """
+        更新机械臂 TCP 当前位姿（绝对值），不进行任何积分或累积，
+        姿态使用旋转矩阵保持稳定。
+        """
         mm_to_m = 0.001
         try:
             if len(msg.position) >= 7:
@@ -169,25 +179,25 @@ class QyhTeleopNode(Node):
                     msg.position[6],
                     msg.position[3]
                 ]  # x y z w
+                self.get_logger().info(f"TCP position x,y,z = {self.cur_tcp_position}")
+                self.get_logger().info(f"TCP quaternion x,y,z,w = {q}")
+                # print rpy
+                self.get_logger().info(f"TCP rpy (deg) = {np.degrees(R.from_quat(q).as_euler('xyz'))}")
                 self.cur_tcp_rotm = R.from_quat(q).as_matrix()
                 self.tcp_ready = True
         except Exception:
             pass
-
+    # print 4x4 numpy matrix pose
+    def print_pose(self, T, label="Pose"):
+        pos = T[:3, 3]
+        rpy = R.from_matrix(T[:3, :3]).as_euler('xyz', degrees=True)
+        self.get_logger().info(f"{label} Position: x={pos[0]:.3f}, y={pos[1]:.3f}, z={pos[2]:.3f}")
+        self.get_logger().info(f"{label} Orientation (rpy in deg): roll={rpy[0]:.1f}, pitch={rpy[1]:.1f}, yaw={rpy[2]:.1f}")
+        
     def vr_left_pose_callback(self, msg):
         grip = self.left_grip_value_
         pressed = grip > self.grip_engage
         released = grip < self.grip_release
-        
-        # # log received vr pose and
-        # msgRotation = R.from_quat([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])
-        # try:
-        #     self.get_logger().info(f"[LEFT] vr_pose received position=({msg.pose.position.x:.3f}, {msg.pose.position.y:.3f}, {msg.pose.position.z:.3f}) "
-        #                            f"orientation=({msg.pose.orientation.x:.3f}, {msg.pose.orientation.y:.3f}, {msg.pose.orientation.z:.3f}, {msg.pose.orientation.w:.3f}) "
-        #                            f"rpy=({math.degrees(msgRotation.as_euler('xyz')[0]):.1f}, {math.degrees(msgRotation.as_euler('xyz')[1]):.1f}, {math.degrees(msgRotation.as_euler('xyz')[2]):.1f}) "
-        #                            f"grip={grip_value:.2f}")
-        # except Exception:
-        #     pass
                 
         if not self.tcp_ready:
             self.get_logger().warn("TCP pose not ready, ignore clutch")
@@ -195,22 +205,19 @@ class QyhTeleopNode(Node):
         
         # 1.将msg转换成T_vr_base[np.eye(4)]
          # VR 当前（base_link）
-        T_vr_now_base = self.make_transform_matrix(
-            translation=[
-                msg.pose.position.x,
-                msg.pose.position.y,
-                msg.pose.position.z
-            ],
-            rpy=R.from_quat([
-                msg.pose.orientation.x,
-                msg.pose.orientation.y,
-                msg.pose.orientation.z,
-                msg.pose.orientation.w
-            ]).as_euler('xyz')
-        )
-        
+        T_vr_now_base = np.eye(4)
+        T_vr_now_base[:3, :3] = R.from_quat([
+            msg.pose.orientation.x,
+            msg.pose.orientation.y,
+            msg.pose.orientation.z,
+            msg.pose.orientation.w
+        ]).as_matrix()
+        T_vr_now_base[:3, 3] = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
+        self.print_pose(T_vr_now_base, label="T_vr_now_base before alignment")
         # Pico → 人体手势对齐（必须在冻结/增量前）
-        T_vr_now_base = T_vr_now_base @ self.T_vr_human_align
+        T_vr_now_base = self.T_vr_human_align @ T_vr_now_base
+        # 打印一下
+        self.print_pose(T_vr_now_base, label="T_vr_now_base after alignment")
         
         state = self.left_clutch_state
 
@@ -226,15 +233,16 @@ class QyhTeleopNode(Node):
             # 1️⃣ 冻结 VR 起点
             self.T_vr_start_base = T_vr_now_base
 
+            
             # 2️⃣ 冻结机械臂起点（forward_lt）
-            T_lt_start = self.make_transform_matrix(
-                self.cur_tcp_position,
-                R.from_matrix(self.cur_tcp_rotm).as_euler('xyz')
-            )
+            T_lt_start = np.eye(4)
+            T_lt_start[:3, :3] = self.cur_tcp_rotm   # ✅ 直接用 rotm
+            T_lt_start[:3, 3]  = self.cur_tcp_position
+            self.print_pose(T_lt_start, label="T_lt_start")
             self.T_tcp_start_forward = T_lt_start @ self.T_lt_forward
-
+            self.print_pose(self.T_tcp_start_forward, label="T_tcp_start_forward")
             self.left_clutch_state = 'TRACKING'
-            self.get_logger().info('[LEFT] Tracking started')
+            self.get_logger().info('---[LEFT] Tracking started')
             return
 
         if state == 'TRACKING':
@@ -245,45 +253,67 @@ class QyhTeleopNode(Node):
         
         if self.left_clutch_state != 'TRACKING':
             return
+
+        # ---------- 增量计算 ----------
         if self.T_vr_start_base is None or self.T_tcp_start_forward is None:
             return
-        # ---------- 增量计算 ----------
-
+        
+        if np.isnan(T_vr_now_base).any(): self.get_logger().error("T_vr_now_base contains NaN")
+        if np.isnan(self.cur_tcp_rotm).any(): self.get_logger().error("cur_tcp_rotm contains NaN")
         # VR → base_link_left
         T_vr_now_left = self.invert_transform(
             self.T_base_base_left
         ) @ T_vr_now_base
+        
+        self.print_pose(T_vr_now_left, label="T_vr_now_left")
 
         T_vr_start_left = self.invert_transform(
             self.T_base_base_left
         ) @ self.T_vr_start_base
+        self.print_pose(T_vr_start_left, label="T_vr_start_left")
 
         # 对齐到 forward_lt
         T_vr_now_forward = T_vr_now_left @ self.invert_transform(self.T_lt_forward)
+        self.print_pose(T_vr_now_forward, label="T_vr_now_forward")
         T_vr_start_forward = T_vr_start_left @ self.invert_transform(self.T_lt_forward)
-
-        # ⭐ 增量
+        self.print_pose(T_vr_start_forward, label="T_vr_start_forward")
+        
+        # 相对变换 ΔT（唯一合法的“增量”）
         delta_T = T_vr_now_forward @ self.invert_transform(T_vr_start_forward)
+        self.print_pose(delta_T, label="delta_T")
+        rotvec = R.from_matrix(delta_T[:3,:3]).as_rotvec()
+        self.get_logger().info(f"delta rotvec: {rotvec}")
+        if np.isnan(delta_T).any() or np.isinf(delta_T).any():
+            self.get_logger().error("delta_T contains NaN or Inf!")
+
 
         # 应用到机械臂起点
         T_forward_target = delta_T @ self.T_tcp_start_forward
-        T_lt_target = T_forward_target @ self.T_lt_forward
-
-        # ---------- 输出 ----------
+        self.print_pose(T_forward_target, label="T_forward_target")
+        T_lt_target = T_forward_target @ self.invert_transform(self.T_lt_forward)
+        self.print_pose(T_lt_target, label="T_lt_target")
+        if np.isnan(T_lt_target).any() or np.isinf(T_lt_target).any():
+            self.get_logger().error("T_lt_target contains NaN/Inf")
+            return
+        # 1️⃣ 位置
         pos = T_lt_target[:3, 3]
-        rotvec = R.from_matrix(T_lt_target[:3, :3]).as_rotvec()
+        rpy = R.from_matrix(T_lt_target[:3, :3]).as_euler('xyz', degrees=False)
+
+        # 2️⃣ 输出（转换为 mm）
         meter_to_mm = 1000.0
         out_pose = [
             pos[0] *  meter_to_mm,
             pos[1] *  meter_to_mm,
             pos[2] *  meter_to_mm,
-            rotvec[0],
-            rotvec[1], 
-            rotvec[2]
+            rpy[0],
+            rpy[1], 
+            rpy[2]
         ]
         self.get_logger().info(
-            f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
-            f"target_rot(rad)=({out_pose[3]:.3f},{out_pose[4]:.3f},{out_pose[5]:.3f})"
+            f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) " # xyz
+            f"target_rot(rad)=({out_pose[3]:.3f},{out_pose[4]:.3f},{out_pose[5]:.3f})" # rpy
+            # rpy in deg
+            f" target_rot(deg)=({math.degrees(out_pose[3]):.1f},{math.degrees(out_pose[4]):.1f},{math.degrees(out_pose[5]):.1f})"
         )
         self.publish_servo_p_command(out_pose)
 
