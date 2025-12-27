@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+# 左乘是“换参考系（改坐标系的解释）”，右乘是“在当前坐标系里再做一次变换（定义子系 / 叠加运动）”。
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Joy
@@ -110,6 +110,7 @@ class QyhTeleopNode(Node):
             translation=[0, 0, 0],
             rpy=[0, 0, -math.pi / 6]
         )
+       
         
         # lt -> forward_lt
         self.T_lt_forward = self.make_transform_matrix(
@@ -118,20 +119,31 @@ class QyhTeleopNode(Node):
         )
         
         # Pico手柄 → 人体手势坐标系
-        # self.T_vr_human_align = self.make_transform_matrix(
-        #     translation=[0, 0, 0],
-        #     rpy=[0, -math.radians(35), 0]
-        # )
         self.T_vr_human_align = self.make_transform_matrix(
             translation=[0, 0, 0],
-            rpy=[0, 0, 0]
+            rpy=[0, -math.radians(35), 0]
         )
         
         # ---------- 增量模式缓存 ----------
         self.T_vr_start_base = None          # 冻结时刻的 VR（base_link）
+        self.T_vr_start_left = None          # 冻结时刻的 VR（base_link_left）
         self.T_tcp_start_forward = None      # 冻结时刻的 TCP（forward_lt）
         
         # self.last_rotation = None  # 使用Rotation对象跟踪，避免Euler多值性
+        
+        
+        # #测试代码：
+        P = self.make_transform_matrix(
+            translation=[1.0, 0, 0],
+            rpy=[0, 0, 0])
+        # # TempTest = self.invert_transform(
+        # #     self.T_base_base_left
+        # # ) @ P
+        # # self.print_pose(TempTest, label="TempTest")
+        T = P @ self.invert_transform(self.T_lt_forward)
+        self.print_pose(T, label="T")
+        P2 = T @ self.T_lt_forward
+        self.print_pose(P2, label="P2")
 
         self.get_logger().info('qyh_teleop node started')
     # ----------------------------------------------------
@@ -213,9 +225,11 @@ class QyhTeleopNode(Node):
             msg.pose.orientation.w
         ]).as_matrix()
         T_vr_now_base[:3, 3] = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
-        self.print_pose(T_vr_now_base, label="T_vr_now_base before alignment")
+        # self.print_pose(T_vr_now_base, label="T_vr_now_base before alignment")
         # Pico → 人体手势对齐（必须在冻结/增量前）
-        T_vr_now_base = self.T_vr_human_align @ T_vr_now_base
+        T_vr_now_base = T_vr_now_base @ self.invert_transform(self.T_vr_human_align)
+        # 左乘：用对齐变换修改参考系（T_new = T_align * T_old）
+        # 这里是把 Pico 手柄的原始 pose 解释为人体对齐坐标系下的 pose。
         # 打印一下
         self.print_pose(T_vr_now_base, label="T_vr_now_base after alignment")
         
@@ -232,13 +246,19 @@ class QyhTeleopNode(Node):
         if state == 'ENGAGING':
             # 1️⃣ 冻结 VR 起点
             self.T_vr_start_base = T_vr_now_base
-
-            
+            self.print_pose(self.T_vr_start_base, label="T_vr_start_base")
+            self.T_vr_start_left = self.invert_transform(
+                self.T_base_base_left
+            ) @ self.T_vr_start_base
+            self.print_pose(self.T_vr_start_left, label="T_vr_start_left")
             # 2️⃣ 冻结机械臂起点（forward_lt）
             T_lt_start = np.eye(4)
             T_lt_start[:3, :3] = self.cur_tcp_rotm   # ✅ 直接用 rotm
             T_lt_start[:3, 3]  = self.cur_tcp_position
             self.print_pose(T_lt_start, label="T_lt_start")
+            # 右乘：在 lt_start 的坐标系里应用 lt->forward（子系/叠加运动）
+            # T_tcp_start_forward = T_lt_start * T_lt_forward
+            # 这样得到的是 forward 相对于 base 的位姿（以 T_lt_start 为参考，右乘应用子框架变换）。
             self.T_tcp_start_forward = T_lt_start @ self.T_lt_forward
             self.print_pose(self.T_tcp_start_forward, label="T_tcp_start_forward")
             self.left_clutch_state = 'TRACKING'
@@ -261,24 +281,25 @@ class QyhTeleopNode(Node):
         if np.isnan(T_vr_now_base).any(): self.get_logger().error("T_vr_now_base contains NaN")
         if np.isnan(self.cur_tcp_rotm).any(): self.get_logger().error("cur_tcp_rotm contains NaN")
         # VR → base_link_left
+        # 左乘 inv(T_base_base_left)：将在 base_link 表示的 pose 转换到 base_link_left 的参考系
+        # T_vr_now_left = inv(T_base_base_left) * T_vr_now_base
         T_vr_now_left = self.invert_transform(
             self.T_base_base_left
         ) @ T_vr_now_base
         
         self.print_pose(T_vr_now_left, label="T_vr_now_left")
 
-        T_vr_start_left = self.invert_transform(
-            self.T_base_base_left
-        ) @ self.T_vr_start_base
-        self.print_pose(T_vr_start_left, label="T_vr_start_left")
-
         # 对齐到 forward_lt
+        # 右乘 inv(T_lt_forward)：将 vr 在 left 的位姿表达为 forward 坐标系下的位姿
+        # （T_lt_forward 是 lt->forward，因此其逆是 forward->lt，在右侧应用可将坐标表达到 forward）
         T_vr_now_forward = T_vr_now_left @ self.invert_transform(self.T_lt_forward)
         self.print_pose(T_vr_now_forward, label="T_vr_now_forward")
-        T_vr_start_forward = T_vr_start_left @ self.invert_transform(self.T_lt_forward)
+        # 同上，针对冻结时刻的起点
+        T_vr_start_forward = self.T_vr_start_left @ self.invert_transform(self.T_lt_forward)
         self.print_pose(T_vr_start_forward, label="T_vr_start_forward")
         
         # 相对变换 ΔT（唯一合法的“增量”）
+        # delta = now * inv(start) —— 通过在左侧乘以 now 并右侧乘以 inv(start) 得到从 start 到 now 的变换
         delta_T = T_vr_now_forward @ self.invert_transform(T_vr_start_forward)
         self.print_pose(delta_T, label="delta_T")
         rotvec = R.from_matrix(delta_T[:3,:3]).as_rotvec()
@@ -288,8 +309,10 @@ class QyhTeleopNode(Node):
 
 
         # 应用到机械臂起点
+        # 左乘 delta_T：在 world/forward 参考系中应用该增量到起始 forward 位姿
         T_forward_target = delta_T @ self.T_tcp_start_forward
         self.print_pose(T_forward_target, label="T_forward_target")
+        # 将 forward 目标转换回 lt 坐标系（右乘 inv(T_lt_forward)）
         T_lt_target = T_forward_target @ self.invert_transform(self.T_lt_forward)
         self.print_pose(T_lt_target, label="T_lt_target")
         if np.isnan(T_lt_target).any() or np.isinf(T_lt_target).any():
@@ -323,7 +346,7 @@ class QyhTeleopNode(Node):
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.position = pose
-        self.left_servo_pub.publish(msg)
+        # self.left_servo_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)
