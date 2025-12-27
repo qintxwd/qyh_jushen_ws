@@ -714,11 +714,11 @@ void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::Sha
 
     //收到的后4各值是四元数，转换为rpy
     tf2::Quaternion q_left;
-    q_left.setX(msg->position[4]);
-    q_left.setY(msg->position[5]);
-    q_left.setZ(msg->position[6]);
-    q_left.setW(msg->position[3]);
-    tf2::Matrix3x3 m_left(q_left);
+    // msg layout: [x_mm, y_mm, z_mm, qx, qy, qz, qw]
+    q_left.setX(msg->position[3]);
+    q_left.setY(msg->position[4]);
+    q_left.setZ(msg->position[5]);
+    q_left.setW(msg->position[6]);
     // Convert received quaternion to Eigen rotation matrix and choose closest rpy
     Eigen::Quaterniond eq_left(q_left.w(), q_left.x(), q_left.y(), q_left.z());
     Eigen::Matrix3d rot_left = eq_left.toRotationMatrix();
@@ -745,7 +745,7 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] Robot not ready to receive commands");
         return;
     }
-    if (msg->position.size() != 6) {
+    if (msg->position.size() != 7) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[RightServoP] invalid position size: %zu", msg->position.size());
         return;
     }
@@ -755,11 +755,11 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
 
     //收到的后4各值是四元数，转换为rpy
     tf2::Quaternion q_right;
-    q_right.setX(msg->position[4]);
-    q_right.setY(msg->position[5]);
-    q_right.setZ(msg->position[6]);
-    q_right.setW(msg->position[3]);
-    tf2::Matrix3x3 m_right(q_right);
+    // msg layout: [x_mm, y_mm, z_mm, qx, qy, qz, qw]
+    q_right.setX(msg->position[3]);
+    q_right.setY(msg->position[4]);
+    q_right.setZ(msg->position[5]);
+    q_right.setW(msg->position[6]);
     // Convert received quaternion to Eigen rotation matrix and choose closest rpy
     Eigen::Quaterniond eq_right(q_right.w(), q_right.x(), q_right.y(), q_right.z());
     Eigen::Matrix3d rot_right = eq_right.toRotationMatrix();

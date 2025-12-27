@@ -320,7 +320,9 @@ class QyhTeleopNode(Node):
             return
         # 1️⃣ 位置与方向（方向改为四元数 xyzw）
         pos = T_lt_target[:3, 3]
-        quat = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # returns [x, y, z, w]
+        # quat = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # returns [x, y, z, w]
+        rpy = R.from_matrix(T_lt_target[:3, :3]).as_euler('xyz', degrees=False)
+        # self.get_logger().info(f"target_rpy (deg)=({np.degrees(rpy[0]):.1f}, {np.degrees(rpy[1]):.1f}, {np.degrees(rpy[2]):.1f})")
 
         # 2️⃣ 输出（位置转为 mm，方向为四元数 x,y,z,w）
         meter_to_mm = 1000.0
@@ -328,17 +330,16 @@ class QyhTeleopNode(Node):
             pos[0] * meter_to_mm,
             pos[1] * meter_to_mm,
             pos[2] * meter_to_mm,
-            quat[0],
-            quat[1],
-            quat[2],
-            quat[3],
+            rpy[0],
+            rpy[1],
+            rpy[2]
         ]
         self.get_logger().info(
             f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
-            f"target_quat=(x={out_pose[3]:.4f},y={out_pose[4]:.4f},z={out_pose[5]:.4f},w={out_pose[6]:.4f})"
+            f"target_rpy(deg)=({np.degrees(out_pose[3]):.1f},{np.degrees(out_pose[4]):.1f},{np.degrees(out_pose[5]):.1f})"
         )
         # publish position(mm) + quaternion(x,y,z,w)
-        self.publish_servo_p_command(out_pose)
+        # self.publish_servo_p_command(out_pose)
 
     # ----------------------------------------------------
 
