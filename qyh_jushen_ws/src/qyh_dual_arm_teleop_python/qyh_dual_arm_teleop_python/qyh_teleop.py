@@ -318,35 +318,38 @@ class QyhTeleopNode(Node):
         if np.isnan(T_lt_target).any() or np.isinf(T_lt_target).any():
             self.get_logger().error("T_lt_target contains NaN/Inf")
             return
-        # 1️⃣ 位置
+        # 1️⃣ 位置与方向（方向改为四元数 xyzw）
         pos = T_lt_target[:3, 3]
-        rpy = R.from_matrix(T_lt_target[:3, :3]).as_euler('xyz', degrees=False)
+        quat = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # returns [x, y, z, w]
 
-        # 2️⃣ 输出（转换为 mm）
+        # 2️⃣ 输出（位置转为 mm，方向为四元数 x,y,z,w）
         meter_to_mm = 1000.0
         out_pose = [
-            pos[0] *  meter_to_mm,
-            pos[1] *  meter_to_mm,
-            pos[2] *  meter_to_mm,
-            rpy[0],
-            rpy[1], 
-            rpy[2]
+            pos[0] * meter_to_mm,
+            pos[1] * meter_to_mm,
+            pos[2] * meter_to_mm,
+            quat[0],
+            quat[1],
+            quat[2],
+            quat[3],
         ]
         self.get_logger().info(
-            f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) " # xyz
-            f"target_rot(rad)=({out_pose[3]:.3f},{out_pose[4]:.3f},{out_pose[5]:.3f})" # rpy
-            # rpy in deg
-            f" target_rot(deg)=({math.degrees(out_pose[3]):.1f},{math.degrees(out_pose[4]):.1f},{math.degrees(out_pose[5]):.1f})"
+            f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
+            f"target_quat=(x={out_pose[3]:.4f},y={out_pose[4]:.4f},z={out_pose[5]:.4f},w={out_pose[6]:.4f})"
         )
+        # publish position(mm) + quaternion(x,y,z,w)
         self.publish_servo_p_command(out_pose)
 
     # ----------------------------------------------------
 
     def publish_servo_p_command(self, pose):
+        # Expecting pose: [x_mm, y_mm, z_mm, qx, qy, qz, qw]
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.position = pose
-        # self.left_servo_pub.publish(msg)
+        # NOTE: the robot/servo-side must interpret JointState.position accordingly
+        # (first 3 entries are position in mm, next 4 are quaternion x,y,z,w).
+        self.left_servo_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)
