@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# 左乘是“换参考系（改坐标系的解释）”，右乘是“在当前坐标系里再做一次变换（定义子系 / 叠加运动）”。
+# 左乘是"换参考系（改坐标系的解释）"，右乘是"在当前坐标系里再做一次变换（定义子系 / 叠加运动）"。
+#
+# 坐标系说明：
+# - VR控制器：在vr_origin下，坐标系x前y左z上 (ROS标准坐标系)
+# - 机械臂base_link ≈ vr_origin (双臂中心)
+# - 机械臂base_link_left = base_link * R_yaw(-30°) (左臂安装点)
+# - 机械臂末端lt：在base_link_left下，坐标系x左y上z前
+#
+# RPY直接增量计算逻辑：
+# 1. 冻结时记录VR和机械臂的RPY起点
+# 2. 运行时计算VR当前RPY（经坐标系对齐和30°偏移变换）
+# 3. delta_rpy = vr_current_rpy - vr_start_rpy
+# 4. target_rpy = arm_start_rpy + delta_rpy
+# 5. 发送格式：xyz(mm) + rpy(degree)
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Joy
@@ -118,35 +131,77 @@ class QyhTeleopNode(Node):
             translation=[0, 0, 0],
             rpy=[0, -math.pi / 2, -math.pi / 2]
         )
-        
-        # Pico手柄 → 人体手势坐标系
+
+        # VR控制器坐标系(x前y左z上) -> 机械臂末端坐标系(x左y上z前)的对齐变换
+        # VR: x前 y左 z上 -> 机械臂: x左 y上 z前
+        self.R_vr_to_arm = np.array([
+            [ 0,  0,  1],  # VR x前 -> 机械臂 z前
+            [ 1,  0,  0],  # VR y左 -> 机械臂 x左
+            [ 0,  1,  0]   # VR z上 -> 机械臂 y上
+        ])
+
+        # Pico手柄 → 人体手势坐标系 (暂时注释，避免双重变换)
         self.T_vr_human_align = self.make_transform_matrix(
             translation=[0, 0, 0],
             rpy=[0, -math.radians(35), 0]
         )
         
         # ---------- 增量模式缓存 ----------
-        self.T_vr_start_base = None          # 冻结时刻的 VR（base_link）
-        self.T_vr_start_left = None          # 冻结时刻的 VR（base_link_left）
-        self.T_tcp_start_forward = None      # 冻结时刻的 TCP（forward_lt）
-        
-        # self.last_rotation = None  # 使用Rotation对象跟踪，避免Euler多值性
-        
-        
-        # #测试代码：
-        P = self.make_transform_matrix(
-            translation=[1.0, 0, 0],
-            rpy=[0, 0, 0])
-        # # TempTest = self.invert_transform(
-        # #     self.T_base_base_left
-        # # ) @ P
-        # # self.print_pose(TempTest, label="TempTest")
-        T = P @ self.invert_transform(self.T_lt_forward)
-        self.print_pose(T, label="T")
-        P2 = T @ self.T_lt_forward
-        self.print_pose(P2, label="P2")
+        self.vr_start_rpy = None             # 冻结时刻的 VR RPY（弧度）
+        self.arm_start_rpy = None            # 冻结时刻的 机械臂 RPY（弧度）
+        self.arm_start_position = None       # 冻结时刻的 机械臂位置（米）
 
         self.get_logger().info('qyh_teleop node started')
+
+        # 调试：验证坐标系变换和RPY增量计算
+        self.debug_coordinate_transforms()
+        self.debug_rpy_incremental()
+    # ----------------------------------------------------
+    # 坐标系调试
+    # ----------------------------------------------------
+
+    def debug_coordinate_transforms(self):
+        """调试坐标系变换关系"""
+        self.get_logger().info("=== Coordinate System Debug ===")
+
+        # VR控制器默认姿态 (x前y左z上)
+        T_vr_default = np.eye(4)
+        self.print_pose(T_vr_default, "VR控制器默认姿态(x前y左z上)")
+
+        # 应用VR到机械臂坐标系对齐
+        T_vr_aligned = np.eye(4)
+        T_vr_aligned[:3, :3] = self.R_vr_to_arm
+        self.print_pose(T_vr_aligned, "VR对齐到机械臂坐标系(x左y上z前)")
+
+        # base_link_left的30度偏移
+        self.print_pose(self.T_base_base_left, "base_link -> base_link_left (-30°yaw)")
+
+        self.get_logger().info("=== Debug Complete ===")
+
+    def debug_rpy_incremental(self):
+        """调试RPY增量计算逻辑"""
+        self.get_logger().info("=== RPY Incremental Debug ===")
+
+        # 模拟VR控制器旋转30°
+        vr_start_rpy = np.array([0, 0, 0])  # 起始：无旋转
+        vr_current_rpy = np.array([np.radians(30), 0, 0])  # 当前：roll +30°
+
+        # 机械臂起始姿态
+        arm_start_rpy = np.array([np.radians(10), np.radians(20), np.radians(30)])  # 10°, 20°, 30°
+
+        # 计算增量
+        delta_rpy = vr_current_rpy - vr_start_rpy
+        target_rpy = arm_start_rpy + delta_rpy
+
+        self.get_logger().info("RPY增量计算示例:")
+        self.get_logger().info(f"VR start RPY: {np.degrees(vr_start_rpy)}°")
+        self.get_logger().info(f"VR current RPY: {np.degrees(vr_current_rpy)}°")
+        self.get_logger().info(f"Delta RPY: {np.degrees(delta_rpy)}°")
+        self.get_logger().info(f"Arm start RPY: {np.degrees(arm_start_rpy)}°")
+        self.get_logger().info(f"Target RPY: {np.degrees(target_rpy)}°")
+
+        self.get_logger().info("=== RPY Debug Complete ===")
+
     # ----------------------------------------------------
     # 基础矩阵工具
     # ----------------------------------------------------
@@ -273,13 +328,10 @@ class QyhTeleopNode(Node):
             msg.pose.orientation.w
         ]).as_matrix()
         T_vr_now_base[:3, 3] = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
-        # self.print_pose(T_vr_now_base, label="T_vr_now_base before alignment")
         # Pico → 人体手势对齐（必须在冻结/增量前）
         T_vr_now_base = T_vr_now_base @ self.invert_transform(self.T_vr_human_align)
-        # 左乘：用对齐变换修改参考系（T_new = T_align * T_old）
-        # 这里是把 Pico 手柄的原始 pose 解释为人体对齐坐标系下的 pose。
-        # 打印一下
-        self.print_pose(T_vr_now_base, label="T_vr_now_base after alignment")
+        # 打印VR位姿
+        self.print_pose(T_vr_now_base, label="T_vr_now_base")
         
         state = self.left_clutch_state
 
@@ -292,26 +344,39 @@ class QyhTeleopNode(Node):
             return
 
         if state == 'ENGAGING':
-            # 1️⃣ 冻结 VR 起点
-            self.T_vr_start_base = T_vr_now_base
-            self.print_pose(self.T_vr_start_base, label="T_vr_start_base")
-            self.T_vr_start_left = self.invert_transform(
-                self.T_base_base_left
-            ) @ self.T_vr_start_base
-            self.print_pose(self.T_vr_start_left, label="T_vr_start_left")
-            # 2️⃣ 冻结机械臂起点（forward_lt）
-            T_lt_start = np.eye(4)
-            T_lt_start[:3, :3] = self.cur_tcp_rotm   # ✅ 直接用 rotm
-            T_lt_start[:3, 3]  = self.cur_tcp_position
-            self.print_pose(T_lt_start, label="T_lt_start")
-            # 右乘：在 lt_start 的坐标系里应用 lt->forward（子系/叠加运动）
-            # T_tcp_start_forward = T_lt_start * T_lt_forward
-            # 这样得到的是 forward 相对于 base 的位姿（以 T_lt_start 为参考，右乘应用子框架变换）。
-            self.T_tcp_start_forward = T_lt_start @ self.T_lt_forward
-            self.print_pose(self.T_tcp_start_forward, label="T_tcp_start_forward")
-            self.left_clutch_state = 'TRACKING'
-            self.get_logger().info('---[LEFT] Tracking started')
-            return
+            try:
+                # 1️⃣ 冻结 VR 起点RPY（考虑坐标系对齐）
+                # VR控制器 -> 机械臂坐标系对齐 + base_link到base_link_left的30°偏移
+                T_vr_aligned = np.eye(4)
+                T_vr_aligned[:3, :3] = self.R_vr_to_arm @ T_vr_now_base[:3, :3] @ self.R_vr_to_arm.T
+                T_vr_aligned[:3, 3] = T_vr_now_base[:3, 3]
+
+                # 应用base_link到base_link_left的变换
+                T_vr_in_left = self.invert_transform(self.T_base_base_left) @ T_vr_aligned
+
+                self.vr_start_rpy = R.from_matrix(T_vr_in_left[:3, :3]).as_euler('xyz', degrees=False)
+                self.get_logger().info(f"VR start RPY (in base_link_left): "
+                                     f"roll={np.degrees(self.vr_start_rpy[0]):.1f}°, "
+                                     f"pitch={np.degrees(self.vr_start_rpy[1]):.1f}°, "
+                                     f"yaw={np.degrees(self.vr_start_rpy[2]):.1f}°")
+
+                # 2️⃣ 冻结机械臂起点RPY和位置
+                self.arm_start_rpy = np.array(self.cur_tcp_rpy).copy()  # 弧度
+                self.arm_start_position = np.array(self.cur_tcp_position).copy()  # 米
+                self.get_logger().info(f"Arm start RPY: roll={np.degrees(self.arm_start_rpy[0]):.1f}°, "
+                                     f"pitch={np.degrees(self.arm_start_rpy[1]):.1f}°, "
+                                     f"yaw={np.degrees(self.arm_start_rpy[2]):.1f}°")
+                self.get_logger().info(f"Arm start position: x={self.arm_start_position[0]:.3f}, "
+                                     f"y={self.arm_start_position[1]:.3f}, z={self.arm_start_position[2]:.3f} m")
+
+                self.left_clutch_state = 'TRACKING'
+                self.get_logger().info('---[LEFT] Tracking started')
+                return
+
+            except Exception as e:
+                self.get_logger().error(f"Error in ENGAGING state: {e}")
+                self.left_clutch_state = 'IDLE'
+                return
 
         if state == 'TRACKING':
             if released:
@@ -322,91 +387,95 @@ class QyhTeleopNode(Node):
         if self.left_clutch_state != 'TRACKING':
             return
 
-        # ---------- 增量计算 ----------
-        if self.T_vr_start_base is None or self.T_tcp_start_forward is None:
+        # ---------- RPY直接增量计算 ----------
+        if self.vr_start_rpy is None or self.arm_start_rpy is None or self.arm_start_position is None:
             return
-        
-        if np.isnan(T_vr_now_base).any(): self.get_logger().error("T_vr_now_base contains NaN")
-        if np.isnan(self.cur_tcp_rotm).any(): self.get_logger().error("cur_tcp_rotm contains NaN")
-        # VR → base_link_left
-        # 左乘 inv(T_base_base_left)：将在 base_link 表示的 pose 转换到 base_link_left 的参考系
-        # T_vr_now_left = inv(T_base_base_left) * T_vr_now_base
-        T_vr_now_left = self.invert_transform(
-            self.T_base_base_left
-        ) @ T_vr_now_base
-        
-        self.print_pose(T_vr_now_left, label="T_vr_now_left")
 
-        # 对齐到 forward_lt
-        # 右乘 inv(T_lt_forward)：将 vr 在 left 的位姿表达为 forward 坐标系下的位姿
-        # （T_lt_forward 是 lt->forward，因此其逆是 forward->lt，在右侧应用可将坐标表达到 forward）
-        T_vr_now_forward = T_vr_now_left @ self.invert_transform(self.T_lt_forward)
-        self.print_pose(T_vr_now_forward, label="T_vr_now_forward")
-        # 同上，针对冻结时刻的起点
-        T_vr_start_forward = self.T_vr_start_left @ self.invert_transform(self.T_lt_forward)
-        self.print_pose(T_vr_start_forward, label="T_vr_start_forward")
-        
-        # 相对变换 ΔT（唯一合法的“增量”）
-        # delta = now * inv(start) —— 通过在左侧乘以 now 并右侧乘以 inv(start) 得到从 start 到 now 的变换
-        delta_T = T_vr_now_forward @ self.invert_transform(T_vr_start_forward)
-        self.print_pose(delta_T, label="delta_T")
-        rotvec = R.from_matrix(delta_T[:3,:3]).as_rotvec()
-        self.get_logger().info(f"delta rotvec: {rotvec}")
-        if np.isnan(delta_T).any() or np.isinf(delta_T).any():
-            self.get_logger().error("delta_T contains NaN or Inf!")
-
-
-        # 应用到机械臂起点
-        # 左乘 delta_T：在 world/forward 参考系中应用该增量到起始 forward 位姿
-        T_forward_target = delta_T @ self.T_tcp_start_forward
-        self.print_pose(T_forward_target, label="T_forward_target")
-        # 将 forward 目标转换回 lt 坐标系（右乘 inv(T_lt_forward)）
-        T_lt_target = T_forward_target @ self.invert_transform(self.T_lt_forward)
-        self.print_pose(T_lt_target, label="T_lt_target")
-        if np.isnan(T_lt_target).any() or np.isinf(T_lt_target).any():
-            self.get_logger().error("T_lt_target contains NaN/Inf")
+        # 检查数据有效性
+        if np.isnan(T_vr_now_base).any():
+            self.get_logger().error("T_vr_now_base contains NaN")
             return
-        # 1️⃣ 位置与方向（方向改为四元数 xyzw）
-        pos = T_lt_target[:3, 3]
-        # quat = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # returns [x, y, z, w]
-        # Choose Euler triple closest to current TCP pose to avoid large jumps
+
         try:
-            prev_rpy = np.array(self.cur_tcp_rpy)
-        except Exception:
-            prev_rpy = np.zeros(3)
-        rpy = self.choose_rpy_closest(prev_rpy, T_lt_target[:3, :3])
-        # self.get_logger().info(f"target_rpy (deg)=({np.degrees(rpy[0]):.1f}, {np.degrees(rpy[1]):.1f}, {np.degrees(rpy[2]):.1f})")
+            # 1️⃣ 计算当前VR的RPY（应用坐标系对齐和30°偏移）
+            T_vr_current_aligned = np.eye(4)
+            T_vr_current_aligned[:3, :3] = self.R_vr_to_arm @ T_vr_now_base[:3, :3] @ self.R_vr_to_arm.T
+            T_vr_current_aligned[:3, 3] = T_vr_now_base[:3, 3]
 
-        # 2️⃣ 输出（位置转为 mm，方向为四元数 x,y,z,w）
-        meter_to_mm = 1000.0
-        quat_target = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # [x,y,z,w]
-        out_pose = [
-            pos[0] * meter_to_mm,
-            pos[1] * meter_to_mm,
-            pos[2] * meter_to_mm,
-            quat_target[0],
-            quat_target[1],
-            quat_target[2],
-            quat_target[3]
-        ]
-        # Log quaternion and chosen RPY (degrees) for clarity
-        self.get_logger().info(
-            f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
-            f"target_quat(x,y,z,w)=({out_pose[3]:.4f},{out_pose[4]:.4f},{out_pose[5]:.4f},{out_pose[6]:.4f}) "
-            f"chosen_rpy(deg)=({np.degrees(rpy[0]):.1f},{np.degrees(rpy[1]):.1f},{np.degrees(rpy[2]):.1f})"
-        )
-        # publish position(mm) + quaternion(x,y,z,w)
-        self.publish_servo_p_command(out_pose)
+            T_vr_current_in_left = self.invert_transform(self.T_base_base_left) @ T_vr_current_aligned
+            # vr_current_rpy = R.from_matrix(T_vr_current_in_left[:3, :3]).as_euler('xyz', degrees=False)
+            vr_current_rpy = self.choose_rpy_closest(
+                self.vr_start_rpy,
+                T_vr_current_in_left[:3, :3]
+            )
+
+            # 2️⃣ 计算VR的RPY增量
+            delta_rpy = vr_current_rpy - self.vr_start_rpy
+
+            # 3️⃣ 计算目标RPY：机械臂起点RPY + VR的RPY增量
+            target_rpy = self.arm_start_rpy + delta_rpy
+
+            # 4️⃣ 计算目标位置：机械臂起点位置 + VR的位置增量
+            # VR控制器位置变化直接映射到机械臂位置变化
+            vr_current_pos = T_vr_now_base[:3, 3]  # 当前VR位置
+            vr_start_pos = np.array([0, 0, 0])     # VR起点位置（相对增量，从0开始）
+
+            # 计算VR的位置增量（在VR坐标系下）
+            delta_pos_vr = vr_current_pos - vr_start_pos
+
+            # 应用VR到机械臂坐标系的对齐变换到位置增量
+            delta_pos_aligned = self.R_vr_to_arm @ delta_pos_vr
+
+            # 计算目标位置
+            target_position = self.arm_start_position + delta_pos_aligned
+
+            # 5️⃣ 发送目标位姿：xyz(mm) + rpy(degree)
+            out_pose = [
+                target_position[0],      # x (m)
+                target_position[1],      # y (m)
+                target_position[2],      # z (m)
+                np.degrees(target_rpy[0]),  # roll (degree)
+                np.degrees(target_rpy[1]),  # pitch (degree)
+                np.degrees(target_rpy[2])   # yaw (degree)
+            ]
+
+            self.get_logger().info(
+                f"VR current RPY: roll={np.degrees(vr_current_rpy[0]):.1f}°, "
+                f"pitch={np.degrees(vr_current_rpy[1]):.1f}°, yaw={np.degrees(vr_current_rpy[2]):.1f}°")
+            self.get_logger().info(
+                f"Delta RPY: roll={np.degrees(delta_rpy[0]):.1f}°, "
+                f"pitch={np.degrees(delta_rpy[1]):.1f}°, yaw={np.degrees(delta_rpy[2]):.1f}°")
+            self.get_logger().info(
+                f"Target: pos(m)=({out_pose[0]:.3f},{out_pose[1]:.3f},{out_pose[2]:.3f}) "
+                f"rpy(deg)=({out_pose[3]:.1f},{out_pose[4]:.1f},{out_pose[5]:.1f})")
+
+            self.publish_servo_p_command(out_pose)
+
+        except Exception as e:
+            self.get_logger().error(f"Error in RPY incremental calculation: {e}")
+            return
 
     # ----------------------------------------------------
 
     def publish_servo_p_command(self, pose):
-        # Expecting pose: [x_mm, y_mm, z_mm, qx, qy, qz, qw]
+        # Expecting pose: [x_m, y_m, z_m, roll_deg, pitch_deg, yaw_deg]
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.position = pose
-        # NOTE: the robot/servo-side must interpret JointState.position accordingly
-        # (first 3 entries are position in mm, next 4 are quaternion x,y,z,w).
+
+        # 发送格式：xyz(mm) + rpy(degree)
+        msg.position = [
+            pose[0] * 1000.0,  # x: m -> mm
+            pose[1] * 1000.0,  # y: m -> mm
+            pose[2] * 1000.0,  # z: m -> mm
+            pose[3],           # roll (degree)
+            pose[4],           # pitch (degree)
+            pose[5]            # yaw (degree)
+        ]
+
+        self.get_logger().info(f"Sending to arm: x={msg.position[0]:.1f}mm, y={msg.position[1]:.1f}mm, "
+                             f"z={msg.position[2]:.1f}mm, r={msg.position[3]:.1f}°, "
+                             f"p={msg.position[4]:.1f}°, y={msg.position[5]:.1f}°")
+
         self.left_servo_pub.publish(msg)
 
 def main(args=None):
