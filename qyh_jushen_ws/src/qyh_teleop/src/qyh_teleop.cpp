@@ -10,6 +10,15 @@
 #include <cmath>
 #include <vector>
 
+// 规范
+// 如果你已经知道了一个简单的变换关系，T_a_to_b_ 应该是 b 坐标系在 a 坐标系下的表示
+// T_a_to_b_: Transform from 'a' coordinate frame to 'b' frame
+// 点变换: P_b = T_a_to_b_ * P_a
+// 点逆变换: P_a = invert_transform(T_a_to_b_) * P_b
+// 位姿变换: T_b = T_a_to_b_ * T_a
+// 位姿逆变换: T_a = invert_transform(T_a_to_b_) * T_b
+
+
 class QyhTeleopNode : public rclcpp::Node {
 public:
     QyhTeleopNode() : Node("qyh_teleop") {
@@ -38,13 +47,13 @@ public:
         tcp_ready_ = false;
 
         // Transforms
-        T_base_base_left_ = make_transform_matrix({0, 0, 0}, {0, 0, -M_PI / 6});
-        T_lt_forward_ = make_transform_matrix({0, 0, 0}, {0, -M_PI / 2, -M_PI / 2});
-        T_vr_human_align_ = make_transform_matrix({0, 0, 0}, {0, -M_PI * 35 / 180, 0});  // -35 degrees
+        T_base_link_to_base_link_left_ = make_transform_matrix({0, 0, 0}, {0, 0, -M_PI / 6});
+        T_forward_lt_to_lt_ = make_transform_matrix({0, 0, 0}, {0, -M_PI / 2, -M_PI / 2});
+        T_vr_to_human_align_ = make_transform_matrix({0, 0, 0}, {0, -M_PI * 35 / 180, 0});  // -35 degrees
 
         // Incremental mode cache
-        T_vr_start_base_.reset();
-        T_tcp_start_forward_.reset();
+        T_vr_start_in_base_link_.reset();
+        T_tcp_start_in_forward_.reset();
 
         last_rotation_.reset();
 
@@ -74,13 +83,13 @@ private:
     bool tcp_ready_;
 
     // Transforms
-    Eigen::Affine3d T_base_base_left_;
-    Eigen::Affine3d T_lt_forward_;
-    Eigen::Affine3d T_vr_human_align_;
+    Eigen::Affine3d T_base_link_to_base_link_left_;
+    Eigen::Affine3d T_forward_lt_to_lt_;
+    Eigen::Affine3d T_vr_to_human_align_;
 
     // Incremental mode cache
-    std::optional<Eigen::Affine3d> T_vr_start_base_;
-    std::optional<Eigen::Affine3d> T_tcp_start_forward_;
+    std::optional<Eigen::Affine3d> T_vr_start_in_base_link_;
+    std::optional<Eigen::Affine3d> T_tcp_start_in_forward_;
 
     std::optional<Eigen::Quaterniond> last_rotation_;
 
@@ -143,16 +152,16 @@ private:
             return;
         }
 
-        // Convert msg to T_vr_now_base
-        Eigen::Affine3d T_vr_now_base = Eigen::Affine3d::Identity();
+        // Convert msg to T_vr_now_in_base_link
+        Eigen::Affine3d T_vr_now_in_base_link = Eigen::Affine3d::Identity();
         Eigen::Quaterniond q(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z);
-        T_vr_now_base.linear() = q.toRotationMatrix();
-        T_vr_now_base.translation() = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
-        print_pose(T_vr_now_base, "T_vr_now_base before alignment");
+        T_vr_now_in_base_link.linear() = q.toRotationMatrix();
+        T_vr_now_in_base_link.translation() = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+        print_pose(T_vr_now_in_base_link, "T_vr_now_in_base_link before alignment");
 
         // Pico → Human gesture alignment
-        T_vr_now_base = T_vr_human_align_ * T_vr_now_base;
-        print_pose(T_vr_now_base, "T_vr_now_base after alignment");
+        T_vr_now_in_base_link =  T_vr_now_in_base_link * T_vr_to_human_align_;
+        print_pose(T_vr_now_in_base_link, "T_vr_now_in_base_link after alignment");
 
         std::string state = left_clutch_state_;
 
@@ -166,15 +175,15 @@ private:
 
         if (state == "ENGAGING") {
             // Freeze VR start
-            T_vr_start_base_ = T_vr_now_base;
+            T_vr_start_in_base_link_ = T_vr_now_in_base_link;
 
             // Freeze arm start (forward_lt)
-            Eigen::Affine3d T_lt_start = Eigen::Affine3d::Identity();
-            T_lt_start.linear() = cur_tcp_rotm_;
-            T_lt_start.translation() = Eigen::Vector3d(cur_tcp_position_[0], cur_tcp_position_[1], cur_tcp_position_[2]);
-            print_pose(T_lt_start, "T_lt_start");
-            T_tcp_start_forward_ = T_lt_start * T_lt_forward_;
-            print_pose(*T_tcp_start_forward_, "T_tcp_start_forward");
+            Eigen::Affine3d T_left_tcp_start_in_base_link = Eigen::Affine3d::Identity();
+            T_left_tcp_start_in_base_link.linear() = cur_tcp_rotm_;
+            T_left_tcp_start_in_base_link.translation() = Eigen::Vector3d(cur_tcp_position_[0], cur_tcp_position_[1], cur_tcp_position_[2]);
+            print_pose(T_left_tcp_start_in_base_link, "T_left_tcp_start_in_base_link");
+            T_tcp_start_in_forward_ = T_left_tcp_start_in_base_link * T_forward_lt_to_lt_;
+            print_pose(*T_tcp_start_in_forward_, "T_tcp_start_in_forward");
             left_clutch_state_ = "TRACKING";
             RCLCPP_INFO(this->get_logger(), "---[LEFT] Tracking started");
 
@@ -183,7 +192,7 @@ private:
             Eigen::Quaterniond q(cur_tcp_rotm_);
             q.normalize();
             last_rotation_ = q;
-            print_pose(*T_tcp_start_forward_, "T_tcp_start_forward for last_rotation");
+            print_pose(*T_tcp_start_in_forward_, "T_tcp_start_in_forward for last_rotation");
 
             return;
         }
@@ -196,30 +205,30 @@ private:
             }
         }
 
-        if (left_clutch_state_ != "TRACKING" || !T_vr_start_base_ || !T_tcp_start_forward_) {
+        if (left_clutch_state_ != "TRACKING" || !T_vr_start_in_base_link_ || !T_tcp_start_in_forward_) {
             return;
         }
 
         // Incremental calculation
-        Eigen::Affine3d T_vr_now_left = invert_transform(T_base_base_left_) * T_vr_now_base;
-        print_pose(T_vr_now_left, "T_vr_now_left");
+        Eigen::Affine3d T_vr_now_in_base_left = invert_transform(T_base_link_to_base_link_left_) * T_vr_now_in_base_link;
+        print_pose(T_vr_now_in_base_left, "T_vr_now_in_base_left");
 
-        Eigen::Affine3d T_vr_start_left = invert_transform(T_base_base_left_) * *T_vr_start_base_;
-        print_pose(T_vr_start_left, "T_vr_start_left");
+        Eigen::Affine3d T_vr_start_in_base_left = invert_transform(T_base_link_to_base_link_left_) * *T_vr_start_in_base_link_;
+        print_pose(T_vr_start_in_base_left, "T_vr_start_in_base_left");
 
-        Eigen::Affine3d T_vr_now_forward = T_vr_now_left * invert_transform(T_lt_forward_);
-        print_pose(T_vr_now_forward, "T_vr_now_forward");
-        Eigen::Affine3d T_vr_start_forward = T_vr_start_left * invert_transform(T_lt_forward_);
-        print_pose(T_vr_start_forward, "T_vr_start_forward");
+        Eigen::Affine3d T_vr_now_in_forward_frame = T_vr_now_in_base_left * invert_transform(T_forward_lt_to_lt_);
+        print_pose(T_vr_now_in_forward_frame, "T_vr_now_in_forward_frame");
+        Eigen::Affine3d T_vr_start_in_forward_frame = T_vr_start_in_base_left * invert_transform(T_forward_lt_to_lt_);
+        print_pose(T_vr_start_in_forward_frame, "T_vr_start_in_forward_frame");
 
         // Delta calculation
-        Eigen::Affine3d delta_T = T_vr_now_forward * invert_transform(T_vr_start_forward);
-        print_pose(delta_T, "delta_T");
-        Eigen::Vector3d delta_pos = delta_T.translation();
+        Eigen::Affine3d delta_transform = T_vr_now_in_forward_frame * invert_transform(T_vr_start_in_forward_frame);
+        print_pose(delta_transform, "delta_transform");
+        Eigen::Vector3d delta_pos = delta_transform.translation();
         // Eigen::AngleAxisd delta_aa(delta_T.linear());
         // if (delta_aa.angle() > M_PI) delta_aa.angle() -= 2 * M_PI;        
         // Eigen::Vector3d delta_rotvec = delta_aa.angle() * delta_aa.axis();
-        Eigen::AngleAxisd delta_aa(delta_T.linear());
+        Eigen::AngleAxisd delta_aa(delta_transform.linear());
         Eigen::Vector3d delta_rotvec = delta_aa.angle() * delta_aa.axis();
         RCLCPP_INFO(this->get_logger(), "delta_pos=%.3f,%.3f,%.3f, delta_rot(rad)=%.3f,%.3f,%.3f, norm=%.3f",
                     delta_pos.x(), delta_pos.y(), delta_pos.z(), delta_rotvec.x(), delta_rotvec.y(), delta_rotvec.z(), delta_rotvec.norm());
@@ -229,42 +238,30 @@ private:
         }
 
         // Apply to arm start
-        Eigen::Affine3d T_forward_target = delta_T * *T_tcp_start_forward_;
-        print_pose(T_forward_target, "T_forward_target");
-        Eigen::Affine3d T_lt_target = T_forward_target * invert_transform(T_lt_forward_);
-        print_pose(T_lt_target, "T_lt_target");
+        Eigen::Affine3d T_tcp_forward_target_in_base_link = delta_transform * *T_tcp_start_in_forward_;
+        print_pose(T_tcp_forward_target_in_base_link, "T_tcp_forward_target_in_base_link");
+        Eigen::Affine3d T_left_tcp_target_in_base_link = T_tcp_forward_target_in_base_link * invert_transform(T_forward_lt_to_lt_);
+        print_pose(T_left_tcp_target_in_base_link, "T_left_tcp_target_in_base_link");
 
         // Position
-        Eigen::Vector3d pos = T_lt_target.translation();
+        Eigen::Vector3d pos = T_left_tcp_target_in_base_link.translation();
 
         // Rotation
-        Eigen::Matrix3d R_target = T_lt_target.linear();
+        Eigen::Matrix3d R_target = T_left_tcp_target_in_base_link.linear();
         Eigen::Quaterniond Q_target(R_target);
 
         if (!last_rotation_) {
-            Eigen::Vector3d rpy = R_target.eulerAngles(0, 1, 2);
             last_rotation_ = Q_target;
         } else {
-            Eigen::Quaterniond last_q = *last_rotation_;
-            Eigen::AngleAxisd last_aa(last_q);
-            Eigen::Vector3d last_rotvec = last_aa.angle() * last_aa.axis();
-            Eigen::Vector3d new_rotvec = last_rotvec + delta_rotvec;
-            Eigen::Quaterniond new_q;
-            double angle = new_rotvec.norm();
-            if (angle < 1e-8) {
-                new_q = Eigen::Quaterniond::Identity();
-            } else {
-                new_q = Eigen::Quaterniond(Eigen::AngleAxisd(angle, new_rotvec / angle));
-            }
-            // Eigen::Vector3d rpy = new_q.toRotationMatrix().eulerAngles(0, 1, 2);
+            // Correct rotation update: compose the incremental rotation (from delta_T)
+            // with the last rotation. Adding rotation vectors is incorrect except for
+            // very small angles — use quaternion multiplication instead.
+            Eigen::Quaterniond q_delta(delta_transform.linear());
+            q_delta.normalize();
+            Eigen::Quaterniond new_q = q_delta * (*last_rotation_);
+            new_q.normalize();
             last_rotation_ = new_q;
-
-            // if (delta_rotvec.norm() < 0.01) {
-            //     rpy = cur_tcp_rotm_.eulerAngles(0, 1, 2);
-            //     RCLCPP_INFO(this->get_logger(), "Delta small, using current TCP rpy for test");
-            // }
         }
-
         Eigen::Vector3d rpy = (*last_rotation_).toRotationMatrix().eulerAngles(0, 1, 2);
 
         // Output (convert to mm)
