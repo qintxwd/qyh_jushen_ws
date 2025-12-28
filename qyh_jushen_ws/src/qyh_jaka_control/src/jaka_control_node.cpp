@@ -645,9 +645,9 @@ void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::Sha
     left_command_servo_p_val.tran.x = msg->position[0];
     left_command_servo_p_val.tran.y = msg->position[1];
     left_command_servo_p_val.tran.z = msg->position[2];
-    left_command_servo_p_val.rpy.rx = new_rpy_left[3];
-    left_command_servo_p_val.rpy.ry = new_rpy_left[4];
-    left_command_servo_p_val.rpy.rz = new_rpy_left[5];
+    left_command_servo_p_val.rpy.rx = msg->position[3];
+    left_command_servo_p_val.rpy.ry = msg->position[4];
+    left_command_servo_p_val.rpy.rz = msg->position[5];
     
     left_last_command_p_time_ = this->now();
     left_input_state_ = ServoInputState::ACTIVE;
@@ -672,9 +672,9 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
     right_command_servo_p_val.tran.x = msg->position[0];
     right_command_servo_p_val.tran.y = msg->position[1];
     right_command_servo_p_val.tran.z = msg->position[2];
-    right_command_servo_p_val.rpy.rx = new_rpy_right[3];
-    right_command_servo_p_val.rpy.ry = new_rpy_right[4];
-    right_command_servo_p_val.rpy.rz = new_rpy_right[5];
+    right_command_servo_p_val.rpy.rx = msg->position[3];
+    right_command_servo_p_val.rpy.ry = msg->position[4];
+    right_command_servo_p_val.rpy.rz = msg->position[5];
 
     right_last_command_p_time_ = this->now();
     right_input_state_ = ServoInputState::ACTIVE;
