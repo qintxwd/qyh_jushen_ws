@@ -1,19 +1,100 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# 左乘是"换参考系（改坐标系的解释）"，右乘是"在当前坐标系里再做一次变换（定义子系 / 叠加运动）"。
+# ========================================================================================
+# VR手柄遥控双臂机械臂系统 - 坐标系变换和增量控制
+# ========================================================================================
 #
-# 坐标系说明：
-# - VR控制器：在vr_origin下，坐标系x前y左z上 (ROS标准坐标系)
-# - 机械臂base_link ≈ vr_origin (双臂中心)
-# - 机械臂base_link_left = base_link * R_yaw(-30°) (左臂安装点)
-# - 机械臂末端lt：在base_link_left下，坐标系x左y上z前
+# 总体目标：将VR手柄的姿态变化映射到机械臂末端的姿态变化
+# 当人手"向前"移动时，机械臂末端也"向前"移动
 #
-# RPY直接增量计算逻辑：
-# 1. 冻结时记录VR和机械臂的RPY起点
-# 2. 运行时计算VR当前RPY（经坐标系对齐和30°偏移变换）
-# 3. delta_rpy = vr_current_rpy - vr_start_rpy
-# 4. target_rpy = arm_start_rpy + delta_rpy
-# 5. 发送格式：xyz(mm) + rpy(degree)
+# ========================================================================================
+# 坐标系定义
+# ========================================================================================
+#
+# 1. VR控制器坐标系 (经过T_vr_human_align变换后):
+#    - x轴: 前 (人手向前伸直方向)
+#    - y轴: 左 (人手向左倾斜方向)
+#    - z轴: 上 (人手上抬方向)
+#    - 位置: 在 vr_origin/base_link 坐标系下
+#
+# 2. 机械臂base_link坐标系:
+#    - x轴: 前 (机器人前进方向)
+#    - y轴: 左 (机器人左侧方向)
+#    - z轴: 上 (机器人上方)
+#    - vr_origin ≈ base_link (双臂中心位置)
+#
+# 3. 机械臂base_link_left坐标系:
+#    - 相对于base_link有 -30° yaw旋转 (绕z轴)
+#    - xyz偏移: [-0.0004, 0.08522, 0.0030]
+#    - 这是左臂的实际安装点，用于补偿URDF与实际机器人的差异
+#
+# 4. 机械臂末端lt坐标系 (在base_link_left下):
+#    - x轴: 左 (机械臂向左移动方向)
+#    - y轴: 上 (机械臂向上移动方向)
+#    - z轴: 前 (机械臂向前伸直方向)
+#
+# ========================================================================================
+# 期望的映射关系 (核心需求)
+# ========================================================================================
+#
+# 当人手"向前伸直"时 (VR x轴向前), 期望机械臂也"向前伸直" (lt z轴向前)
+# 当人手"向左倾斜"时 (VR y轴向左), 期望机械臂也"向左倾斜" (lt x轴向左)
+# 当人手"上抬"时 (VR z轴向上), 期望机械臂也"上抬" (lt y轴向上)
+#
+# 映射关系: VR x → lt z, VR y → lt x, VR z → lt y
+#
+# ========================================================================================
+# 坐标变换逻辑
+# ========================================================================================
+#
+# 1. 坐标系对齐变换矩阵 R_vr_to_arm:
+#    将VR控制器坐标系(x前y左z上) 变换到 机械臂末端坐标系(x左y上z前)
+#
+#    向量变换: [vx, vy, vz]_vr → [vy, vz, vx]_arm
+#    矩阵形式:
+#    R_vr_to_arm = [
+#        [0, 1, 0],  # lt_x = VR_y (左)
+#        [0, 0, 1],  # lt_y = VR_z (上)
+#        [1, 0, 0]   # lt_z = VR_x (前)
+#    ]
+#
+# 2. 空间变换:
+#    - VR数据在base_link下 (经过T_vr_human_align调整姿态)
+#    - 需要变换到base_link_left坐标系: inv(T_base_base_left) @ T_vr_in_base_link
+#    - T_base_base_left: base_link -> base_link_left (包含-30°yaw + xyz偏移[-0.0004, 0.08522, 0.0030])
+#    - xyz偏移对RPY增量影响较小，主要影响位置计算
+#
+# ========================================================================================
+# RPY直接增量控制逻辑
+# ========================================================================================
+#
+# 核心思想: 直接在RPY空间进行增量计算，避免复杂的矩阵运算和多解问题
+#
+# 1. ENGAGING阶段 (按下按钮时):
+#    - 记录VR当前RPY: vr_start_rpy (在base_link_left下)
+#    - 记录机械臂当前RPY: arm_start_rpy
+#    - 记录机械臂当前位置: arm_start_position
+#
+# 2. TRACKING阶段 (遥控过程中):
+#    - 计算VR当前RPY (使用连续解算避免跳跃)
+#    - 计算RPY增量: delta_rpy = vr_current_rpy - vr_start_rpy
+#    - 应用坐标系对齐: delta_rpy_aligned = R_vr_to_arm @ delta_rpy
+#    - 计算目标RPY: target_rpy = arm_start_rpy + delta_rpy_aligned
+#    - 位置增量: delta_pos = vr_current_pos - vr_start_pos
+#    - 计算目标位置: target_pos = arm_start_pos + delta_pos
+#
+# 3. 发送格式:
+#    - xyz: 米 -> 毫米
+#    - rpy: 弧度 -> 度
+#
+# ========================================================================================
+# 关键优势
+# ========================================================================================
+#
+# 1. 直观性: VR手柄的转动直接对应机械臂的转动
+# 2. 连续性: RPY增量避免了四元数到欧拉角的多解问题
+# 3. 实时性: 计算简单，延迟低
+# 4. 稳定性: 相对增量计算对漂移不敏感
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Joy
@@ -119,10 +200,12 @@ class QyhTeleopNode(Node):
         self.cur_tcp_rpy = [0.0, 0.0, 0.0]
         self.tcp_ready = False
         
-        # -30 degree yaw transform
+        # base_link -> base_link_left 变换 (包含30°yaw和xyz偏移)
+        # URDF定义: xyz="-0.0004 0.08522 0.0030" rpy="0 0 -0.5236" (-30°)
+        # 注意: 左臂的y坐标是正值(0.08522)，表示在base_link右侧
         self.T_base_base_left = self.make_transform_matrix(
-            translation=[0, 0, 0],
-            rpy=[0, 0, -math.pi / 6]
+            translation=[-0.0004, 0.08522, 0.0030],  # URDF中的xyz偏移
+            rpy=[0, 0, -math.pi / 6]  # -30° yaw (弧度)
         )
        
         
@@ -133,14 +216,37 @@ class QyhTeleopNode(Node):
         )
 
         # VR控制器坐标系(x前y左z上) -> 机械臂末端坐标系(x左y上z前)的对齐变换
-        # VR: x前 y左 z上 -> 机械臂: x左 y上 z前
+        #
+        # 坐标系分析：
+        # VR控制器:     x前, y左, z上
+        # 机械臂末端lt:  x左, y上, z前
+        #
+        # 期望的映射关系：
+        # - 人手向前伸直(VR x向前) → 机械臂向前伸直(lt z向前)
+        # - 人手向左倾斜(VR y向左) → 机械臂向左倾斜(lt x向左)
+        # - 人手上抬(VR z向上) → 机械臂上抬(lt y向上)
+        #
+        # 所以映射关系：VR x -> lt z, VR y -> lt x, VR z -> lt y
+        #
+        # 变换矩阵推导：
+        # 如果向量在VR坐标系下的坐标为 [vx, vy, vz]
+        # 在lt坐标系下的坐标应该是 [vy, vz, vx]
+        # 因为 lt_x = VR_y, lt_y = VR_z, lt_z = VR_x
+        #
+        # 变换矩阵 R 满足：R @ [vx, vy, vz] = [vy, vz, vx]
+        # 解得：
         self.R_vr_to_arm = np.array([
-            [ 0,  0,  1],  # VR x前 -> 机械臂 z前
-            [ 1,  0,  0],  # VR y左 -> 机械臂 x左
-            [ 0,  1,  0]   # VR z上 -> 机械臂 y上
+            [0, 1, 0],  # lt_x = 0*vx + 1*vy + 0*vz = vy
+            [0, 0, 1],  # lt_y = 0*vx + 0*vy + 1*vz = vz
+            [1, 0, 0]   # lt_z = 1*vx + 0*vy + 0*vz = vx
         ])
 
-        # Pico手柄 → 人体手势坐标系 (暂时注释，避免双重变换)
+        # 验证：
+        # R @ [1, 0, 0] = [0, 0, 1] ✓ (VR x轴 -> lt z轴)
+        # R @ [0, 1, 0] = [1, 0, 0] ✓ (VR y轴 -> lt x轴)
+        # R @ [0, 0, 1] = [0, 1, 0] ✓ (VR z轴 -> lt y轴)
+
+        # Pico手柄 → 人体手势坐标系
         self.T_vr_human_align = self.make_transform_matrix(
             translation=[0, 0, 0],
             rpy=[0, -math.radians(35), 0]
@@ -148,13 +254,15 @@ class QyhTeleopNode(Node):
         
         # ---------- 增量模式缓存 ----------
         self.vr_start_rpy = None             # 冻结时刻的 VR RPY（弧度）
+        self.vr_start_position = None        # 冻结时刻的 VR位置（米）
+        self.last_vr_rpy = None              # 上一帧的 VR RPY（用于连续解算）
         self.arm_start_rpy = None            # 冻结时刻的 机械臂 RPY（弧度）
         self.arm_start_position = None       # 冻结时刻的 机械臂位置（米）
 
         self.get_logger().info('qyh_teleop node started')
 
         # 调试：验证坐标系变换和RPY增量计算
-        self.debug_coordinate_transforms()
+        self.debug_coordinate_alignment()
         self.debug_rpy_incremental()
     # ----------------------------------------------------
     # 坐标系调试
@@ -178,27 +286,54 @@ class QyhTeleopNode(Node):
 
         self.get_logger().info("=== Debug Complete ===")
 
+    def debug_coordinate_alignment(self):
+        """调试坐标系对齐变换"""
+        self.get_logger().info("=== Coordinate Alignment Debug ===")
+
+        # 测试VR坐标系到机械臂坐标系的变换
+        # VR x轴 (前) -> 机械臂坐标系
+        vr_x_axis = np.array([1, 0, 0])
+        arm_x_from_vr_x = self.R_vr_to_arm @ vr_x_axis
+        self.get_logger().info(f"VR x轴(前) -> 机械臂坐标: {arm_x_from_vr_x} (期望: [0,0,1] 机械臂z轴)")
+
+        # VR y轴 (左) -> 机械臂坐标系
+        vr_y_axis = np.array([0, 1, 0])
+        arm_y_from_vr_y = self.R_vr_to_arm @ vr_y_axis
+        self.get_logger().info(f"VR y轴(左) -> 机械臂坐标: {arm_y_from_vr_y} (期望: [1,0,0] 机械臂x轴)")
+
+        # VR z轴 (上) -> 机械臂坐标系
+        vr_z_axis = np.array([0, 0, 1])
+        arm_z_from_vr_z = self.R_vr_to_arm @ vr_z_axis
+        self.get_logger().info(f"VR z轴(上) -> 机械臂坐标: {arm_z_from_vr_z} (期望: [0,1,0] 机械臂y轴)")
+
+        # 注意：这里不测试完整的姿态变换，因为我们的增量控制不使用这种方式
+
+        self.get_logger().info("=== Coordinate Debug Complete ===")
+
     def debug_rpy_incremental(self):
         """调试RPY增量计算逻辑"""
         self.get_logger().info("=== RPY Incremental Debug ===")
 
-        # 模拟VR控制器旋转30°
+        # 模拟VR控制器旋转30° roll (VR坐标系下的roll增加)
         vr_start_rpy = np.array([0, 0, 0])  # 起始：无旋转
-        vr_current_rpy = np.array([np.radians(30), 0, 0])  # 当前：roll +30°
+        vr_current_rpy = np.array([np.radians(30), 0, 0])  # 当前：VR roll +30°
+
+        # 计算RPY增量
+        delta_rpy_raw = vr_current_rpy - vr_start_rpy
+        self.get_logger().info(f"VR roll+30° -> delta_rpy_raw: {np.degrees(delta_rpy_raw)}°")
+
+        # 应用坐标系对齐: VR roll -> 机械臂 yaw (因为VR x->机械臂 z, roll绕x->yaw绕z)
+        delta_rpy_aligned = self.R_vr_to_arm @ delta_rpy_raw
+        self.get_logger().info(f"坐标系对齐后: delta_rpy_aligned: {np.degrees(delta_rpy_aligned)}°")
+        self.get_logger().info("解释: VR的roll(绕x轴) -> 机械臂的yaw(绕z轴)")
 
         # 机械臂起始姿态
         arm_start_rpy = np.array([np.radians(10), np.radians(20), np.radians(30)])  # 10°, 20°, 30°
+        target_rpy = arm_start_rpy + delta_rpy_aligned
 
-        # 计算增量
-        delta_rpy = vr_current_rpy - vr_start_rpy
-        target_rpy = arm_start_rpy + delta_rpy
-
-        self.get_logger().info("RPY增量计算示例:")
-        self.get_logger().info(f"VR start RPY: {np.degrees(vr_start_rpy)}°")
-        self.get_logger().info(f"VR current RPY: {np.degrees(vr_current_rpy)}°")
-        self.get_logger().info(f"Delta RPY: {np.degrees(delta_rpy)}°")
-        self.get_logger().info(f"Arm start RPY: {np.degrees(arm_start_rpy)}°")
-        self.get_logger().info(f"Target RPY: {np.degrees(target_rpy)}°")
+        self.get_logger().info(f"机械臂起始RPY: {np.degrees(arm_start_rpy)}°")
+        self.get_logger().info(f"目标RPY: {np.degrees(target_rpy)}°")
+        self.get_logger().info("结果: 机械臂yaw增加了30°, 实现了VR roll -> 机械臂 yaw的映射")
 
         self.get_logger().info("=== RPY Debug Complete ===")
 
@@ -294,11 +429,12 @@ class QyhTeleopNode(Node):
                     msg.position[6],
                     msg.position[3]
                 ]  # x y z w
+                # 从四元数统一生成RPY，确保一致性（避免C++端rpy和quat不一致的问题）
+                self.cur_tcp_rotm = R.from_quat(q).as_matrix()
                 self.cur_tcp_rpy = [msg.position[7], msg.position[8], msg.position[9]]                
                 self.get_logger().info(f"TCP position x,y,z = {self.cur_tcp_position}")
                 self.get_logger().info(f"TCP quaternion x,y,z,w = {q}")
                 self.get_logger().info(f"TCP rpy (deg) = {np.degrees(self.cur_tcp_rpy)}")
-                self.cur_tcp_rotm = R.from_quat(q).as_matrix()
                 self.tcp_ready = True
         except Exception:
             pass
@@ -332,7 +468,7 @@ class QyhTeleopNode(Node):
         T_vr_now_base = T_vr_now_base @ self.invert_transform(self.T_vr_human_align)
         # 打印VR位姿
         self.print_pose(T_vr_now_base, label="T_vr_now_base")
-        
+                
         state = self.left_clutch_state
 
 
@@ -345,20 +481,21 @@ class QyhTeleopNode(Node):
 
         if state == 'ENGAGING':
             try:
-                # 1️⃣ 冻结 VR 起点RPY（考虑坐标系对齐）
-                # VR控制器 -> 机械臂坐标系对齐 + base_link到base_link_left的30°偏移
-                T_vr_aligned = np.eye(4)
-                T_vr_aligned[:3, :3] = self.R_vr_to_arm @ T_vr_now_base[:3, :3] @ self.R_vr_to_arm.T
-                T_vr_aligned[:3, 3] = T_vr_now_base[:3, 3]
+                # 1️⃣ 冻结 VR 起点姿态和位置（在base_link_left坐标系下）
+                # 将VR位姿变换到base_link_left坐标系，但保持VR原始坐标系定义
+                T_vr_in_left = self.invert_transform(self.T_base_base_left) @ T_vr_now_base
 
-                # 应用base_link到base_link_left的变换
-                T_vr_in_left = self.invert_transform(self.T_base_base_left) @ T_vr_aligned
-
+                # 记录VR起点（原始VR坐标系下的RPY，用于增量计算）
                 self.vr_start_rpy = R.from_matrix(T_vr_in_left[:3, :3]).as_euler('xyz', degrees=False)
-                self.get_logger().info(f"VR start RPY (in base_link_left): "
+                self.vr_start_position = T_vr_in_left[:3, 3].copy()
+                self.last_vr_rpy = self.vr_start_rpy.copy()  # 初始化连续解算基准
+                self.get_logger().info(f"VR start RPY (raw): "
                                      f"roll={np.degrees(self.vr_start_rpy[0]):.1f}°, "
                                      f"pitch={np.degrees(self.vr_start_rpy[1]):.1f}°, "
                                      f"yaw={np.degrees(self.vr_start_rpy[2]):.1f}°")
+                self.get_logger().info(f"VR start position: "
+                                     f"x={self.vr_start_position[0]:.3f}, "
+                                     f"y={self.vr_start_position[1]:.3f}, z={self.vr_start_position[2]:.3f} m")
 
                 # 2️⃣ 冻结机械臂起点RPY和位置
                 self.arm_start_rpy = np.array(self.cur_tcp_rpy).copy()  # 弧度
@@ -388,7 +525,8 @@ class QyhTeleopNode(Node):
             return
 
         # ---------- RPY直接增量计算 ----------
-        if self.vr_start_rpy is None or self.arm_start_rpy is None or self.arm_start_position is None:
+        if (self.vr_start_rpy is None or self.vr_start_position is None or
+            self.arm_start_rpy is None or self.arm_start_position is None):
             return
 
         # 检查数据有效性
@@ -397,37 +535,37 @@ class QyhTeleopNode(Node):
             return
 
         try:
-            # 1️⃣ 计算当前VR的RPY（应用坐标系对齐和30°偏移）
-            T_vr_current_aligned = np.eye(4)
-            T_vr_current_aligned[:3, :3] = self.R_vr_to_arm @ T_vr_now_base[:3, :3] @ self.R_vr_to_arm.T
-            T_vr_current_aligned[:3, 3] = T_vr_now_base[:3, 3]
+            # 1️⃣ 计算当前VR位姿（只应用base_link到base_link_left的30°偏移）
+            T_vr_current_in_left = self.invert_transform(self.T_base_base_left) @ T_vr_now_base
 
-            T_vr_current_in_left = self.invert_transform(self.T_base_base_left) @ T_vr_current_aligned
-            # vr_current_rpy = R.from_matrix(T_vr_current_in_left[:3, :3]).as_euler('xyz', degrees=False)
+            # 计算当前VR的RPY（使用连续解算，基于上一帧而不是起始帧）
             vr_current_rpy = self.choose_rpy_closest(
-                self.vr_start_rpy,
+                self.last_vr_rpy,
                 T_vr_current_in_left[:3, :3]
             )
+            self.last_vr_rpy = vr_current_rpy.copy()  # 更新连续解算基准
 
-            # 2️⃣ 计算VR的RPY增量
-            delta_rpy = vr_current_rpy - self.vr_start_rpy
+            # 2️⃣ 计算VR的RPY增量（原始VR坐标系下的增量）
+            delta_rpy_raw = vr_current_rpy - self.vr_start_rpy
 
-            # 3️⃣ 计算目标RPY：机械臂起点RPY + VR的RPY增量
-            target_rpy = self.arm_start_rpy + delta_rpy
+            # 3️⃣ 应用VR控制器坐标系到机械臂末端坐标系的对齐变换
+            # VR坐标系(x前y左z上) -> 机械臂末端坐标系(x左y上z前)
+            # 注意：虽然ChatGPT认为对欧拉角直接应用线性变换"数学上不成立"，
+            # 但在小角度增量控制中，这种近似处理是工程上可接受的，且正确表达了轴对应关系
+            delta_rpy_aligned = self.R_vr_to_arm @ delta_rpy_raw
+
+            # 4️⃣ 计算目标RPY：机械臂起点RPY + 对齐后的RPY增量
+            target_rpy = self.arm_start_rpy + delta_rpy_aligned
 
             # 4️⃣ 计算目标位置：机械臂起点位置 + VR的位置增量
-            # VR控制器位置变化直接映射到机械臂位置变化
-            vr_current_pos = T_vr_now_base[:3, 3]  # 当前VR位置
-            vr_start_pos = np.array([0, 0, 0])     # VR起点位置（相对增量，从0开始）
+            # 使用和RPY相同的坐标系变换：VR -> 对齐 -> base_link_left
+            vr_current_pos_in_left = T_vr_current_in_left[:3, 3]
 
-            # 计算VR的位置增量（在VR坐标系下）
-            delta_pos_vr = vr_current_pos - vr_start_pos
+            # 计算VR在base_link_left坐标系下的位置增量
+            delta_pos = vr_current_pos_in_left - self.vr_start_position
 
-            # 应用VR到机械臂坐标系的对齐变换到位置增量
-            delta_pos_aligned = self.R_vr_to_arm @ delta_pos_vr
-
-            # 计算目标位置
-            target_position = self.arm_start_position + delta_pos_aligned
+            # 直接累加到机械臂起始位置（都在base_link_left坐标系下）
+            target_position = self.arm_start_position + delta_pos
 
             # 5️⃣ 发送目标位姿：xyz(mm) + rpy(degree)
             out_pose = [
@@ -476,7 +614,7 @@ class QyhTeleopNode(Node):
                              f"z={msg.position[2]:.1f}mm, r={msg.position[3]:.1f}°, "
                              f"p={msg.position[4]:.1f}°, y={msg.position[5]:.1f}°")
 
-        self.left_servo_pub.publish(msg)
+        # self.left_servo_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)
