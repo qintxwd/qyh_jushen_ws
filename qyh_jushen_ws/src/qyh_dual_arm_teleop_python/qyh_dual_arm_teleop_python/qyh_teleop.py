@@ -103,6 +103,7 @@ class QyhTeleopNode(Node):
         self.left_grip_value_ = 0.0
         self.cur_tcp_position = [0.0, 0.0, 0.0]
         self.cur_tcp_rotm = np.eye(3)
+        self.cur_tcp_rpy = [0.0, 0.0, 0.0]
         self.tcp_ready = False
         
         # -30 degree yaw transform
@@ -164,6 +165,51 @@ class QyhTeleopNode(Node):
         T_inv[:3, 3] = t_inv
         return T_inv
 
+    def choose_rpy_closest(self, rpy_prev, rotm):
+        """
+        Given previous rpy (array-like, radians) and a 3x3 rotation matrix (numpy),
+        return an Euler `xyz` triple nearest to rpy_prev using candidate enumeration
+        and 2*pi unwrapping. Handles the +-90deg singularity by preserving yaw.
+        """
+        prev = np.asarray(rpy_prev, dtype=float)
+        Rmat = np.asarray(rotm, dtype=float)
+        EPS = 1e-6
+        z_axis = Rmat[:, 2]
+        if abs(z_axis[2] - 1.0) < EPS:
+            return np.array([0.0, 0.0, prev[2]])
+        if abs(z_axis[2] + 1.0) < EPS:
+            return np.array([math.pi, 0.0, prev[2]])
+
+        base = R.from_matrix(Rmat).as_euler('xyz', degrees=False)
+        candidates = [base, np.array([base[0] + math.pi, math.pi - base[1], base[2] + math.pi])]
+
+        TWO_PI = 2.0 * math.pi
+        expanded = []
+        for c0 in candidates:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        c = c0 + np.array([dx * TWO_PI, dy * TWO_PI, dz * TWO_PI])
+                        # normalize each component into prev +/- pi
+                        for k in range(3):
+                            while c[k] - prev[k] > math.pi:
+                                c[k] -= TWO_PI
+                            while c[k] - prev[k] < -math.pi:
+                                c[k] += TWO_PI
+                        expanded.append(c)
+
+        best = expanded[0]
+        best_dist = np.sum((best - prev) ** 2)
+        for c in expanded:
+            d = np.sum((c - prev) ** 2)
+            if d < best_dist:
+                best = c
+                best_dist = d
+
+        # normalize yaw to [-pi,pi]
+        best[2] = math.atan2(math.sin(best[2]), math.cos(best[2]))
+        return best
+
     # ----------------------------------------------------
     # 回调
     # ----------------------------------------------------
@@ -179,22 +225,24 @@ class QyhTeleopNode(Node):
         """
         mm_to_m = 0.001
         try:
-            if len(msg.position) >= 7:
+            if len(msg.position) >= 10:
                 self.cur_tcp_position = [
                     msg.position[0] * mm_to_m,
                     msg.position[1] * mm_to_m,
                     msg.position[2] * mm_to_m
                 ]
+                # C++ publishes tcp_pose as [x,y,z, w,x,y,z, rpy...]
+                # indices: [3]=w, [4]=x, [5]=y, [6]=z
                 q = [
                     msg.position[4],
                     msg.position[5],
                     msg.position[6],
                     msg.position[3]
                 ]  # x y z w
+                self.cur_tcp_rpy = [msg.position[7], msg.position[8], msg.position[9]]                
                 self.get_logger().info(f"TCP position x,y,z = {self.cur_tcp_position}")
                 self.get_logger().info(f"TCP quaternion x,y,z,w = {q}")
-                # print rpy
-                self.get_logger().info(f"TCP rpy (deg) = {np.degrees(R.from_quat(q).as_euler('xyz'))}")
+                self.get_logger().info(f"TCP rpy (deg) = {np.degrees(self.cur_tcp_rpy)}")
                 self.cur_tcp_rotm = R.from_quat(q).as_matrix()
                 self.tcp_ready = True
         except Exception:
@@ -321,25 +369,34 @@ class QyhTeleopNode(Node):
         # 1️⃣ 位置与方向（方向改为四元数 xyzw）
         pos = T_lt_target[:3, 3]
         # quat = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # returns [x, y, z, w]
-        rpy = R.from_matrix(T_lt_target[:3, :3]).as_euler('xyz', degrees=False)
+        # Choose Euler triple closest to current TCP pose to avoid large jumps
+        try:
+            prev_rpy = np.array(self.cur_tcp_rpy)
+        except Exception:
+            prev_rpy = np.zeros(3)
+        rpy = self.choose_rpy_closest(prev_rpy, T_lt_target[:3, :3])
         # self.get_logger().info(f"target_rpy (deg)=({np.degrees(rpy[0]):.1f}, {np.degrees(rpy[1]):.1f}, {np.degrees(rpy[2]):.1f})")
 
         # 2️⃣ 输出（位置转为 mm，方向为四元数 x,y,z,w）
         meter_to_mm = 1000.0
+        quat_target = R.from_matrix(T_lt_target[:3, :3]).as_quat()  # [x,y,z,w]
         out_pose = [
             pos[0] * meter_to_mm,
             pos[1] * meter_to_mm,
             pos[2] * meter_to_mm,
-            rpy[0],
-            rpy[1],
-            rpy[2]
+            quat_target[0],
+            quat_target[1],
+            quat_target[2],
+            quat_target[3]
         ]
+        # Log quaternion and chosen RPY (degrees) for clarity
         self.get_logger().info(
             f"target_pos(mm)=({out_pose[0]:.1f},{out_pose[1]:.1f},{out_pose[2]:.1f}) "
-            f"target_rpy(deg)=({np.degrees(out_pose[3]):.1f},{np.degrees(out_pose[4]):.1f},{np.degrees(out_pose[5]):.1f})"
+            f"target_quat(x,y,z,w)=({out_pose[3]:.4f},{out_pose[4]:.4f},{out_pose[5]:.4f},{out_pose[6]:.4f}) "
+            f"chosen_rpy(deg)=({np.degrees(rpy[0]):.1f},{np.degrees(rpy[1]):.1f},{np.degrees(rpy[2]):.1f})"
         )
         # publish position(mm) + quaternion(x,y,z,w)
-        # self.publish_servo_p_command(out_pose)
+        self.publish_servo_p_command(out_pose)
 
     # ----------------------------------------------------
 

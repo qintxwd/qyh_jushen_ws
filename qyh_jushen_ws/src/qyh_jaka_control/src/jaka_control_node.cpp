@@ -248,7 +248,7 @@ void JakaControlNode::left_timer_callback()
         tf2::Quaternion quaternion;
         quaternion.setRPY(cached_left_pose_.rpy.rx, cached_left_pose_.rpy.ry, cached_left_pose_.rpy.rz);
 
-        msg_tcp_pose.position.resize(7);
+        msg_tcp_pose.position.resize(10);
         msg_tcp_pose.position[0] = cached_left_pose_.tran.x;
         msg_tcp_pose.position[1] = cached_left_pose_.tran.y;
         msg_tcp_pose.position[2] = cached_left_pose_.tran.z;
@@ -256,6 +256,10 @@ void JakaControlNode::left_timer_callback()
         msg_tcp_pose.position[4] = quaternion.x();
         msg_tcp_pose.position[5] = quaternion.y();
         msg_tcp_pose.position[6] = quaternion.z();
+        // 新增：附加 rpy 信息（rad）
+        msg_tcp_pose.position[7] = cached_left_pose_.rpy.rx;
+        msg_tcp_pose.position[8] = cached_left_pose_.rpy.ry;
+        msg_tcp_pose.position[9] = cached_left_pose_.rpy.rz;
     }
     
 
@@ -326,7 +330,7 @@ void JakaControlNode::right_timer_callback()
         tf2::Quaternion quaternion;
         quaternion.setRPY(cached_right_pose_.rpy.rx, cached_right_pose_.rpy.ry, cached_right_pose_.rpy.rz);
 
-        msg_tcp_pose.position.resize(7);
+        msg_tcp_pose.position.resize(10);
         msg_tcp_pose.position[0] = cached_right_pose_.tran.x;
         msg_tcp_pose.position[1] = cached_right_pose_.tran.y;
         msg_tcp_pose.position[2] = cached_right_pose_.tran.z;
@@ -334,6 +338,11 @@ void JakaControlNode::right_timer_callback()
         msg_tcp_pose.position[4] = quaternion.x();
         msg_tcp_pose.position[5] = quaternion.y();
         msg_tcp_pose.position[6] = quaternion.z();
+        
+        // 新增：附加 rpy 信息（rad）
+        msg_tcp_pose.position[7] = cached_right_pose_.rpy.rx;
+        msg_tcp_pose.position[8] = cached_right_pose_.rpy.ry;
+        msg_tcp_pose.position[9] = cached_right_pose_.rpy.rz;
     }
 
     if (msg_pre_right_joint_state.size() != 0)
@@ -621,82 +630,7 @@ void JakaControlNode::publishStatus()
     
     robot_state_pub_->publish(robot_state_msg);
 }
-// 返回在所有等价 Euler 解中与 rpy_prev 最近的一组 rpy（弧度）
-// 支持奇异点处理：pitch ~ ±90° 时保留 yaw
-Eigen::Vector3d qyh_choose_rpy_closest_fast(const Eigen::Vector3d &rpy_prev, const Eigen::Matrix3d &R)
-{
-  Eigen::Vector3d rpy;
 
-  Eigen::Vector3d z_axis = R.col(2);
-
-  const double EPS = 1e-6;
-
-  if (std::abs(z_axis.z() - 1.0) < EPS)
-  {
-    // 正向竖直向上
-    rpy.x() = 0.0;
-    rpy.y() = 0.0;
-    rpy.z() = rpy_prev.z();  // 保留原 yaw
-  }
-  else if (std::abs(z_axis.z() + 1.0) < EPS)
-  {
-    // 反向竖直向下
-    rpy.x() = M_PI;
-    rpy.y() = 0.0;
-    rpy.z() = rpy_prev.z();  // 保留原 yaw
-  }
-  else
-  {
-    // 普通情况：计算 standard Euler 角
-    rpy = R.eulerAngles(0, 1, 2);
-
-    // 生成基本候选解（base + sign-flip）
-    std::vector<Eigen::Vector3d> candidates;
-    candidates.push_back(rpy);
-    candidates.push_back(Eigen::Vector3d(rpy.x() + M_PI, M_PI - rpy.y(), rpy.z() + M_PI));
-
-    const double TWO_PI = 2.0 * M_PI;
-    std::vector<Eigen::Vector3d> expanded;
-
-    for (const auto &c0 : candidates)
-    {
-      for (int dx = -1; dx <= 1; ++dx)
-        for (int dy = -1; dy <= 1; ++dy)
-          for (int dz = -1; dz <= 1; ++dz)
-          {
-            Eigen::Vector3d c = c0 + Eigen::Vector3d(dx * TWO_PI, dy * TWO_PI, dz * TWO_PI);
-            // 对每个分量归一化到 rpy_prev ±π
-            for (int k = 0; k < 3; ++k)
-            {
-              while (c[k] - rpy_prev[k] > M_PI)
-                c[k] -= TWO_PI;
-              while (c[k] - rpy_prev[k] < -M_PI)
-                c[k] += TWO_PI;
-            }
-            expanded.push_back(c);
-          }
-    }
-
-    // 选择最接近 rpy_prev 的解
-    double bestDist = 1e300;
-    Eigen::Vector3d best = rpy;
-    for (const auto &c : expanded)
-    {
-      double dist = (c - rpy_prev).squaredNorm();
-      if (dist < bestDist)
-      {
-        bestDist = dist;
-        best = c;
-      }
-    }
-
-    // 归一化 yaw
-    best.z() = std::atan2(std::sin(best.z()), std::cos(best.z()));
-    rpy = best;
-  }
-
-  return rpy;
-}
 void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
     if(!connected_ || !powered_ || !enabled_ || !servo_running_) {
@@ -711,23 +645,9 @@ void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::Sha
     left_command_servo_p_val.tran.x = msg->position[0];
     left_command_servo_p_val.tran.y = msg->position[1];
     left_command_servo_p_val.tran.z = msg->position[2];
-
-    //收到的后4各值是四元数，转换为rpy
-    tf2::Quaternion q_left;
-    // msg layout: [x_mm, y_mm, z_mm, qx, qy, qz, qw]
-    q_left.setX(msg->position[3]);
-    q_left.setY(msg->position[4]);
-    q_left.setZ(msg->position[5]);
-    q_left.setW(msg->position[6]);
-    // Convert received quaternion to Eigen rotation matrix and choose closest rpy
-    Eigen::Quaterniond eq_left(q_left.w(), q_left.x(), q_left.y(), q_left.z());
-    Eigen::Matrix3d rot_left = eq_left.toRotationMatrix();
-    Eigen::Vector3d prev_rpy_left(cached_left_pose_.rpy.rx, cached_left_pose_.rpy.ry, cached_left_pose_.rpy.rz);
-    Eigen::Vector3d new_rpy_left = qyh_choose_rpy_closest_fast(prev_rpy_left, rot_left);
-
-    left_command_servo_p_val.rpy.rx = new_rpy_left[0];
-    left_command_servo_p_val.rpy.ry = new_rpy_left[1];
-    left_command_servo_p_val.rpy.rz = new_rpy_left[2];
+    left_command_servo_p_val.rpy.rx = new_rpy_left[3];
+    left_command_servo_p_val.rpy.ry = new_rpy_left[4];
+    left_command_servo_p_val.rpy.rz = new_rpy_left[5];
     
     left_last_command_p_time_ = this->now();
     left_input_state_ = ServoInputState::ACTIVE;
@@ -752,23 +672,9 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
     right_command_servo_p_val.tran.x = msg->position[0];
     right_command_servo_p_val.tran.y = msg->position[1];
     right_command_servo_p_val.tran.z = msg->position[2];
-
-    //收到的后4各值是四元数，转换为rpy
-    tf2::Quaternion q_right;
-    // msg layout: [x_mm, y_mm, z_mm, qx, qy, qz, qw]
-    q_right.setX(msg->position[3]);
-    q_right.setY(msg->position[4]);
-    q_right.setZ(msg->position[5]);
-    q_right.setW(msg->position[6]);
-    // Convert received quaternion to Eigen rotation matrix and choose closest rpy
-    Eigen::Quaterniond eq_right(q_right.w(), q_right.x(), q_right.y(), q_right.z());
-    Eigen::Matrix3d rot_right = eq_right.toRotationMatrix();
-    Eigen::Vector3d prev_rpy_right(cached_right_pose_.rpy.rx, cached_right_pose_.rpy.ry, cached_right_pose_.rpy.rz);
-    Eigen::Vector3d new_rpy_right = qyh_choose_rpy_closest_fast(prev_rpy_right, rot_right);
-    
-    right_command_servo_p_val.rpy.rx = new_rpy_right[0];
-    right_command_servo_p_val.rpy.ry = new_rpy_right[1];
-    right_command_servo_p_val.rpy.rz = new_rpy_right[2];
+    right_command_servo_p_val.rpy.rx = new_rpy_right[3];
+    right_command_servo_p_val.rpy.ry = new_rpy_right[4];
+    right_command_servo_p_val.rpy.rz = new_rpy_right[5];
 
     right_last_command_p_time_ = this->now();
     right_input_state_ = ServoInputState::ACTIVE;
