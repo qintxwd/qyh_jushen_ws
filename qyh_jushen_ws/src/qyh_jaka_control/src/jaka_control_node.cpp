@@ -637,7 +637,7 @@ void JakaControlNode::leftServoPCallback(const sensor_msgs::msg::JointState::Sha
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] Robot not ready to receive commands");
         return;
     }
-    if (msg->position.size() != 7) {
+    if (msg->position.size() < 6) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] invalid position size: %zu", msg->position.size());
         return;
     }
@@ -665,7 +665,7 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[LeftServoP] Robot not ready to receive commands");
         return;
     }
-    if (msg->position.size() != 7) {
+    if (msg->position.size() < 6) {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[RightServoP] invalid position size: %zu", msg->position.size());
         return;
     }
