@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'qyh_teleop = qyh_dual_arm_teleop_python.qyh_teleop:main',
+            'qyh_teleop_left = qyh_dual_arm_teleop_python.qyh_teleop_left:main',
+            'qyh_teleop_right = qyh_dual_arm_teleop_python.qyh_teleop_right:main',
         ],
     },
 )
