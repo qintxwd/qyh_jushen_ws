@@ -57,6 +57,13 @@ class QyhTeleopNode(Node):
             translation=[0, 0, 0],
             rpy=[0, -math.radians(35), 0]
         )
+        
+        # 右臂镜像修正（语义层，不是物理安装）
+        self.T_vr_mirror = np.eye(4)
+
+        # if self.arm_side == 'right':
+        #     self.T_vr_mirror[1, 1] = -1.0   # Y 轴镜像
+        #     self.get_logger().info("[right] Enable VR semantic mirror (Y axis)")
 
         # 增量缓存
         self.vr_start_rotm = None
@@ -136,13 +143,19 @@ class QyhTeleopNode(Node):
 
         if state == 'ENGAGING':
             try:
-                T_vr_in_arm = self.invert_transform(self.T_base_link_2_arm) @ T_vr_now_base
+                T_vr_in_arm = (
+                    self.T_vr_mirror @
+                    self.invert_transform(self.T_base_link_2_arm) @
+                    T_vr_now_base
+                )
                 self.vr_start_rotm = T_vr_in_arm[:3, :3].copy()
                 self.vr_start_position = T_vr_in_arm[:3, 3].copy()
                 self.arm_start_rpy = np.array(self.cur_tcp_rpy).copy()
                 self.arm_start_position = np.array(self.cur_tcp_position).copy()
 
                 self.clutch_state = 'TRACKING'
+                # 打印T_vr_now_base
+                self.print_pose(T_vr_now_base, label="ENGAGING T_vr_now_base")
                 self.get_logger().info(
                     f"[{self.arm_side}]▶ TRACKING开始 | VR起点:{[round(x*100,1) for x in self.vr_start_position]}cm | "
                     f"ARM起点:{[round(x*100,1) for x in self.arm_start_position]}cm")
@@ -170,7 +183,11 @@ class QyhTeleopNode(Node):
             return
 
         try:
-            T_vr_current_in_arm = self.invert_transform(self.T_base_link_2_arm) @ T_vr_now_base
+            T_vr_current_in_arm = (
+                self.T_vr_mirror @
+                self.invert_transform(self.T_base_link_2_arm) @
+                T_vr_now_base
+            )
             vr_current_rotm = T_vr_current_in_arm[:3, :3]
             vr_current_pos = T_vr_current_in_arm[:3, 3]
             delta_rotm_vr = vr_current_rotm @ np.linalg.inv(self.vr_start_rotm)
@@ -188,6 +205,7 @@ class QyhTeleopNode(Node):
                 target_rpy[2]
             ]
             delta_rpy_deg = R.from_matrix(delta_rotm_vr).as_euler('xyz', degrees=True)
+            self.print_pose(T_vr_now_base, label="TRACKING T_vr_now_base")
             self.get_logger().info(
                 f"[{self.arm_side}]Δpos(前左上)=[{delta_pos[0]*100:.1f},{delta_pos[1]*100:.1f},{delta_pos[2]*100:.1f}]cm "
                 f"[{self.arm_side}]Δrpy=[{delta_rpy_deg[0]:.1f},{delta_rpy_deg[1]:.1f},{delta_rpy_deg[2]:.1f}]°")

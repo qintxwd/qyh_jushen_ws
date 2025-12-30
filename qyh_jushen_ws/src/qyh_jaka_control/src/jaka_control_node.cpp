@@ -286,7 +286,7 @@ void JakaControlNode::left_timer_callback()
     left_tcp_pose_pub_->publish(msg_tcp_pose);
     // 每隔1秒输出一次msg_tcp_pose内容，方便调试
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-        "Left TCP Pose: [x=%.2f, y=%.2f, z=%.2f, roll=%.2f, pitch=%.2f, yaw=%.2f]",
+        "Left TCP Pose: [x=%f, y=%f, z=%f, roll=%f, pitch=%f, yaw=%f]",
         msg_tcp_pose.position[0], msg_tcp_pose.position[1], msg_tcp_pose.position[2],
         rad2deg(cached_left_pose_.rpy.rx), rad2deg(cached_left_pose_.rpy.ry), rad2deg(cached_left_pose_.rpy.rz));
 
@@ -437,7 +437,7 @@ void JakaControlNode::command_p_timer_callback()
     // LEFT
     switch (left_input_state_) {
         case ServoInputState::NEVER_RECEIVED:
-            target_left = cached_left_pose_; // 保持当前
+            target_left = left_last_target_pose_; // 保持当前
             break;
         case ServoInputState::ACTIVE:
             target_left = left_command_servo_p_val;
@@ -454,7 +454,7 @@ void JakaControlNode::command_p_timer_callback()
     // RIGHT
     switch (right_input_state_) {
         case ServoInputState::NEVER_RECEIVED:
-            target_right = cached_right_pose_;
+            target_right = right_last_target_pose_; // 保持当前
             break;
         case ServoInputState::ACTIVE:
             target_right = right_command_servo_p_val;
