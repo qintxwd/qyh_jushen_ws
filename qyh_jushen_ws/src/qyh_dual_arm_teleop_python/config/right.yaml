@@ -1,4 +1,4 @@
 qyh_teleop_right:
   ros__parameters:
     arm_side: right
-    arm_in_base_link_transform: [-0.00108, -0.08395, 0.000951, 0.0, 0.0, 0.5236]
+    arm_in_upper_body_link_transform: [-0.00108, -0.08395, 0.000951, 0.0, 0.0, 0.5236]

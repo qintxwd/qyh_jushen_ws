@@ -14,6 +14,7 @@
 
 #include "qyh_waist_msgs/msg/waist_state.hpp"
 #include "qyh_waist_msgs/srv/waist_control.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
 #include "modbus/modbus.hpp"
 
 namespace qyh_waist_control
@@ -125,6 +126,7 @@ private:
 
   // ROS2 接口
   rclcpp::Publisher<qyh_waist_msgs::msg::WaistState>::SharedPtr state_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
   rclcpp::Service<qyh_waist_msgs::srv::WaistControl>::SharedPtr control_srv_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr reconnect_timer_;

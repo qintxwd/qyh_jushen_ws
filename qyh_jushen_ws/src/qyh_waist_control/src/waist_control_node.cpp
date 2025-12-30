@@ -48,6 +48,10 @@ WaistControlNode::WaistControlNode(const rclcpp::NodeOptions & options)
   // 创建发布者
   state_pub_ = this->create_publisher<qyh_waist_msgs::msg::WaistState>(
     "waist_state", 10);
+  
+  // 发布joint_states供robot_state_publisher使用
+  joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
+    "/joint_states", 10);
 
   // 创建服务
   control_srv_ = this->create_service<qyh_waist_msgs::srv::WaistControl>(
@@ -126,6 +130,19 @@ void WaistControlNode::timer_callback()
     current_state_.header.stamp = this->now();
     current_state_.connected = true;
     state_pub_->publish(current_state_);
+    
+    // 发布joint_states给robot_state_publisher
+    // waist_joint角度：0(竖直) -> 0 rad, 45度(前倾) -> -0.785 rad
+    sensor_msgs::msg::JointState js;
+    js.header.stamp = this->now();
+    js.name.push_back("waist_joint");
+    // 前倾角度转为负的pitch角度（绕Y轴负向旋转）
+    // 临时先设置为0
+    double waist_rad =  0;// -current_state_.current_angle * M_PI / 180.0;
+    js.position.push_back(waist_rad);
+    js.velocity.push_back(0.0);
+    js.effort.push_back(0.0);
+    joint_state_pub_->publish(js);
   } else {
     current_state_.connected = false;
     state_pub_->publish(current_state_);

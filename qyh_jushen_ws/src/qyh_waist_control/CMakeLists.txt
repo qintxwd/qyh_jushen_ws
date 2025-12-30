@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(qyh_waist_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 # Include directories
 include_directories(
@@ -32,6 +33,7 @@ ament_target_dependencies(waist_control_node
   rclcpp
   qyh_waist_msgs
   std_msgs
+  sensor_msgs
 )
 
 target_link_libraries(waist_control_node

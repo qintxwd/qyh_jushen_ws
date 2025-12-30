@@ -11,7 +11,7 @@ from scipy.spatial.transform import Rotation as R
 import math
 import numpy as np
 from std_msgs.msg import String
-
+from qyh_waist_msgs.msg import WaistState
 
 class QyhTeleopNode(Node):
     def __init__(self):
@@ -23,9 +23,9 @@ class QyhTeleopNode(Node):
         self.get_logger().info(f"[{self.arm_side}]Arm side set to: {self.arm_side}")
         
         # 获取参数，arm_in_base_link_transform: xyz rpy
-        self.declare_parameter('arm_in_base_link_transform', [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        arm_transform_list = self.get_parameter('arm_in_base_link_transform').get_parameter_value().double_array_value
-        self.get_logger().info(f"[{self.arm_side}]Arm in base_link transform: {arm_transform_list}")
+        self.declare_parameter('arm_in_upper_body_link_transform', [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        arm_transform_list = self.get_parameter('arm_in_upper_body_link_transform').get_parameter_value().double_array_value
+        self.get_logger().info(f"[{self.arm_side}]Arm in upper_body_link transform: {arm_transform_list}")
         
         # publishers
         self.servo_pub = self.create_publisher(JointState, f'/teleop/{self.arm_side}/servo_p', 10)
@@ -34,7 +34,7 @@ class QyhTeleopNode(Node):
         self.pose_sub = self.create_subscription(PoseStamped, f'/vr/{self.arm_side}_controller/pose', self.vr_pose_callback, 10)
         self.joy_sub = self.create_subscription(Joy, f'/vr/{self.arm_side}_controller/joy', self.joy_callback, 10)
         self.tcp_sub = self.create_subscription(JointState, f'/{self.arm_side}_arm/tcp_pose', self.tcp_pose_callback, 10)
-
+        self.waist_sub = self.create_subscription(WaistState, "/waist_state", self.waist_callback, 10)
         # clutch thresholds
         self.grip_engage = 0.6
         self.grip_release = 0.3
@@ -48,10 +48,15 @@ class QyhTeleopNode(Node):
         self.tcp_ready = False
         
         # 变换矩阵
-        self.T_base_link_2_arm = self.make_transform_matrix(
+        self.T_upper_body_link_2_arm = self.make_transform_matrix(
             translation=arm_transform_list[0:3],
             rpy=arm_transform_list[3:6]
         )
+        
+        self.T_base_link_2_upper_body = np.eye(4)
+        
+        self.T_base_link_2_arm_total = self.T_base_link_2_upper_body @ self.T_upper_body_link_2_arm
+
 
         self.T_vr_human_align = self.make_transform_matrix(
             translation=[0, 0, 0],
@@ -64,6 +69,8 @@ class QyhTeleopNode(Node):
         # if self.arm_side == 'right':
         #     self.T_vr_mirror[1, 1] = -1.0   # Y 轴镜像
         #     self.get_logger().info("[right] Enable VR semantic mirror (Y axis)")
+        
+        self.waist_pitch = 0.0  # 弯腰角度，单位 rad
 
         # 增量缓存
         self.vr_start_rotm = None
@@ -72,6 +79,11 @@ class QyhTeleopNode(Node):
         self.arm_start_position = None
 
         self.get_logger().info(f'[{self.arm_side}]qyh_teleop node started')
+
+    def waist_callback(self, msg):
+        # waist_state.current_angle: 0~45°, 0=竖直
+        self.waist_pitch = -math.radians(msg.current_angle)  # 转为负 pitch rad
+        self.T_base_link_2_upper_body[:3, :3] = R.from_euler('xyz', [0, self.waist_pitch, 0]).as_matrix()
 
     def make_transform_matrix(self, translation, rpy):
         T = np.eye(4)
@@ -133,6 +145,8 @@ class QyhTeleopNode(Node):
         ]).as_matrix()
         T_vr_now_base[:3, 3] = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
         T_vr_now_base = T_vr_now_base @ self.invert_transform(self.T_vr_human_align)
+        
+        self.T_base_link_2_arm_total = self.T_base_link_2_upper_body @ self.T_upper_body_link_2_arm
                 
         state = self.clutch_state
 
@@ -145,7 +159,7 @@ class QyhTeleopNode(Node):
             try:
                 T_vr_in_arm = (
                     self.T_vr_mirror @
-                    self.invert_transform(self.T_base_link_2_arm) @
+                    self.invert_transform(self.T_base_link_2_arm_total) @
                     T_vr_now_base
                 )
                 self.vr_start_rotm = T_vr_in_arm[:3, :3].copy()
@@ -185,7 +199,7 @@ class QyhTeleopNode(Node):
         try:
             T_vr_current_in_arm = (
                 self.T_vr_mirror @
-                self.invert_transform(self.T_base_link_2_arm) @
+                self.invert_transform(self.T_base_link_2_arm_total) @
                 T_vr_now_base
             )
             vr_current_rotm = T_vr_current_in_arm[:3, :3]
