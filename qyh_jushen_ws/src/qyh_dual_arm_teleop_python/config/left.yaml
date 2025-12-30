@@ -1,0 +1,13 @@
+arm_side: left
+arm_in_base_link_transform: [-0.0004, 0.08522, 0.0030, 0.0, 0.0, -0.5236]
+
+        # # publishers
+        # self.servo_pub = self.create_publisher(JointState, '/teleop/left/servo_p', 10)
+
+        # # subscribers
+        # self.pose_sub = self.create_subscription(PoseStamped, '/vr/left_controller/pose', self.vr_pose_callback, 10)
+        # self.joy_sub = self.create_subscription(Joy, '/vr/left_controller/joy', self.joy_callback, 10)
+        # self.tcp_sub = self.create_subscription(JointState, '/left_arm/tcp_pose', self.tcp_pose_callback, 10)
+
+            #         translation=[-0.0004, 0.08522, 0.0030],
+            # rpy=[0, 0, -math.pi / 6]
