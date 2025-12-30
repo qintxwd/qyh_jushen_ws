@@ -82,9 +82,9 @@ private:
             found_ids.push_back(broadcast_id);
         }
         
-        // 方法2: 逐个ID扫描 (ID 0-10 范围，可以扩大)
-        RCLCPP_INFO(this->get_logger(), "正在扫描ID 0-10...");
-        for (uint8_t id = 0; id <= 10; id++) {
+        // 方法2: 逐个ID扫描 (ID 0-255 范围，可以扩大)
+        RCLCPP_INFO(this->get_logger(), "正在扫描ID 0-255...");
+        for (uint8_t id = 0; id <= 255; id++) {
             uint16_t position = 0;
             if (servo.readPosition(id, position)) {
                 // 检查是否已经在列表中
