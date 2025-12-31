@@ -196,7 +196,6 @@ install(
   PROGRAMS
     scripts/common_benchmark_node.py
     scripts/service_benchmark_node.py
-    scripts/depth_visualizer.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
