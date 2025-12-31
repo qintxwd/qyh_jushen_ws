@@ -35,7 +35,9 @@ fi
 
 # 相机配置
 HEAD_CAMERA_IP="192.168.1.10"
-HEAD_CAMERA_SERIAL=""  # 可选：指定序列号
+HEAD_CAMERA_SERIAL="CPE895300029"   # 头部相机序列号
+LEFT_HAND_SERIAL="CP0BB53000AT"     # 左手相机序列号
+RIGHT_HAND_SERIAL="CP0BB530003J"    # 右手相机序列号
 
 # 检查 web_video_server 是否已安装
 check_web_video_server() {
@@ -75,11 +77,12 @@ start_head_camera() {
     # 启动bringup 并将日志输出到文件
     export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
     export RCUTILS_LOGGING_BUFFERED_STREAM=1
-export RCUTILS_COLORIZED_OUTPUT=1
+    export RCUTILS_COLORIZED_OUTPUT=1
     # Orbbec 相机启动参数
     # 使用最小参数集启动，依赖相机默认配置
     ros2 launch orbbec_camera gemini_330_series.launch.py \
         camera_name:=head_camera \
+        camera_serial:=$HEAD_CAMERA_SERIAL \
         enumerate_net_device:=true \
         &
     
@@ -94,6 +97,31 @@ export RCUTILS_COLORIZED_OUTPUT=1
     echo -e "${GREEN}✓ 深度图转换节点已启动 (PID: $VISUALIZER_PID)${NC}"
 }
 
+# 启动手部相机 (USB)
+start_hand_cameras() {
+    echo -e "${BLUE}启动手部相机...${NC}"
+
+    # 左手相机 (USB port 对应 lsusb -t 的端口)
+    ros2 launch orbbec_camera gemini_330_series.launch.py \
+        camera_name:=left_hand_camera \
+        usb_port:=2-3.1.3.6 \
+        enumerate_usb_device:=true \
+        &
+
+    LEFT_HAND_PID=$!
+    echo -e "${GREEN}✓ 左手相机已启动 (PID: $LEFT_HAND_PID)${NC}"
+
+    # 右手相机 (USB port 对应 lsusb -t 的端口)
+    ros2 launch orbbec_camera gemini_330_series.launch.py \
+        camera_name:=right_hand_camera \
+        usb_port:=2-3.1.1.5 \
+        enumerate_usb_device:=true \
+        &
+
+    RIGHT_HAND_PID=$!
+    echo -e "${GREEN}✓ 右手相机已启动 (PID: $RIGHT_HAND_PID)${NC}"
+}
+
 # 启动 web_video_server
 start_web_video_server() {
     echo -e "${BLUE}启动 web_video_server...${NC}"
@@ -104,7 +132,7 @@ start_web_video_server() {
     # 启动bringup 并将日志输出到文件
     export RCUTILS_LOGGING_FORMAT='[{time:%Y-%m-%d %H:%M:%S.%e}] [Version:'"$GLOBAL_SLAM_VERSION"'] [{severity}] [{name}] [{file_name}:{line_number}]: {message}'
     export RCUTILS_LOGGING_BUFFERED_STREAM=1
-export RCUTILS_COLORIZED_OUTPUT=1
+    export RCUTILS_COLORIZED_OUTPUT=1
     
     ros2 run web_video_server web_video_server \
         --ros-args \
@@ -116,8 +144,6 @@ export RCUTILS_COLORIZED_OUTPUT=1
     WEB_VIDEO_PID=$!
     echo -e "${GREEN}✓ web_video_server 已启动 (PID: $WEB_VIDEO_PID)${NC}"
     echo -e "${GREEN}  访问地址: http://localhost:8080${NC}"
-    echo -e "${GREEN}  视频流:   http://localhost:8080/stream?topic=/head_camera/color/image_raw${NC}"
-    echo -e "${GREEN}  深度流:   http://localhost:8080/stream?topic=/head_camera/depth/image_visual${NC}"
 }
 
 # 显示可用话题
@@ -133,18 +159,12 @@ show_available_topics() {
 cleanup() {
     echo -e "\n${YELLOW}正在关闭相机系统...${NC}"
     
-    # 终止所有相关进程
-    if [ ! -z "$HEAD_CAMERA_PID" ]; then
-        kill $HEAD_CAMERA_PID 2>/dev/null || true
-    fi
-    if [ ! -z "$WEB_VIDEO_PID" ]; then
-        kill $WEB_VIDEO_PID 2>/dev/null || true
-    fi
-    if [ ! -z "$VISUALIZER_PID" ]; then
-        kill $VISUALIZER_PID 2>/dev/null || true
-    fi
+    [ ! -z "$HEAD_CAMERA_PID" ] && kill $HEAD_CAMERA_PID 2>/dev/null || true
+    [ ! -z "$LEFT_HAND_PID" ] && kill $LEFT_HAND_PID 2>/dev/null || true
+    [ ! -z "$RIGHT_HAND_PID" ] && kill $RIGHT_HAND_PID 2>/dev/null || true
+    [ ! -z "$WEB_VIDEO_PID" ] && kill $WEB_VIDEO_PID 2>/dev/null || true
+    [ ! -z "$VISUALIZER_PID" ] && kill $VISUALIZER_PID 2>/dev/null || true
     
-    # 终止所有相关节点
     pkill -f "orbbec_camera" 2>/dev/null || true
     pkill -f "web_video_server" 2>/dev/null || true
     pkill -f "depth_visualizer" 2>/dev/null || true
@@ -152,6 +172,7 @@ cleanup() {
     echo -e "${GREEN}✓ 相机系统已关闭${NC}"
     exit 0
 }
+
 
 # 注册清理函数
 trap cleanup SIGINT SIGTERM
@@ -169,9 +190,11 @@ main() {
     
     # 启动相机
     start_head_camera
-    
+    start_hand_cameras
+
     # 启动 web_video_server
     start_web_video_server
+    
     
     # 显示可用话题
     show_available_topics
@@ -182,8 +205,9 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo -e "${BLUE}可用服务:${NC}"
     echo -e "  - 头部相机话题: /head_camera/color/image_raw"
-    echo -e "  - 深度图话题:   /head_camera/depth/image_raw (原始16位)"
-    echo -e "  - 深度图可视:   /head_camera/depth/image_visual (彩色8位)"
+    echo -e "  - 左手相机话题: /left_hand_camera/color/image_raw"
+    echo -e "  - 右手相机话题: /right_hand_camera/color/image_raw"
+    echo -e "  - 深度图可视:   /head_camera/depth/image_visual"
     echo -e "  - 视频流服务:   http://localhost:8080"
     echo ""
     echo -e "${YELLOW}按 Ctrl+C 停止所有服务${NC}"
@@ -229,3 +253,12 @@ case "${1:-}" in
         main
         ;;
 esac
+
+# head:
+ros2 launch orbbec_camera gemini_330_series.launch.py enable_point_cloud:=true color_width:=640 color_height:=480 depth_width:=640 depth_height:=480 depth_fps:=15 color_fps:=15 depth_registration:=true enumerate_net_device:=true camera_name:=head_camera camera_serial:=CPE895300029 net_device_ip:=192.168.1.10
+
+# left hand:
+ros2 launch orbbec_camera gemini_330_series.launch.py enable_point_cloud:=true color_width:=640 color_height:=480 depth_width:=640 depth_height:=480 depth_fps:=15 color_fps:=15 depth_registration:=true enumerate_net_device:=false camera_name:=left_camera camera_serial:=CP0BB53000AT
+
+# right hand:
+ros2 launch orbbec_camera gemini_330_series.launch.py enable_point_cloud:=true color_width:=640 color_height:=480 depth_width:=640 depth_height:=480 depth_fps:=15 color_fps:=15 depth_registration:=true enumerate_net_device:=false camera_name:=right_camera camera_serial:=CP0BB530003J
