@@ -23,7 +23,7 @@ ROS2 C++ 头部电机位置控制包，使用 Bus Servo 协议控制头部舵机
 ## 安装
 
 ```bash
-cd ~/qyh_jushen_ws
+cd ~/qyh-robot-system/qyh_jushen_ws
 colcon build --packages-select qyh_head_motor_control
 source install/setup.bash
 ```

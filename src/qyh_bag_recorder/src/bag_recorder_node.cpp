@@ -43,10 +43,10 @@ public:
         // 获取基础路径
         std::string base_path = this->get_parameter("base_path").as_string();
         if (base_path.empty()) {
-            // 默认使用 ~/qyh_jushen_ws/DATA/
+            // 默认使用 ~/qyh-robot-system/DATA/
             const char* home = std::getenv("HOME");
             if (home) {
-                base_path_ = std::string(home) + "/qyh_jushen_ws/DATA";
+                base_path_ = std::string(home) + "/qyh-robot-system/DATA";
             } else {
                 base_path_ = "/tmp/qyh_bag_data";
             }

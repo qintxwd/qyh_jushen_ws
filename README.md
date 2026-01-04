@@ -1,16 +1,12 @@
 # QYH Jushen ROS2 Workspace
 
-千岩护（QYH）具身机器人ROS2工作空间。包含机器人所有核心控制、硬件驱动、任务引擎等功能包。
+具身机器人ROS2工作空间。包含机器人所有核心控制、硬件驱动、任务引擎等功能包。
 
 ## 环境要求
 
 - **操作系统**: Ubuntu 22.04 LTS
 - **ROS版本**: ROS2 Humble
 - **编译工具**: colcon
-- **依赖库**: 
-  - libmodbus (硬件控制)
-  - JAKA机械臂SDK (节卡控制)
-  - Orbbec SDK (相机驱动)
 
 ## 快速开始
 
@@ -28,9 +24,6 @@ sudo apt install python3-colcon-common-extensions
 ### 2. 安装依赖
 
 ```bash
-# 安装libmodbus用于硬件通信
-sudo apt install libmodbus-dev
-
 # 安装ROS2依赖
 cd qyh_jushen_ws
 rosdep install --from-paths src --ignore-src -r -y
@@ -55,7 +48,7 @@ colcon build --symlink-install
 source install/setup.bash
 
 # 建议添加到 ~/.bashrc 中
-echo "source ~/qyh_jushen_ws/install/setup.bash" >> ~/.bashrc
+echo "source ~/qyh-robot-system/qyh_jushen_ws/install/setup.bash" >> ~/.bashrc
 ```
 
 ### 5. 启动机器人

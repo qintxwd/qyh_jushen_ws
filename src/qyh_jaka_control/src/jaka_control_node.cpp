@@ -693,14 +693,14 @@ void JakaControlNode::rightServoPCallback(const sensor_msgs::msg::JointState::Sh
  * @return true if successful
  */
 bool JakaControlNode::loadAndSetPayloadFromConfig() {
-    // 获取配置文件路径：~/qyh_jushen_ws/persistent/preset/payload_config.yaml
+    // 获取配置文件路径：~/qyh-robot-system/persistent/preset/payload_config.yaml
     std::string home_dir = std::getenv("HOME") ? std::getenv("HOME") : std::getenv("USERPROFILE");
     if (home_dir.empty()) {
         // 尝试使用当前工作目录的相对路径
         home_dir = ".";
     }
     
-    fs::path config_path = fs::path(home_dir) / "qyh_jushen_ws" / "persistent" / "preset" / "payload_config.yaml";
+    fs::path config_path = fs::path(home_dir) / "qyh-robot-system" / "persistent" / "preset" / "payload_config.yaml";
     
     // 如果找不到，尝试从当前可执行文件往上找
     if (!fs::exists(config_path)) {

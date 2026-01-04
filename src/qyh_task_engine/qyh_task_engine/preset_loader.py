@@ -14,7 +14,7 @@ class PresetLoader:
     """
     预设加载器
     
-    从 ~/qyh_jushen_ws/persistent/preset/ 加载预设数据
+    从 ~/qyh-robot-system/persistent/preset/ 加载预设数据
     供 ROS2 任务引擎使用
     """
     
@@ -40,9 +40,9 @@ class PresetLoader:
         
         self.storage_path = Path(storage_path)
         
-        # 地图文件路径 (在 ~/qyh_jushen_ws/maps 文件夹)
+        # 地图文件路径 (在 ~/qyh-robot-system/maps 文件夹)
         home = Path.home()
-        self.maps_dir = home / "qyh_jushen_ws" / "maps"
+        self.maps_dir = home / "qyh-robot-system" / "maps"
         
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._load_all()

@@ -16,7 +16,7 @@ def generate_launch_description():
     base_path_arg = DeclareLaunchArgument(
         'base_path',
         default_value='',
-        description='录制文件保存的基础路径，默认为 ~/qyh_jushen_ws/DATA'
+        description='录制文件保存的基础路径，默认为 ~/qyh-robot-system/DATA'
     )
     
     # Bag Recorder 节点

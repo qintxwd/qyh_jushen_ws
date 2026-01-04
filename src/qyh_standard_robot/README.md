@@ -18,7 +18,7 @@ This package requires libmodbus library which is included in the `thirdparty` di
 
 Build the package:
 ```bash
-cd /home/qyh/qyh_jushen_ws/qyh_jushen_ws
+cd /home/qyh/qyh-robot-system/qyh_jushen_ws
 colcon build --packages-select qyh_standard_robot_msgs qyh_standard_robot
 source install/setup.bash
 ```
