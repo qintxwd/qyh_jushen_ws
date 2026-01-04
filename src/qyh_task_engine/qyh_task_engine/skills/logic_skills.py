@@ -253,7 +253,7 @@ class SubTaskNode(SkillNode):
         import json
         from pathlib import Path
         
-        tasks_dir = Path.home() / "qyh_jushen_ws" / "persistent" / "tasks"
+        tasks_dir = Path.home() / "qyh-robot-system" / "persistent" / "tasks"
         task_file = tasks_dir / f"{task_id}.json"
         
         if not task_file.exists():

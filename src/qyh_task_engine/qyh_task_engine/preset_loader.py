@@ -36,7 +36,7 @@ class PresetLoader:
     def __init__(self, storage_path: str = None):
         if storage_path is None:
             home = Path.home()
-            storage_path = home / "qyh_jushen_ws" / "persistent" / "preset"
+            storage_path = home / "qyh-robot-system" / "persistent" / "preset"
         
         self.storage_path = Path(storage_path)
         

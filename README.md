@@ -25,14 +25,14 @@ sudo apt install python3-colcon-common-extensions
 
 ```bash
 # 安装ROS2依赖
-cd qyh_jushen_ws
+cd ~/qyh-robot-system/qyh_jushen_ws
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
 ### 3. 编译工作空间
 
 ```bash
-cd qyh_jushen_ws
+cd ~/qyh-robot-system/qyh_jushen_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 ```
