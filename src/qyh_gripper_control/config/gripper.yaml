@@ -1,0 +1,9 @@
+/**:
+  ros__parameters:
+    device_port: "/dev/ttyUSB0"
+    baudrate: 115200
+    slave_id: 1
+    publish_rate: 20.0
+    auto_activate: true
+    left_slave_id: 2
+    right_slave_id: 1

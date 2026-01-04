@@ -1,0 +1,102 @@
+# JAKA双臂机器人配置
+/**:
+  ros__parameters:
+    # 机器人连接参数
+    robot_ip: "192.168.2.200"
+    auto_connect: true
+
+    # 伺服控制参数
+    cycle_time: 0.008  # 8ms = 125Hz (推荐)
+    teleop_target_update_time: 0.05  # 50ms = 20Hz (VR目标更新频率)
+    use_cartesian: false  # true: 笛卡尔空间伺服, false: 关节空间伺服
+    
+    # 初始化姿态配置（弧度）
+    # 姿态1: 双臂张开姿态（home姿态的4轴和6轴改为0）
+    open_pose_joints: [0.0, -1.0472, 0.0, 0.0, 0.0, 0.0, 0.0,  # 左臂
+                       0.0, -1.0472, 0.0, 0.0, 0.0, 0.0, 0.0]  # 右臂
+    # 姿态2: 默认初始位置（左手: 0,-60,0,-50,0,50,0° | 右手: 0,-60,0,-50,0,-50,0°）
+    home_pose_joints: [0.0, -1.0472, 0.0, -0.8727, 0.0, 0.8727, 0.0,  # 左臂
+                       0.0, -1.0472, 0.0, -0.8727, 0.0, -0.8727, 0.0] # 右臂
+    # 运动参数
+    init_joint_velocity: 0.5  # rad/s
+    init_joint_acceleration: 0.3  # rad/s²
+
+    # VR跟随参数
+    vr_enabled: false
+    recording_output_dir: "/tmp/jaka_recordings"
+    recording_frequency: 125.0  # Hz
+    
+    # VR坐标系到机器人坐标系的转换（校准后设置）
+    vr_left_translation: [0.0, 0.0, 0.0]  # [x, y, z] in meters
+    vr_left_rotation: [0.0, 0.0, 0.0, 1.0]  # quaternion [x, y, z, w]
+    vr_right_translation: [0.0, 0.0, 0.0]
+    vr_right_rotation: [0.0, 0.0, 0.0, 1.0]
+
+    # 伺服滤波器设置
+    servo_filter_type: "carte_nlf"  # "none", "joint_lpf", "joint_nlf", "carte_nlf"
+    
+    # 笛卡尔空间非线性滤波参数
+    max_linear_velocity: 500.0  # mm/s
+    max_linear_acceleration: 2000.0  # mm/s²
+    max_linear_jerk: 10000.0  # mm/s³
+    max_angular_velocity: 180.0  # deg/s
+    max_angular_acceleration: 720.0  # deg/s²
+    max_angular_jerk: 3600.0  # deg/s³
+    
+    # 关节空间低通滤波参数
+    joint_lpf_cutoff_freq: 30.0  # Hz
+    
+    # 关节空间非线性滤波参数
+    joint_max_velocity: 180.0  # deg/s
+    joint_max_acceleration: 720.0  # deg/s²
+    joint_max_jerk: 3600.0  # deg/s³
+
+    # 安全参数
+    workspace_x_min: -1.0  # meters
+    workspace_x_max: 1.0
+    workspace_y_min: -1.0
+    workspace_y_max: 1.0
+    workspace_z_min: 0.0
+    workspace_z_max: 1.5
+    
+    collision_enabled: true
+    collision_level: 2  # 0-5, higher = more sensitive
+
+    # IK求解器参数 (VR遥操作模式)
+    ik_solver:
+      enabled: true  # true: 启用IK模式(订阅VR位姿), false: 标准Bridge模式(订阅关节指令)
+      target_x_left: false  # false: 目标坐标系X轴向前, true: X轴向左
+      has_z_offset: false  # 是否应用Z轴偏移补偿
+      left_z_offset: 0.219885132  # 左臂零位Z偏移(m)
+      right_z_offset: 0.217950931  # 右臂零位Z偏移(m)
+
+    # 速度积分控制参数 (Velocity Servo Controller)
+    velocity_control:
+      # 控制周期与增益
+      
+      # 关节速度限制
+      joint_vel_limit: 3.0  # 关节速度限制 (rad/s) (Increased from 1.5 to allow faster VR moves)
+      
+      # 安全参数
+      max_joint_accel: 50.0  # 最大关节加速度 (rad/s²), 防止速度突变
+      
+      # 目标变化死区（过滤VR手柄的微小抖动，避免不必要的指令更新）
+      target_change_position_threshold: 0.002  # 位置变化阈值 (m), 约2mm
+      target_change_orientation_threshold: 0.035  # 姿态变化阈值 (四元数距离), 约2度
+
+      # IK关节解低通（在IK Gate 通过后对关节目标做指数平滑，抑制“来回抖”）
+      joint_target_alpha: 0.6
+      
+      # 关节限位（自动从URDF读取，这里作为备份）
+      joint_pos_min: [-6.2832, -1.8326, -6.2832, -2.5307, -6.2832, -1.8326, -6.2832]  # rad
+      joint_pos_max: [6.2832, 1.8326, 6.2832, 0.5236, 6.2832, 1.8326, 6.2832]  # rad
+    
+    # 性能调优建议：
+    # - 如果感觉太慢：增大 max_linear_vel, max_angular_vel, linear_gain
+    # - 如果接近目标抖动：增大 position_deadzone, orientation_deadzone
+    # - 如果VR手柄抖动明显：增大 target_change_position_threshold, target_change_orientation_threshold
+    # - 如果路径不平滑：减小 joint_vel_limit, max_delta_q
+    # - 如果奇异点附近速度爆炸：增大 lambda_min
+
+  
+  

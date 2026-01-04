@@ -1,0 +1,6 @@
+# 通过站点定位或导航到站点 (40007通过站点定位 or 40015导航到站点)
+uint16 site_id
+bool is_localization  # true=40007通过站点定位(仅定位不移动), false=40015导航到站点(移动)
+---
+bool success
+string message

@@ -1,0 +1,5 @@
+# Set current site (40027)
+uint16 site_id
+---
+bool success
+string message

@@ -1,0 +1,5 @@
+# Get current gripper state
+---
+bool success
+qyh_gripper_msgs/GripperState state
+string message

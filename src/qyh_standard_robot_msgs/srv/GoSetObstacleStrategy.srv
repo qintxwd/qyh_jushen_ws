@@ -1,0 +1,5 @@
+# Set obstacle avoidance strategy (40016)
+uint16 strategy
+---
+bool success
+string message

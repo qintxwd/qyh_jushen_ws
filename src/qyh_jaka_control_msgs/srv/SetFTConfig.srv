@@ -1,0 +1,7 @@
+int32 arm_id
+int32 frame
+float64 gain
+float64 dead_zone
+---
+bool success
+string message

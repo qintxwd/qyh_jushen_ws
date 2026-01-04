@@ -1,0 +1,30 @@
+# ROS2 工作空间 - 编译和安装目录
+build/
+install/
+log/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# ROS 特定文件
+*.bag
+*.db3
+
+# 编辑器备份
+*~
+\#*\#
+.#*

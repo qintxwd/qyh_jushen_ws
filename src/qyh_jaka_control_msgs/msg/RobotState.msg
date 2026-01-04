@@ -1,0 +1,15 @@
+std_msgs/Header header
+bool connected
+string robot_ip
+bool powered_on
+bool enabled
+bool in_estop
+bool in_error
+bool servo_mode_enabled
+bool left_in_position
+bool right_in_position
+string error_message
+float64[7] left_joint_positions
+float64[7] right_joint_positions
+geometry_msgs/Pose left_cartesian_pose
+geometry_msgs/Pose right_cartesian_pose

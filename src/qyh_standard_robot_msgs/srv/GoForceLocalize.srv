@@ -1,0 +1,9 @@
+# Force localization with pose (40049,40051,40053)
+# Must be set atomically: x, y, yaw
+# Standard ROS units (converted to mm, mm, 1/1000 rad when writing to Modbus)
+float64 x         # X coordinate [m]
+float64 y         # Y coordinate [m]
+float64 yaw       # Yaw angle [rad]
+---
+bool success
+string message

@@ -1,0 +1,8 @@
+# 获取录制状态服务
+---
+# 输出: 是否正在录制, 当前动作名, 已录制时长(秒), 包路径
+bool is_recording
+string action_name
+float64 duration_sec
+string bag_path
+string[] topics

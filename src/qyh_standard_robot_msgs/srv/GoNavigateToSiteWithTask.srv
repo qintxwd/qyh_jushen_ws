@@ -1,0 +1,7 @@
+# Navigate to site with task ID (40066 + 40068)
+# Must be set atomically together: task_id, site_id
+uint16 task_id
+uint16 site_id
+---
+bool success
+string message

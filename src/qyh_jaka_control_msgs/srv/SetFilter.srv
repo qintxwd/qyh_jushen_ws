@@ -1,0 +1,8 @@
+string filter_type
+float64 cutoff_frequency
+float64 max_joint_velocity
+float64 max_joint_acceleration
+float64 max_joint_jerk
+---
+bool success
+string message

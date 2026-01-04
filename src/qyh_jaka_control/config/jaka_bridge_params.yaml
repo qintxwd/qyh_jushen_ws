@@ -1,0 +1,15 @@
+jaka_bridge_node:
+  ros__parameters:
+    # Robot connection
+    robot_ip: "192.168.2.200"
+    auto_connect: true
+    
+    # Servo control
+    servo_frequency_hz: 125.0  # Target output frequency
+    
+    # Smooth servo bridge
+    # Note: Main smoothing is done in vr_clutch (Cartesian space)
+    # Disable interpolation here to reduce latency
+    buffer_size: 5  # Reduced buffer size for lower latency
+    interpolation_weight: 1.0  # 1.0 = no interpolation (direct passthrough)
+    enable_interpolation: false  # Disabled - clutch already smooths

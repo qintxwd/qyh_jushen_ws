@@ -1,0 +1,12 @@
+# 停止点动控制服务
+
+# 机器人ID: 0=左臂, 1=右臂
+int8 robot_id
+
+# 要停止的轴/关节编号 (1-based)
+# 0 = 停止所有轴
+int8 axis_num
+
+---
+bool success
+string message

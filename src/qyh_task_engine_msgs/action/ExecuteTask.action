@@ -1,0 +1,36 @@
+# 执行任务动作
+# 支持异步执行和实时反馈
+
+# ============ Goal ============
+# 任务 JSON 描述
+string task_json
+
+# 是否为调试模式
+bool debug_mode false
+
+---
+
+# ============ Result ============
+# 执行是否成功
+bool success
+
+# 任务 ID
+string task_id
+
+# 最终状态
+string final_status
+
+# 结果消息
+string message
+
+# 总耗时 (秒)
+float64 total_time
+
+---
+
+# ============ Feedback ============
+# 实时状态反馈
+qyh_task_engine_msgs/TaskStatus task_status
+
+# 所有节点的状态列表
+qyh_task_engine_msgs/NodeStatus[] node_statuses

@@ -1,0 +1,20 @@
+# 执行任务服务请求
+
+# 任务 JSON 描述 (完整的行为树结构)
+string task_json
+
+# 是否为调试模式 (单步执行)
+bool debug_mode false
+
+---
+
+# 执行任务服务响应
+
+# 是否成功接受任务
+bool success
+
+# 分配的任务 ID
+string task_id
+
+# 响应消息
+string message

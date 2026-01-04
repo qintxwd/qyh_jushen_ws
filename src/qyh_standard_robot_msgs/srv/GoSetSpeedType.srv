@@ -1,0 +1,5 @@
+# Set speed level (40026) [1,100]
+uint16 speed_level
+---
+bool success
+string message

@@ -1,0 +1,22 @@
+# 腰部电机控制服务
+# 统一控制接口
+# 位置范围: 163711(前倾45°) ~ 230715(竖直0°)
+
+# 命令类型
+uint8 CMD_ENABLE = 1          # 上使能
+uint8 CMD_DISABLE = 2         # 下使能
+uint8 CMD_SET_SPEED = 3       # 设置速度
+uint8 CMD_GO_POSITION = 4     # 去目标位置 (原始值)
+uint8 CMD_GO_ANGLE = 5        # 去目标角度 (度, 0~45)
+uint8 CMD_LEAN_FORWARD = 6    # 手动前倾 (hold=true开始, hold=false停止)
+uint8 CMD_LEAN_BACK = 7       # 手动后仰/回正 (hold=true开始, hold=false停止)
+uint8 CMD_RESET_ALARM = 8     # 复位报警
+uint8 CMD_STOP = 9            # 停止运动
+uint8 CMD_GO_UPRIGHT = 10     # 回到竖直位置
+
+uint8 command                 # 命令类型
+float32 value                 # 参数值 (角度0~45 或 原始位置值 或 速度)
+bool hold                     # 用于前倾/后仰: true=按住, false=松开
+---
+bool success
+string message

@@ -1,0 +1,7 @@
+# 停止录制服务
+---
+# 输出: 是否成功, 消息, 录制时长(秒), 包路径
+bool success
+string message
+float64 duration_sec
+string bag_path

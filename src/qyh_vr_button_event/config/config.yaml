@@ -1,0 +1,18 @@
+qyh_vr_button_event:
+  ros__parameters:
+    left_joy_topic: '/vr/left_controller/joy'
+    right_joy_topic: '/vr/right_controller/joy'
+    left_move_service: '/left/move_gripper'
+    right_move_service: '/right/move_gripper'
+    lift_control_service: '/lift/control'
+    waist_control_service: '/waist/control'
+    waist_state_topic: '/waist/state'
+    manual_velocity_topic: '/manual_velocity_cmd'
+    max_vx: 0.6
+    max_w: 1.2
+    deadzone: 0.2
+    joy_timeout_ms: 500
+    check_timer_ms: 100
+    chassis_keepalive_ms: 100
+    left_hold_angle: 45.0
+    left_return_angle: 0.0

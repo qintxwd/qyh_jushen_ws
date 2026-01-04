@@ -1,0 +1,32 @@
+# Head Motor Parameters
+# 头部电机控制参数配置
+
+head_motor_node:
+  ros__parameters:
+    # Serial port configuration
+    # 串口配置
+    serial_port: "/dev/ttyACM0"
+    baudrate: 1000000
+    
+    # Motor configuration
+    # 电机配置
+    # motor_ids: 舵机ID列表 (需要根据实际接线配置)
+    # - 1: 头部水平旋转 (pan)
+    # - 2: 头部俯仰 (tilt)
+    motor_ids: [1, 2]
+    
+    # Joint names (for JointState message)
+    # 关节名称 (用于 JointState 消息)
+    joint_names: ["head_pan_joint", "head_tilt_joint"]
+    
+    # Position limits in radians
+    # 位置限制 (弧度)
+    # pan: -90° ~ +90° (-1.57 ~ 1.57 rad)
+    # tilt: -45° ~ +45° (-0.785 ~ 0.785 rad)
+    position_min_rad: [-1.5708, -0.7854]
+    position_max_rad: [1.5708, 0.7854]
+    
+    # Control parameters
+    # 控制参数
+    publish_rate: 20          # Joint state publish rate (Hz)
+    move_duration_ms: 100     # Movement duration for position commands (ms)

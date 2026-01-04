@@ -1,0 +1,5 @@
+geometry_msgs/Pose left_pose
+geometry_msgs/Pose right_pose
+bool is_abs
+float64 linear_speed
+float64 angular_speed

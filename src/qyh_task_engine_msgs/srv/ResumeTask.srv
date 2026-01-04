@@ -1,0 +1,9 @@
+# 恢复任务服务
+
+# 任务 ID
+string task_id
+
+---
+
+bool success
+string message

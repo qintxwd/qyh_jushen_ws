@@ -1,0 +1,86 @@
+# SmoothServoBridge 平滑度优化参数配置
+# 
+# 用途：消除抖动，提高路径平滑度
+# 使用方法：ros2 launch qyh_jaka_control jaka_control.launch.py config_file:=$(ros2 pkg prefix qyh_jaka_control)/share/qyh_jaka_control/config/smooth_params.yaml
+
+/**:
+  ros__parameters:
+    # ========== 核心平滑参数 ==========
+    
+    # 1. 插值权重 (0.0-1.0)
+    #    - 控制每次输出向目标靠近的速度
+    #    - 越小越平滑，但响应越慢
+    #    - 0.5 = 每次移动一半距离 (默认)
+    #    - 0.3 = 每次移动30%，更平滑
+    #    - 0.2 = 每次移动20%，非常平滑但响应慢
+    interpolation_weight: 0.3  # 推荐：0.2-0.3 用于平滑，0.4-0.5 用于响应
+    
+    # 2. 缓冲区大小
+    #    - 存储未来指令的数量
+    #    - 越大越能提前规划，运动更平滑
+    #    - 但增加延迟
+    buffer_size: 16  # 推荐：16-20 用于平滑，10-12 用于低延迟
+    
+    # 3. 速度安全系数 (0.1-1.0)
+    #    - 实际速度 = 最大速度 × 安全系数
+    #    - 越小越慢，运动越平滑
+    #    - 0.8 = 80%速度 (默认)
+    #    - 0.6 = 60%速度，更平滑
+    velocity_safety_factor: 0.65  # 推荐：0.6-0.7 用于平滑操作
+    
+    # ========== 插值控制 ==========
+    
+    # 是否启用插值（false会直接使用目标值，不推荐）
+    enable_interpolation: true
+    
+    # 伺服周期（与cycle_time_ms匹配）
+    cycle_time_ms: 8.0  # 8ms = 125Hz
+    
+    # ========== 高级参数 ==========
+    
+    # Stale阈值：超过此时间认为缓存失效
+    # 增大可以避免误判，但可能导致旧数据被使用
+    stale_threshold_ms: 300  # 300ms (适应手柄30Hz输入)
+    
+    # 命令超时：超过此时间无新指令则认为超时
+    command_timeout_sec: 0.5
+    
+    # ========== 低通滤波 (可选，需要代码启用) ==========
+    
+    # 低通滤波截止频率 (Hz)
+    # 用于滤除高频抖动
+    # 推荐：5-10 Hz 用于平滑VR输入
+    low_pass_cutoff_hz: 8.0
+    
+    # 位置增量限制 (rad)
+    # 单个周期内的最大关节变化量
+    # 用于防止大跳变
+    max_position_delta: 0.05  # 约2.87度
+    
+    # ========== 预设配置选择 ==========
+    
+    # 预设1: 超平滑模式（牺牲响应速度）
+    # interpolation_weight: 0.2
+    # buffer_size: 20
+    # velocity_safety_factor: 0.6
+    # low_pass_cutoff_hz: 6.0
+    
+    # 预设2: 平衡模式（推荐）
+    # interpolation_weight: 0.3
+    # buffer_size: 16
+    # velocity_safety_factor: 0.65
+    # low_pass_cutoff_hz: 8.0
+    
+    # 预设3: 快速响应模式
+    # interpolation_weight: 0.4
+    # buffer_size: 12
+    # velocity_safety_factor: 0.75
+    # low_pass_cutoff_hz: 10.0
+    
+    # ========== 调试选项 ==========
+    
+    # 是否启用详细日志
+    verbose_logging: false
+    
+    # 性能统计频率
+    stats_update_interval_sec: 2.0

@@ -1,0 +1,16 @@
+# 腰部电机控制参数
+waist_control_node:
+  ros__parameters:
+    # PLC 连接参数
+    plc_ip: "192.168.1.88"
+    plc_port: 502
+
+    # 状态发布频率 (Hz)
+    publish_rate: 10.0
+
+    # 位置范围 (原始值)
+    # 163711 = 前倾45度
+    # 230715 = 竖直0度
+    position_upright: 230715    # 竖直位置
+    position_max_lean: 163711   # 最大前倾位置
+    max_angle: 45.0             # 最大前倾角度(度)
