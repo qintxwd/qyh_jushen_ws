@@ -21,17 +21,70 @@ VR手柄 → qyh_vr_calibration → qyh_teleoperation_controller → qyh_jaka_co
 
 详细架构请参考: [TELEOPERATION_INTEGRATION_GUIDE.md](/TELEOPERATION_INTEGRATION_GUIDE.md)
 
-## SDK 版本
+## SDK 版本与多架构支持
 
+本包支持 **x64** 和 **ARM64** 双架构编译，会自动检测系统架构并选择对应的 JAKA SDK 库。
+
+### ARM64 (Jetson/嵌入式平台)
 - **JAKA SDK**: 2.3.0.13 (NVIDIA Jetson 优化版)
-- **更新日期**: 2025-07-18
-- **库文件**: `thirdparty/lib/libjakaAPI_2_3_0_13.so`
+- **库文件**: `thirdparty/arm64/lib/libjakaAPI_2_3_0_13.so`
 - **主要特性**:
   - 支持末端传感器扭矩反馈 (edg_get_stat)
   - 支持读写双臂安装位置
   - 废弃 edg_recv 接口，edg_get_stat 已脱离依赖
   - 多线程安全优化
   - edg优先级提升至98，绑定到CPU10
+
+### x64 (PC/服务器平台)
+- **JAKA SDK**: 2.3.3
+- **库文件**: `thirdparty/x64/lib/libjakaAPI_2_3_3.so`
+- **主要特性**:
+  - 更新的SDK版本
+  - 完整的桌面开发支持
+
+### 架构检测与编译
+
+CMake 会自动检测系统架构：
+```cmake
+Detecting architecture...
+🔧 Detected ARM64 architecture
+📁 JAKA Include directory: .../thirdparty/arm64/include
+📁 JAKA Library directory: .../thirdparty/arm64/lib
+✅ Found JAKA API library: libjakaAPI_2_3_0_13.so
+```
+
+### 目录结构重组
+
+⚠️ **首次编译前需要重组目录结构**：
+
+```bash
+# Linux/macOS
+cd qyh_jushen_ws/src/qyh_jaka_control
+bash scripts/reorganize_thirdparty.sh
+
+# Windows PowerShell
+cd qyh_jushen_ws\src\qyh_jaka_control
+.\scripts\reorganize_thirdparty.ps1
+```
+
+重组后的目录结构：
+```
+thirdparty/
+├── arm64/
+│   ├── include/       # ARM64 头文件
+│   │   ├── JAKAZuRobot.h
+│   │   ├── jkerr.h
+│   │   └── jktypes.h
+│   └── lib/           # ARM64 库
+│       └── libjakaAPI_2_3_0_13.so
+└── x64/
+    ├── include/       # x64 头文件
+    │   ├── JAKAZuRobot.h
+    │   ├── jkerr.h
+    │   └── jktypes.h
+    └── lib/           # x64 库
+        └── libjakaAPI_2_3_3.so
+```
 
 ## 核心节点: jaka_control_node
 

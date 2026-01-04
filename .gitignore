@@ -3,6 +3,8 @@ build/
 install/
 log/
 
+qyh_jushen_log/
+
 # Python 缓存
 __pycache__/
 *.py[cod]
