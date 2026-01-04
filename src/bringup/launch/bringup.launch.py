@@ -28,32 +28,17 @@ def generate_launch_description():
         f"{robot_name}_{robot_version}",
         daemon_launch_name
     ])
-    
-    # navigation launch文件路径
-    # nav_launch_path = PathJoinSubstitution([
-    #     bringup_pkg_share,
-    #     'launch',
-    #     f"{robot_name}_{robot_version}",
-    #     nav_launch_name
-    # ])
-    
+        
     # 包含daemon launch文件
     daemon_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(daemon_launch_path),
         launch_arguments={}.items()
     )
     
-    # 包含navigation launch文件
-    # nav_launch = IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource(nav_launch_path),
-    #     launch_arguments={}.items()
-    # )
-    
     # 创建LaunchDescription
     ld = LaunchDescription()
     
     # 添加子launch文件
     ld.add_action(daemon_launch)
-    # ld.add_action(nav_launch)
     
     return ld
