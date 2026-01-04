@@ -7,7 +7,9 @@ log/
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
+
+# 注意：不忽略.so文件，因为thirdparty中的库文件需要提交
+# *.so
 
 # IDE
 .vscode/
