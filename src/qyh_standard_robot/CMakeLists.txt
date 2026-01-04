@@ -13,6 +13,17 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(qyh_standard_robot_msgs REQUIRED)
 
+# Detect architecture
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+  set(ARCH_DIR "arm64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  set(ARCH_DIR "x64")
+else()
+  set(ARCH_DIR "arm64")  # Default to arm64 for Jetson
+endif()
+
+message(STATUS "Detected architecture: ${CMAKE_SYSTEM_PROCESSOR}, using ${ARCH_DIR}")
+
 # Include directories
 include_directories(
   include
@@ -21,15 +32,13 @@ include_directories(
 
 # Link directories
 link_directories(
-  thirdparty/lib/linux
+  ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/lib/linux/${ARCH_DIR}
 )
 
 # Add library
 add_library(${PROJECT_NAME}_node SHARED
   src/standard_robot_node.cpp
 )
-
-target_link_directories(${PROJECT_NAME}_node PRIVATE thirdparty/lib/linux)
 
 target_compile_features(${PROJECT_NAME}_node PUBLIC c_std_99 cxx_std_17)
 
@@ -51,7 +60,6 @@ rclcpp_components_register_nodes(${PROJECT_NAME}_node "qyh_standard_robot::Stand
 add_executable(${PROJECT_NAME}_node_exe
   src/standard_robot_node_main.cpp
 )
-target_link_directories(${PROJECT_NAME}_node_exe PRIVATE thirdparty/lib/linux)
 target_compile_features(${PROJECT_NAME}_node_exe PUBLIC c_std_99 cxx_std_17)
 
 ament_target_dependencies(${PROJECT_NAME}_node_exe
@@ -82,9 +90,12 @@ install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(DIRECTORY thirdparty/lib/linux/
+# Install the correct architecture libraries
+install(DIRECTORY thirdparty/lib/linux/${ARCH_DIR}/
   DESTINATION lib
   FILES_MATCHING PATTERN "*.so*"
+  PATTERN "*.so" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  PATTERN "*.so.*" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 )
 
 if(BUILD_TESTING)
