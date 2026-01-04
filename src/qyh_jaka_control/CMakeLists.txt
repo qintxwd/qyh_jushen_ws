@@ -98,6 +98,13 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# Install Python scripts
+install(PROGRAMS
+  scripts/qyh_jaka_joint_adapter_node.py
+  scripts/test_joint_adapter.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(DIRECTORY
   config/
   DESTINATION share/${PROJECT_NAME}/config
