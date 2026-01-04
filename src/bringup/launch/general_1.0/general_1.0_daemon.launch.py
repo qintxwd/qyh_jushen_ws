@@ -148,7 +148,7 @@ def generate_launch_description():
             PathJoinSubstitution([
                 FindPackageShare('qyh_head_motor_control'),
                 'launch',
-                'head_motor_control.launch.py'
+                'head_motor.launch.py'
             ])
         ]),
         condition=IfCondition(LaunchConfiguration('enable_head'))
