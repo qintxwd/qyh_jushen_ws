@@ -262,10 +262,24 @@ class WaistMoveToNode(SkillNode):
         return None
     
     def halt(self):
-        """中断腰部移动"""
+        """中断腰部移动 - 发送停止命令"""
         super().halt()
-        # TODO: 发送停止命令
-        self.log_info("Waist halted")
+        self.log_info("Waist halted - sending STOP command")
+        
+        # 发送停止命令
+        if self.ros_node and self._waist_client:
+            try:
+                from qyh_waist_msgs.srv import WaistControl
+                request = WaistControl.Request()
+                request.command = 9  # CMD_STOP
+                request.value = 0.0
+                request.hold = False
+                
+                # 异步发送，不等待响应
+                self._waist_client.call_async(request)
+                self.log_info("Waist STOP command sent")
+            except Exception as e:
+                self.log_error(f"Failed to send STOP command: {e}")
     
     def reset(self):
         """重置节点状态"""
@@ -282,18 +296,46 @@ class WaistMoveToNode(SkillNode):
 
 class WaistStopNode(SkillNode):
     """
-    腰部电机停止节点
+    腰部电机停止节点 - 双重保障机制
+    1. 发送当前位置作为目标位置
+    2. 发送 CMD_STOP 命令
     """
     
     NODE_TYPE = "WaistStop"
     
     PARAM_SCHEMA = {}
     
+    def __init__(self, node_id: str, params: dict = None, **kwargs):
+        super().__init__(node_id, params, **kwargs)
+        self._status_sub = None
+        self._current_position = 0
+        self._status_received = False
+    
     def setup(self) -> bool:
-        return True
+        if not self.ros_node:
+            return True
+        
+        try:
+            from qyh_waist_msgs.msg import WaistState
+            # 订阅状态以获取当前位置
+            self._status_sub = self.ros_node.create_subscription(
+                WaistState,
+                '/waist/state',
+                self._status_callback,
+                10
+            )
+            return True
+        except Exception as e:
+            self.log_warn(f"Failed to setup waist state subscription: {e}")
+            return True
+    
+    def _status_callback(self, msg):
+        """状态回调 - 记录当前位置"""
+        self._current_position = msg.current_position
+        self._status_received = True
     
     def execute(self) -> SkillResult:
-        self.log_info("Stopping waist")
+        self.log_info("Stopping waist with dual-safety mechanism")
         
         if not self.ros_node:
             return SkillResult(
@@ -313,17 +355,28 @@ class WaistStopNode(SkillNode):
                     message="Waist service not available"
                 )
             
-            request = WaistControl.Request()
-            request.command = 9  # STOP
-            request.value = 0.0
-            request.hold = False
+            # 保障1: 发送当前位置作为目标位置（如果已收到状态）
+            if self._status_received:
+                self.log_info(f"  Safety 1: Setting target to current position: {self._current_position}")
+                request_pos = WaistControl.Request()
+                request_pos.command = 4  # CMD_GO_POSITION
+                request_pos.value = float(self._current_position)
+                request_pos.hold = False
+                client.call_async(request_pos)
+            else:
+                self.log_warn("  No waist state received, skipping position-based stop")
             
-            # 不等待响应，立即返回
-            client.call_async(request)
+            # 保障2: 发送 CMD_STOP
+            self.log_info("  Safety 2: Sending CMD_STOP")
+            request_stop = WaistControl.Request()
+            request_stop.command = 9  # CMD_STOP
+            request_stop.value = 0.0
+            request_stop.hold = False
+            client.call_async(request_stop)
             
             return SkillResult(
                 status=SkillStatus.SUCCESS,
-                message="Waist stop command sent"
+                message="Waist stop commands sent (dual-safety)"
             )
         except Exception as e:
             return SkillResult(

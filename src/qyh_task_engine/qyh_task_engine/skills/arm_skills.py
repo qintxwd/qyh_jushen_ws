@@ -230,9 +230,24 @@ class ArmMoveJNode(SkillNode):
             return -1
     
     def halt(self):
-        """中断执行"""
+        """中断执行 - 发送急停命令"""
         super().halt()
-        # TODO: 发送急停命令
+        self.log_info("Arm halted - sending motion_abort")
+        
+        # 发送急停命令
+        if self.ros_node:
+            try:
+                from std_srvs.srv import Trigger
+                client = self.ros_node.create_client(Trigger, '/jaka/robot/motion_abort')
+                
+                # 异步发送，不等待响应
+                if client.service_is_ready():
+                    client.call_async(Trigger.Request())
+                    self.log_info("Arm motion_abort command sent")
+                else:
+                    self.log_warn("motion_abort service not ready")
+            except Exception as e:
+                self.log_error(f"Failed to send motion_abort: {e}")
     
     def reset(self):
         """重置节点状态"""

@@ -213,10 +213,24 @@ class LiftMoveToNode(SkillNode):
         return None
     
     def halt(self):
-        """中断升降"""
+        """中断升降 - 发送停止命令"""
         super().halt()
-        # TODO: 发送停止命令
-        self.log_info("Lift halted")
+        self.log_info("Lift halted - sending STOP command")
+        
+        # 发送停止命令
+        if self.ros_node and self._lift_client:
+            try:
+                from qyh_lift_msgs.srv import LiftControl
+                request = LiftControl.Request()
+                request.command = 8  # CMD_STOP
+                request.value = 0.0
+                request.hold = False
+                
+                # 异步发送，不等待响应
+                self._lift_client.call_async(request)
+                self.log_info("Lift STOP command sent")
+            except Exception as e:
+                self.log_error(f"Failed to send STOP command: {e}")
     
     def reset(self):
         """重置节点状态"""
@@ -233,18 +247,46 @@ class LiftMoveToNode(SkillNode):
 
 class LiftStopNode(SkillNode):
     """
-    升降电机停止节点
+    升降电机停止节点 - 双重保障机制
+    1. 发送当前位置作为目标位置
+    2. 发送 CMD_STOP 命令
     """
     
     NODE_TYPE = "LiftStop"
     
     PARAM_SCHEMA = {}
     
+    def __init__(self, node_id: str, params: dict = None, **kwargs):
+        super().__init__(node_id, params, **kwargs)
+        self._status_sub = None
+        self._current_position = 0.0
+        self._status_received = False
+    
     def setup(self) -> bool:
-        return True
+        if not self.ros_node:
+            return True
+        
+        try:
+            from qyh_lift_msgs.msg import LiftState
+            # 订阅状态以获取当前位置
+            self._status_sub = self.ros_node.create_subscription(
+                LiftState,
+                '/lift/state',
+                self._status_callback,
+                10
+            )
+            return True
+        except Exception as e:
+            self.log_warn(f"Failed to setup lift state subscription: {e}")
+            return True
+    
+    def _status_callback(self, msg):
+        """状态回调 - 记录当前位置"""
+        self._current_position = msg.current_position
+        self._status_received = True
     
     def execute(self) -> SkillResult:
-        self.log_info("Stopping lift")
+        self.log_info("Stopping lift with dual-safety mechanism")
         
         if not self.ros_node:
             return SkillResult(
@@ -264,17 +306,28 @@ class LiftStopNode(SkillNode):
                     message="Lift service not available"
                 )
             
-            request = LiftControl.Request()
-            request.command = 8  # CMD_STOP: 停止运动
-            request.value = 0.0
-            request.hold = False
+            # 保障1: 发送当前位置作为目标位置（如果已收到状态）
+            if self._status_received:
+                self.log_info(f"  Safety 1: Setting target to current position: {self._current_position:.2f}mm")
+                request_pos = LiftControl.Request()
+                request_pos.command = 4  # CMD_GO_POSITION
+                request_pos.value = self._current_position
+                request_pos.hold = False
+                client.call_async(request_pos)
+            else:
+                self.log_warn("  No lift state received, skipping position-based stop")
             
-            # 不等待响应，立即返回
-            client.call_async(request)
+            # 保障2: 发送 CMD_STOP
+            self.log_info("  Safety 2: Sending CMD_STOP")
+            request_stop = LiftControl.Request()
+            request_stop.command = 8  # CMD_STOP
+            request_stop.value = 0.0
+            request_stop.hold = False
+            client.call_async(request_stop)
             
             return SkillResult(
                 status=SkillStatus.SUCCESS,
-                message="Lift stop command sent"
+                message="Lift stop commands sent (dual-safety)"
             )
         except Exception as e:
             return SkillResult(

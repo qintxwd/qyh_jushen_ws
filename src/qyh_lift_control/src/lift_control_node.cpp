@@ -341,15 +341,47 @@ bool LiftControlNode::stop_move()
 {
   RCLCPP_INFO(this->get_logger(), "Stopping movement");
 
-  // 使用 COIL_GO_STOP (1006) 来停止绝对位置移动
-  // 写1触发停止，然后清除
-  if (!write_coil(ModbusAddress::COIL_GO_STOP, true)) {
-    return false;
+  // 双重保障机制：
+  // 1. 发送当前位置作为目标位置（立即生效）
+  // 2. 触发 COIL_GO_STOP 停止信号
+  
+  // 保障1: 发送当前位置 - 让目标=当前，电机停止
+  float current_pos = current_state_.current_position;
+  RCLCPP_INFO(this->get_logger(), "  Setting target to current position: %.2f", current_pos);
+  
+  {
+    std::lock_guard<std::mutex> lock(modbus_mutex_);
+    if (modbus_ctx_) {
+      try {
+        uint32_t raw;
+        std::memcpy(&raw, &current_pos, sizeof(float));
+        // Little-endian byte swap: [低16位, 高16位]
+        std::vector<uint16_t> regs(2);
+        regs[0] = static_cast<uint16_t>(raw & 0xFFFF);
+        regs[1] = static_cast<uint16_t>(raw >> 16);
+        modbus_ctx_->write_registers(
+          ModbusAddress::REG_BASE + ModbusAddress::REG_TARGET_POSITION, regs);
+        
+        // 触发绝对位置GO（让当前位置生效）
+        modbus_ctx_->write_coil(ModbusAddress::COIL_BASE + ModbusAddress::COIL_GO_POSITION, true);
+      } catch (const modbus::Exception & e) {
+        RCLCPP_WARN(this->get_logger(), "  Failed to write current position: %s", e.what());
+      }
+    }
   }
 
-  // 短暂延时后清除停止信号
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  return write_coil(ModbusAddress::COIL_GO_STOP, false);
+  // 保障2: 触发 COIL_GO_STOP
+  if (!write_coil(ModbusAddress::COIL_GO_STOP, true)) {
+    RCLCPP_WARN(this->get_logger(), "  Failed to trigger GO_STOP");
+    // 不返回 false，因为保障1可能已生效
+  } else {
+    // 短暂延时后清除停止信号
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    write_coil(ModbusAddress::COIL_GO_STOP, false);
+  }
+
+  RCLCPP_INFO(this->get_logger(), "  Stop command completed");
+  return true;  // 只要保障1成功就返回 true
 }
 
 void LiftControlNode::handle_control(

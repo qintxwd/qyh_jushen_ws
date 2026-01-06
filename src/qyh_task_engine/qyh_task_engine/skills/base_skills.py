@@ -304,11 +304,26 @@ class BaseMoveToNode(SkillNode):
         return None
     
     def halt(self):
-        """中断导航"""
+        """中断导航 - 发送停止移动命令"""
         super().halt()
         self._is_navigating = False
         self._command_sent = False
-        self.log_info(f"Navigation halted (station {self._station_id})")
+        self.log_info(f"Navigation halted (station {self._station_id}) - sending stop command")
+        
+        # 发送停止移动命令
+        if self.ros_node:
+            try:
+                from qyh_standard_robot_msgs.srv import ControlStopMove
+                client = self.ros_node.create_client(ControlStopMove, 'control_stop_move')
+                
+                # 异步发送，不等待响应
+                if client.service_is_ready() or client.wait_for_service(timeout_sec=0.5):
+                    client.call_async(ControlStopMove.Request())
+                    self.log_info("  Stop move command sent")
+                else:
+                    self.log_warn("  Stop move service not ready")
+            except Exception as e:
+                self.log_error(f"  Failed to send stop command: {e}")
     
     def reset(self):
         """重置节点状态"""
@@ -407,3 +422,61 @@ class BaseVelocityNode(SkillNode):
         """重置节点状态"""
         super().reset()
         self._start_time = None
+
+
+class BaseStopNode(SkillNode):
+    """
+    底盘停止节点 - 停止当前导航或移动
+    """
+    
+    NODE_TYPE = "BaseStop"
+    
+    PARAM_SCHEMA = {}
+    
+    def setup(self) -> bool:
+        return True
+    
+    def execute(self) -> SkillResult:
+        self.log_info("Stopping base movement")
+        
+        if not self.ros_node:
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message="Base stopped (mock mode)"
+            )
+        
+        try:
+            from qyh_standard_robot_msgs.srv import ControlStopMove
+            client = self.ros_node.create_client(
+                ControlStopMove, 'control_stop_move'
+            )
+            
+            if not client.wait_for_service(timeout_sec=1.0):
+                # 如果服务不可用，尝试发送零速度作为备用
+                self.log_warn("Stop move service not available, sending zero velocity")
+                from geometry_msgs.msg import Twist
+                cmd_vel_pub = self.ros_node.create_publisher(Twist, '/cmd_vel', 10)
+                msg = Twist()
+                msg.linear.x = 0.0
+                msg.angular.z = 0.0
+                cmd_vel_pub.publish(msg)
+                
+                return SkillResult(
+                    status=SkillStatus.SUCCESS,
+                    message="Base stopped (zero velocity)"
+                )
+            
+            # 发送停止移动命令
+            request = ControlStopMove.Request()
+            future = client.call_async(request)
+            
+            # 不等待响应，立即返回
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message="Base stop command sent"
+            )
+        except Exception as e:
+            return SkillResult(
+                status=SkillStatus.FAILURE,
+                message=f"Failed to stop base: {e}"
+            )
