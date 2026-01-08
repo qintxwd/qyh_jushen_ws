@@ -30,7 +30,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'camera_name': 'right_camera',
-            'usb_port': '2-3.1.3',
+            'usb_port': '2-3.4.2',
             'device_num': '2',
             'sync_mode': 'software_triggering',
             'config_file_path': config_file_path,
@@ -45,7 +45,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'camera_name': 'left_camera',
-            'usb_port': '2-3.3.4',
+            'usb_port': '2-3.4.1',
             'device_num': '2',
             'sync_mode': 'hardware_triggering',
             'config_file_path': config_file_path,
