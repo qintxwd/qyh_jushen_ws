@@ -73,6 +73,10 @@ private:
 
     void command_p_timer_callback();
 
+    // ==================== ServoJ (Joint Stream) ====================
+    void command_j_timer_callback();
+    void command_j_input_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
+
     // void jog_timer_callback();
 
     void command_p_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
@@ -117,6 +121,16 @@ private:
     // 新增：命令过期时间（ms），超过则认为数据可能已过期
     rclcpp::Duration command_timeout_ = rclcpp::Duration::from_seconds(0.2);
 
+    // ServoJ 输入缓存（双臂合并：14维 = 左7 + 右7）
+    std::array<double, 14> dual_command_servo_j_val_{};
+    std::array<double, 14> dual_last_target_servo_j_{};
+    rclcpp::Time dual_last_command_j_time_{};
+    ServoInputState joint_input_state_ = ServoInputState::NEVER_RECEIVED;
+
+    // 当 ServoJ 活跃时，禁止 ServoP 下发，避免两套伺服打架
+    std::atomic<bool> servo_j_override_{false};
+    bool servo_j_override_prev_{false};
+
     // 状态
     std::atomic<bool> connected_;
     std::atomic<bool> powered_;
@@ -155,6 +169,9 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_p_publisher_; //用定时器发送servo p指令[以固定的8ms频率发送]，将收到的左右手指令合并后发送出去
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_p_subscriber_; //接收上面的8ms频率的servo p指令，具体进行执行
 
+    // ServoJ 输入：外部可直接发布 14 维关节目标到该 topic
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_j_subscriber_;
+
     // 服务
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_on_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_off_;
@@ -176,6 +193,7 @@ private:
     rclcpp::TimerBase::SharedPtr right_timer_;
     // rclcpp::TimerBase::SharedPtr command_j_timer_;
     rclcpp::TimerBase::SharedPtr command_p_timer_;
+    rclcpp::TimerBase::SharedPtr command_j_timer_;
     rclcpp::TimerBase::SharedPtr status_timer_;
     // rclcpp::TimerBase::SharedPtr jog_timer_;    
 };

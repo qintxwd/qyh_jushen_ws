@@ -56,6 +56,11 @@ JakaControlNode::JakaControlNode()
         "/dual_arm/command_servo_p", 10,
         std::bind(&JakaControlNode::command_p_callback, this, std::placeholders::_1));
 
+    // 订阅 ServoJ（双臂14维关节目标）：用于录制/回放/策略推理的稳定关节控制入口
+    dual_arm_command_j_subscriber_ = create_subscription<sensor_msgs::msg::JointState>(
+        "/dual_arm/command_servo_j", 10,
+        std::bind(&JakaControlNode::command_j_input_callback, this, std::placeholders::_1));
+
     robot_ = std::make_shared<JAKAZuRobot>();
     
     // 创建服务处理器（负责所有服务回调）
@@ -148,6 +153,9 @@ JakaControlNode::JakaControlNode()
     has_left_cached_state_ = false;
     has_right_cached_state_ = false;
 
+    // 初始化 ServoJ 时间戳，避免 NEVER_RECEIVED 状态下计算时间差出错
+    dual_last_command_j_time_ = this->get_clock()->now();
+
     // 按照官方示例程序的标准初始化流程
     RCLCPP_INFO(get_logger(), "Connecting to robot at %s...", robot_ip_.c_str());
     if (robot_->login_in(robot_ip_.c_str()) == ERR_SUCC) {
@@ -206,6 +214,7 @@ JakaControlNode::JakaControlNode()
     left_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::left_timer_callback, this));
     right_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::right_timer_callback, this));
     command_p_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::command_p_timer_callback, this));
+    command_j_timer_ = create_wall_timer(period, std::bind(&JakaControlNode::command_j_timer_callback, this));
     status_timer_ = create_wall_timer(200ms, std::bind(&JakaControlNode::publishStatus, this));
     // jog_timer_ = create_wall_timer(std::chrono::milliseconds(static_cast<int>(jog_time_ * 1000)),std::bind(&JakaControlNode::jog_timer_callback, this));
     
@@ -240,6 +249,7 @@ void JakaControlNode::left_timer_callback()
     // edg_get_stat 单位mm和rad
     if (robot_->edg_get_stat(0, &cached_left_joints_, &cached_left_pose_) == ERR_SUCC) // 0 for left arm
     {
+        has_left_cached_state_ = true;  // 标记缓存有效
         cached_left_pose_.rpy.rx = deg2rad(cached_left_pose_.rpy.rx);
         cached_left_pose_.rpy.ry = deg2rad(cached_left_pose_.rpy.ry);
         cached_left_pose_.rpy.rz = deg2rad(cached_left_pose_.rpy.rz);
@@ -322,6 +332,7 @@ void JakaControlNode::right_timer_callback()
     // be careful! cartesian read rpy in degrees, but requires radius to control servo p
     if (robot_->edg_get_stat(1, &cached_right_joints_, &cached_right_pose_) == ERR_SUCC) // 1 for right arm
     {
+        has_right_cached_state_ = true;  // 标记缓存有效
         cached_right_pose_.rpy.rx = deg2rad(cached_right_pose_.rpy.rx);
         cached_right_pose_.rpy.ry = deg2rad(cached_right_pose_.rpy.ry);
         cached_right_pose_.rpy.rz = deg2rad(cached_right_pose_.rpy.rz);
@@ -501,6 +512,11 @@ void JakaControlNode::command_p_callback(const sensor_msgs::msg::JointState::Sha
         return;
     }
 
+    // ServoJ 活跃时，禁止 ServoP 下发，避免两套伺服同时写入 edg 缓冲导致指令混乱
+    if (servo_j_override_.load()) {
+        return;
+    }
+
     // 检查长度
     if (msg->position.size() != 12) {
         RCLCPP_ERROR(this->get_logger(), "command_p_callback: expected 12 positions, got %zu", msg->position.size());
@@ -540,6 +556,106 @@ void JakaControlNode::command_p_callback(const sensor_msgs::msg::JointState::Sha
         }
     } catch (const std::exception &e) {
         RCLCPP_ERROR(this->get_logger(), "Exception in command_p_callback: %s", e.what());
+    }
+}
+
+void JakaControlNode::command_j_input_callback(const sensor_msgs::msg::JointState::SharedPtr msg)
+{
+    if (!msg) {
+        return;
+    }
+
+    if (msg->position.size() != 14) {
+        RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+            "command_j_input_callback: expected 14 positions (7 left + 7 right), got %zu", msg->position.size());
+        return;
+    }
+
+    // 缓存最新目标；实际下发由固定周期 timer 负责，确保发送频率稳定
+    for (size_t i = 0; i < 14; ++i) {
+        dual_command_servo_j_val_[i] = msg->position[i];
+    }
+    dual_last_command_j_time_ = this->get_clock()->now();
+    if (joint_input_state_ == ServoInputState::NEVER_RECEIVED) {
+        dual_last_target_servo_j_ = dual_command_servo_j_val_;
+    }
+    joint_input_state_ = ServoInputState::ACTIVE;
+}
+
+void JakaControlNode::command_j_timer_callback()
+{
+    if (!connected_ || !powered_ || !enabled_ || !servo_running_) {
+        servo_j_override_.store(false);
+        servo_j_override_prev_ = false;
+        return;
+    }
+
+    const auto now = this->get_clock()->now();
+
+    // ServoJ 是否认为“活跃”：在超时窗口内收到过目标，则保持 override
+    bool override_active = false;
+    if (joint_input_state_ != ServoInputState::NEVER_RECEIVED) {
+        const auto age = now - dual_last_command_j_time_;
+        override_active = (age <= command_timeout_);
+
+        if (age <= active_window_) {
+            joint_input_state_ = ServoInputState::ACTIVE;
+        } else if (age <= command_timeout_) {
+            joint_input_state_ = ServoInputState::HOLD;
+        } else {
+            joint_input_state_ = ServoInputState::TIMEOUT;
+        }
+    }
+
+    // falling-edge: ServoJ 退出时，将 ServoP 的 hold 目标重置为“当前姿态”，避免恢复 ServoP 时突然跳变
+    if (servo_j_override_prev_ && !override_active) {
+        if (has_left_cached_state_) {
+            left_last_target_pose_ = cached_left_pose_;
+            left_input_state_ = ServoInputState::HOLD;
+        }
+        if (has_right_cached_state_) {
+            right_last_target_pose_ = cached_right_pose_;
+            right_input_state_ = ServoInputState::HOLD;
+        }
+    }
+
+    servo_j_override_.store(override_active);
+    servo_j_override_prev_ = override_active;
+
+    if (!override_active) {
+        return;
+    }
+
+    // 选择目标：ACTIVE 用最新输入，HOLD/TIMEOUT 维持 last_target
+    std::array<double, 14> target = dual_last_target_servo_j_;
+    if (joint_input_state_ == ServoInputState::ACTIVE) {
+        target = dual_command_servo_j_val_;
+        dual_last_target_servo_j_ = target;
+    }
+
+    try {
+        JointValue joint_left;
+        JointValue joint_right;
+
+        for (int i = 0; i < 7; ++i) {
+            joint_left.jVal[i] = target[static_cast<size_t>(i)];
+            joint_right.jVal[i] = target[static_cast<size_t>(i + 7)];
+        }
+
+        // 原子发送：左右臂 servo_j 压入缓冲后一次 edg_send（保持与 ServoP 相同的时序）
+        RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 200,
+            "[ServoJ] sending: L[0]=%.4f R[0]=%.4f state=%d",
+            joint_left.jVal[0], joint_right.jVal[0], static_cast<int>(joint_input_state_));
+
+        robot_->edg_servo_j(0, &joint_left, ABS, 1);
+        robot_->edg_servo_j(1, &joint_right, ABS, 1);
+        int ret = robot_->edg_send();
+        if (ret != 0) {
+            RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                "edg_send (servo_j) failed with code %d", ret);
+        }
+    } catch (const std::exception &e) {
+        RCLCPP_ERROR(this->get_logger(), "Exception in command_j_timer_callback: %s", e.what());
     }
 }
 
@@ -829,6 +945,13 @@ bool JakaControlNode::startServoInternal() {
         // 初始化 last_target 为当前缓存位姿，便于进入 HOLD 时保持
         left_last_target_pose_ = cached_left_pose_;
         right_last_target_pose_ = cached_right_pose_;
+
+        // 初始化 ServoJ 目标为当前关节位置，避免第一次 ServoJ 指令时突然跳变
+        for (int i = 0; i < 7; ++i) {
+            dual_last_target_servo_j_[static_cast<size_t>(i)] = cached_left_joints_.jVal[i];
+            dual_last_target_servo_j_[static_cast<size_t>(i + 7)] = cached_right_joints_.jVal[i];
+        }
+        joint_input_state_ = ServoInputState::NEVER_RECEIVED;
 
         servo_running_ = true;
 
