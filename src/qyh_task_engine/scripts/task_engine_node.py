@@ -240,6 +240,8 @@ class TaskEngineNode(Node):
         msg.progress = float(status_dict.get('progress', 0.0))
         msg.message = status_dict.get('message', '')
         msg.elapsed_time = float(status_dict.get('elapsed_time', 0.0))
+        # 填充节点状态列表
+        msg.node_statuses = self._dict_to_node_statuses(status_dict)
         return msg
     
     def _dict_to_node_statuses(self, status_dict: dict) -> list:
@@ -253,6 +255,16 @@ class TaskEngineNode(Node):
             msg.status = node_state.get('status', 'idle')
             msg.message = node_state.get('result', {}).get('message', '') if node_state.get('result') else ''
             msg.duration = float(node_state.get('duration', 0.0))
+            
+            # 扩展字段（用于复杂场景）
+            msg.children_count = int(node_state.get('children_count', 0))
+            msg.current_child_index = int(node_state.get('current_child_index', 0))
+            msg.current_iteration = int(node_state.get('current_iteration', 0))
+            
+            # total_iterations 可能是 'infinite' 字符串或数字
+            total_iter = node_state.get('total_iterations', 0)
+            msg.total_iterations = 0 if total_iter == 'infinite' else int(total_iter)
+            
             node_statuses.append(msg)
         return node_statuses
 

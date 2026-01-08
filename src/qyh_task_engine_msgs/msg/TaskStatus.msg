@@ -32,3 +32,6 @@ builtin_interfaces/Time start_time
 
 # 已执行时间 (秒)
 float64 elapsed_time
+
+# 所有节点的状态列表
+NodeStatus[] node_statuses
