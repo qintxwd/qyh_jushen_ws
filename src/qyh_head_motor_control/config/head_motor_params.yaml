@@ -11,20 +11,28 @@ head_motor_node:
     # Motor configuration
     # 电机配置
     # motor_ids: 舵机ID列表 (需要根据实际接线配置)
-    # - 1: 头部水平旋转 (pan)
-    # - 2: 头部俯仰 (tilt)
+    # - 1: 上下点头 (tilt)
+    # - 2: 左右摇头 (pan)
     motor_ids: [1, 2]
     
     # Joint names (for JointState message)
     # 关节名称 (用于 JointState 消息)
-    joint_names: ["head_pan_joint", "head_tilt_joint"]
+    joint_names: ["head_tilt_joint", "head_pan_joint"]
     
     # Position limits in radians
     # 位置限制 (弧度)
-    # pan: -90° ~ +90° (-1.57 ~ 1.57 rad)
-    # tilt: -45° ~ +45° (-0.785 ~ 0.785 rad)
-    position_min_rad: [-1.5708, -0.7854]
-    position_max_rad: [1.5708, 0.7854]
+    # ID 1 (tilt): -45° ~ +45° (-0.7854 ~ 0.7854 rad)
+    # ID 2 (pan): -90° ~ +90° (-1.5708 ~ 1.5708 rad)
+    position_min_rad: [-0.7854, -1.5708]
+    position_max_rad: [0.7854, 1.5708]
+    
+    # Raw position mapping (hardware values [0-1000])
+    # 原始位置映射 (硬件值 [0-1000])
+    # ID 1 (tilt): 前倾45° → 375, 中间0° → 580, 后仰45° → 785
+    # ID 2 (pan): 最右边90° → 70, 中间0° → 440, 最左边90° → 820
+    position_center_raw: [580, 440]       # 中间位置 (0°对应的原始值)
+    position_min_raw: [375, 820]          # 最小角度对应的原始值
+    position_max_raw: [785, 70]           # 最大角度对应的原始值
     
     # Control parameters
     # 控制参数

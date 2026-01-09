@@ -1,5 +1,10 @@
 #include <sensor_msgs/msg/joy.hpp>
 #include <cmath>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
+#include <std_srvs/srv/set_bool.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 #include <qyh_lift_msgs/msg/lift_state.hpp>
 #include <qyh_lift_msgs/srv/lift_control.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -31,10 +36,15 @@ public:
     this->declare_parameter<std::string>("waist_control_service", "/waist/control");
     this->declare_parameter<std::string>("waist_state_topic", "/waist/state");
     this->declare_parameter<std::string>("manual_velocity_topic", "/manual_velocity_cmd");
+    this->declare_parameter<std::string>("vr_head_pose_topic", "/vr/head/pose");
+    this->declare_parameter<std::string>("head_cmd_topic", "/head_motor_node/cmd_position");
+    this->declare_parameter<std::string>("head_follow_service", "/vr/enable_head_follow");
     this->declare_parameter<double>("max_vx", 0.6);
     this->declare_parameter<double>("max_w", 1.2);
     this->declare_parameter<double>("deadzone", 0.2);
     this->declare_parameter<double>("waist_stop_offset_deg", 2.0);
+    this->declare_parameter<double>("max_head_pan_rad", 1.5708);   // ±90°
+    this->declare_parameter<double>("max_head_tilt_rad", 0.7854);  // ±45°
     this->declare_parameter<int>("joy_timeout_ms", 500);
     this->declare_parameter<int>("check_timer_ms", 100);
     this->declare_parameter<int>("chassis_keepalive_ms", 100);
@@ -47,10 +57,15 @@ public:
     waist_control_service_ = this->get_parameter("waist_control_service").as_string();
     manual_velocity_topic_ = this->get_parameter("manual_velocity_topic").as_string();
     waist_state_topic_ = this->get_parameter("waist_state_topic").as_string();
+    vr_head_pose_topic_ = this->get_parameter("vr_head_pose_topic").as_string();
+    head_cmd_topic_ = this->get_parameter("head_cmd_topic").as_string();
+    head_follow_service_ = this->get_parameter("head_follow_service").as_string();
     max_vx_ = this->get_parameter("max_vx").as_double();
     max_w_ = this->get_parameter("max_w").as_double();
     deadzone_ = this->get_parameter("deadzone").as_double();
     waist_stop_offset_deg_ = this->get_parameter("waist_stop_offset_deg").as_double();
+    max_head_pan_rad_ = this->get_parameter("max_head_pan_rad").as_double();
+    max_head_tilt_rad_ = this->get_parameter("max_head_tilt_rad").as_double();
     joy_timeout_ms_ = this->get_parameter("joy_timeout_ms").as_int();
     check_timer_ms_ = this->get_parameter("check_timer_ms").as_int();
     chassis_keepalive_ms_ = this->get_parameter("chassis_keepalive_ms").as_int();
@@ -88,6 +103,21 @@ public:
       waist_state_topic_, 10, [this](const qyh_waist_msgs::msg::WaistState::SharedPtr msg){
         waist_current_angle_ = msg->current_angle;
       });
+
+    // VR head pose subscription for head following
+    vr_head_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+      vr_head_pose_topic_, 10,
+      std::bind(&VRButtonEventNode::vrHeadCallback, this, std::placeholders::_1));
+
+    // head motor command publisher
+    head_cmd_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+      head_cmd_topic_, 10);
+
+    // head follow enable/disable service
+    head_follow_srv_ = this->create_service<std_srvs::srv::SetBool>(
+      head_follow_service_,
+      std::bind(&VRButtonEventNode::enableHeadFollowCallback, this,
+                std::placeholders::_1, std::placeholders::_2));
 
     // initialize last joy times to now to avoid immediate timeout
     last_left_joy_time_ = this->now();
@@ -331,12 +361,95 @@ private:
       });
   }
 
+  void vrHeadCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+  {
+    if (!head_follow_enabled_) {
+      return;  // 未开启跟随，忽略
+    }
+    
+    // 将四元数转换为欧拉角
+    tf2::Quaternion quat(
+      msg->pose.orientation.x,
+      msg->pose.orientation.y,
+      msg->pose.orientation.z,
+      msg->pose.orientation.w
+    );
+    
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+    
+    // 映射到舵机角度
+    // yaw -> pan (左右摇头)
+    // pitch -> tilt (上下点头，注意方向可能需要取反)
+    // roll -> 忽略
+    
+    current_head_pan_ = std::max(-max_head_pan_rad_, std::min(max_head_pan_rad_, yaw));
+    current_head_tilt_ = std::max(-max_head_tilt_rad_, std::min(max_head_tilt_rad_, -pitch));  // 取反以匹配舵机方向
+    
+    head_returned_to_center_ = false;
+    publishHeadCommand();
+  }
+
+  void enableHeadFollowCallback(
+    const std_srvs::srv::SetBool::Request::SharedPtr request,
+    std_srvs::srv::SetBool::Response::SharedPtr response)
+  {
+    head_follow_enabled_ = request->data;
+    
+    if (head_follow_enabled_) {
+      RCLCPP_INFO(this->get_logger(), "✅ Head VR following ENABLED via service");
+      head_returned_to_center_ = false;
+      response->success = true;
+      response->message = "Head following enabled";
+    } else {
+      RCLCPP_INFO(this->get_logger(), "❌ Head VR following DISABLED - returning to center");
+      current_head_pan_ = 0.0;
+      current_head_tilt_ = 0.0;
+      head_returned_to_center_ = false;
+      publishHeadCommand();  // 立即发送回中命令
+      response->success = true;
+      response->message = "Head following disabled, returning to center";
+    }
+  }
+
+  void publishHeadCommand()
+  {
+    // 如果未开启跟随且已经回到中心，不再发送
+    if (!head_follow_enabled_ && head_returned_to_center_) {
+      return;
+    }
+    
+    // 发布舵机命令 [tilt, pan] 对应 motor_ids [1, 2]
+    auto msg = std_msgs::msg::Float64MultiArray();
+    
+    // 将弧度转换为归一化值 [-1, 1]
+    double tilt_normalized = current_head_tilt_ / max_head_tilt_rad_;
+    double pan_normalized = current_head_pan_ / max_head_pan_rad_;
+    
+    msg.data = {tilt_normalized, pan_normalized};
+    head_cmd_pub_->publish(msg);
+    
+    RCLCPP_DEBUG(this->get_logger(), "Published head command: tilt=%.3f pan=%.3f", tilt_normalized, pan_normalized);
+    
+    // 如果未开启跟随且刚发送了回中命令，标记已回中
+    if (!head_follow_enabled_ && !head_returned_to_center_) {
+      if (std::abs(current_head_pan_) < 0.01 && std::abs(current_head_tilt_) < 0.01) {
+        head_returned_to_center_ = true;
+        RCLCPP_INFO(this->get_logger(), "Head returned to center position");
+      }
+    }
+  }
+
   // params
   std::string left_joy_topic_, right_joy_topic_;
   std::string left_move_service_, right_move_service_;
   std::string lift_control_service_, waist_control_service_;
   std::string manual_velocity_topic_;
+  std::string vr_head_pose_topic_;
+  std::string head_cmd_topic_;
+  std::string head_follow_service_;
   double max_vx_, max_w_;
+  double max_head_pan_rad_, max_head_tilt_rad_;
   std::string waist_state_topic_;
   double waist_current_angle_ = 0.0;
   double last_sent_waist_angle_ = -9999.0;
@@ -354,15 +467,24 @@ private:
   rclcpp::Time last_right_joy_time_;
   bool last_published_nonzero_manual_ = false;
 
+  // head following state
+  bool head_follow_enabled_ = false;
+  bool head_returned_to_center_ = false;
+  double current_head_pan_ = 0.0;
+  double current_head_tilt_ = 0.0;
+
   // subs/pubs/clients
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr left_joy_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr right_joy_sub_;
   rclcpp::Subscription<qyh_waist_msgs::msg::WaistState>::SharedPtr waist_state_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr vr_head_sub_;
   rclcpp::Client<qyh_gripper_msgs::srv::MoveGripper>::SharedPtr left_move_client_;
   rclcpp::Client<qyh_gripper_msgs::srv::MoveGripper>::SharedPtr right_move_client_;
   rclcpp::Client<qyh_lift_msgs::srv::LiftControl>::SharedPtr lift_client_;
   rclcpp::Client<qyh_waist_msgs::srv::WaistControl>::SharedPtr waist_client_;
   rclcpp::Publisher<qyh_standard_robot_msgs::msg::ManualVelocityCommand>::SharedPtr manual_vel_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr head_cmd_pub_;
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr head_follow_srv_;
 
   // check timeouts and issue stops
   void checkTimeouts()

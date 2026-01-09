@@ -90,16 +90,26 @@ private:
     /**
      * @brief 归一化位置转换为原始位置
      * @param normalized 归一化位置 [-1, 1]
+     * @param motor_index 电机索引
      * @return 原始位置 [0-1000]
      */
-    uint16_t normalizedToRaw(double normalized) const;
+    uint16_t normalizedToRaw(double normalized, size_t motor_index) const;
+    
+    /**
+     * @brief 弧度转换为原始位置
+     * @param radian 弧度
+     * @param motor_index 电机索引
+     * @return 原始位置 [0-1000]
+     */
+    uint16_t radianToRaw(double radian, size_t motor_index) const;
     
     /**
      * @brief 原始位置转换为归一化位置
      * @param raw 原始位置 [0-1000]
+     * @param motor_index 电机索引
      * @return 归一化位置 [-1, 1]
      */
-    double rawToNormalized(uint16_t raw) const;
+    double rawToNormalized(uint16_t raw, size_t motor_index) const;
     
     /**
      * @brief 原始位置转换为弧度
@@ -119,6 +129,9 @@ private:
     std::vector<std::string> joint_names_;
     std::vector<double> position_min_rad_;
     std::vector<double> position_max_rad_;
+    std::vector<int64_t> position_center_raw_;
+    std::vector<int64_t> position_min_raw_;
+    std::vector<int64_t> position_max_raw_;
     int publish_rate_;
     int move_duration_ms_;
     

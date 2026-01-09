@@ -40,8 +40,13 @@ void HeadMotorNode::initParameters()
     this->declare_parameter("joint_names", std::vector<std::string>{"head_pan_joint", "head_tilt_joint"});
     
     // 位置限制 (弧度)
-    this->declare_parameter("position_min_rad", std::vector<double>{-1.57, -0.785});
-    this->declare_parameter("position_max_rad", std::vector<double>{1.57, 0.785});
+    this->declare_parameter("position_min_rad", std::vector<double>{-0.7854, -1.5708});
+    this->declare_parameter("position_max_rad", std::vector<double>{0.7854, 1.5708});
+    
+    // 原始位置映射
+    this->declare_parameter("position_center_raw", std::vector<int64_t>{580, 440});
+    this->declare_parameter("position_min_raw", std::vector<int64_t>{375, 820});
+    this->declare_parameter("position_max_raw", std::vector<int64_t>{785, 70});
     
     // 控制参数
     this->declare_parameter("publish_rate", 20);
@@ -54,6 +59,9 @@ void HeadMotorNode::initParameters()
     joint_names_ = this->get_parameter("joint_names").as_string_array();
     position_min_rad_ = this->get_parameter("position_min_rad").as_double_array();
     position_max_rad_ = this->get_parameter("position_max_rad").as_double_array();
+    position_center_raw_ = this->get_parameter("position_center_raw").as_integer_array();
+    position_min_raw_ = this->get_parameter("position_min_raw").as_integer_array();
+    position_max_raw_ = this->get_parameter("position_max_raw").as_integer_array();
     publish_rate_ = this->get_parameter("publish_rate").as_int();
     move_duration_ms_ = this->get_parameter("move_duration_ms").as_int();
     
@@ -178,7 +186,7 @@ void HeadMotorNode::cmdPositionCallback(const std_msgs::msg::Float64MultiArray::
     
     for (size_t i = 0; i < motor_ids_.size(); i++) {
         ids.push_back(static_cast<uint8_t>(motor_ids_[i]));
-        positions.push_back(normalizedToRaw(msg->data[i]));
+        positions.push_back(normalizedToRaw(msg->data[i], i));
     }
     
     if (!protocol_->setPositions(ids, positions, static_cast<uint16_t>(move_duration_ms_))) {
@@ -237,27 +245,99 @@ void HeadMotorNode::enableTorqueCallback(
     response->message = request->data ? "Torque enabled" : "Torque disabled";
 }
 
-uint16_t HeadMotorNode::normalizedToRaw(double normalized) const
+uint16_t HeadMotorNode::normalizedToRaw(double normalized, size_t motor_index) const
 {
-    // [-1, 1] -> [0, 1000]
+    // [-1, 1] -> 弧度 -> 原始位置
     double clamped = std::max(-1.0, std::min(1.0, normalized));
-    return static_cast<uint16_t>((clamped + 1.0) * 500.0);
+    
+    double min_rad = (motor_index < position_min_rad_.size()) ? position_min_rad_[motor_index] : -M_PI;
+    double max_rad = (motor_index < position_max_rad_.size()) ? position_max_rad_[motor_index] : M_PI;
+    
+    double radian = min_rad + (clamped + 1.0) * 0.5 * (max_rad - min_rad);
+    return radianToRaw(radian, motor_index);
 }
 
-double HeadMotorNode::rawToNormalized(uint16_t raw) const
+uint16_t HeadMotorNode::radianToRaw(double radian, size_t motor_index) const
 {
-    // [0, 1000] -> [-1, 1]
-    return (static_cast<double>(raw) / 500.0) - 1.0;
+    // 弧度 -> 原始位置，使用实际硬件映射
+    if (motor_index >= position_center_raw_.size() ||
+        motor_index >= position_min_raw_.size() ||
+        motor_index >= position_max_raw_.size()) {
+        return 500;  // 默认中间位置
+    }
+    
+    double min_rad = (motor_index < position_min_rad_.size()) ? position_min_rad_[motor_index] : -M_PI;
+    double max_rad = (motor_index < position_max_rad_.size()) ? position_max_rad_[motor_index] : M_PI;
+    
+    int center_raw = position_center_raw_[motor_index];
+    int min_raw = position_min_raw_[motor_index];
+    int max_raw = position_max_raw_[motor_index];
+    
+    // 根据角度正负分段线性映射
+    int raw_pos;
+    if (radian <= 0.0) {
+        // 负角度: [min_rad, 0] -> [min_raw, center_raw]
+        double ratio = (min_rad != 0.0) ? (radian / min_rad) : 0.0;
+        raw_pos = center_raw + static_cast<int>(ratio * (center_raw - min_raw));
+    } else {
+        // 正角度: [0, max_rad] -> [center_raw, max_raw]
+        double ratio = (max_rad != 0.0) ? (radian / max_rad) : 0.0;
+        raw_pos = center_raw + static_cast<int>(ratio * (max_raw - center_raw));
+    }
+    
+    // 限制在 [0, 1000] 范围内
+    return static_cast<uint16_t>(std::max(0, std::min(1000, raw_pos)));
+}
+
+double HeadMotorNode::rawToNormalized(uint16_t raw, size_t motor_index) const
+{
+    // 原始位置 -> 弧度 -> [-1, 1]
+    double radian = rawToRadian(raw, motor_index);
+    
+    double min_rad = (motor_index < position_min_rad_.size()) ? position_min_rad_[motor_index] : -M_PI;
+    double max_rad = (motor_index < position_max_rad_.size()) ? position_max_rad_[motor_index] : M_PI;
+    
+    double normalized = (radian - min_rad) / (max_rad - min_rad) * 2.0 - 1.0;
+    return std::max(-1.0, std::min(1.0, normalized));
 }
 
 double HeadMotorNode::rawToRadian(uint16_t raw, size_t motor_index) const
 {
-    // [0, 1000] -> [min_rad, max_rad]
+    // 原始位置 -> 弧度，使用实际硬件映射
+    if (motor_index >= position_center_raw_.size() ||
+        motor_index >= position_min_raw_.size() ||
+        motor_index >= position_max_raw_.size()) {
+        return 0.0;  // 默认返回0度
+    }
+    
     double min_rad = (motor_index < position_min_rad_.size()) ? position_min_rad_[motor_index] : -M_PI;
     double max_rad = (motor_index < position_max_rad_.size()) ? position_max_rad_[motor_index] : M_PI;
     
-    double ratio = static_cast<double>(raw) / 1000.0;
-    return min_rad + ratio * (max_rad - min_rad);
+    int center_raw = position_center_raw_[motor_index];
+    int min_raw = position_min_raw_[motor_index];
+    int max_raw = position_max_raw_[motor_index];
+    
+    // 根据原始位置与中心位置的关系分段映射
+    double radian;
+    if (raw <= center_raw) {
+        // 原始位置 <= 中心: [min_raw, center_raw] -> [min_rad, 0]
+        if (center_raw != min_raw) {
+            double ratio = static_cast<double>(raw - center_raw) / (center_raw - min_raw);
+            radian = ratio * min_rad;
+        } else {
+            radian = 0.0;
+        }
+    } else {
+        // 原始位置 > 中心: [center_raw, max_raw] -> [0, max_rad]
+        if (max_raw != center_raw) {
+            double ratio = static_cast<double>(raw - center_raw) / (max_raw - center_raw);
+            radian = ratio * max_rad;
+        } else {
+            radian = 0.0;
+        }
+    }
+    
+    return std::max(min_rad, std::min(max_rad, radian));
 }
 
 }  // namespace qyh_head_motor_control

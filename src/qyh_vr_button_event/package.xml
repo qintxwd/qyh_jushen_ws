@@ -12,6 +12,8 @@
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
   <depend>qyh_gripper_msgs</depend>
   <depend>qyh_lift_msgs</depend>
   <depend>qyh_waist_msgs</depend>

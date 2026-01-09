@@ -10,6 +10,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(qyh_gripper_msgs REQUIRED)
 find_package(qyh_lift_msgs REQUIRED)
 find_package(qyh_waist_msgs REQUIRED)
@@ -36,6 +38,8 @@ ament_target_dependencies(qyh_vr_button_event
   rclcpp
   std_msgs
   sensor_msgs
+  geometry_msgs
+  tf2
   qyh_gripper_msgs
   qyh_lift_msgs
   qyh_waist_msgs
