@@ -45,6 +45,8 @@ public:
     this->declare_parameter<double>("waist_stop_offset_deg", 2.0);
     this->declare_parameter<double>("max_head_pan_rad", 1.5708);   // ±90°
     this->declare_parameter<double>("max_head_tilt_rad", 0.7854);  // ±45°
+    this->declare_parameter<double>("head_angle_threshold_deg", 3.0);  // 最小角度变化才发送
+    this->declare_parameter<int>("head_publish_interval_ms", 100);  // 最小发布间隔
     this->declare_parameter<int>("joy_timeout_ms", 500);
     this->declare_parameter<int>("check_timer_ms", 100);
     this->declare_parameter<int>("chassis_keepalive_ms", 100);
@@ -66,6 +68,8 @@ public:
     waist_stop_offset_deg_ = this->get_parameter("waist_stop_offset_deg").as_double();
     max_head_pan_rad_ = this->get_parameter("max_head_pan_rad").as_double();
     max_head_tilt_rad_ = this->get_parameter("max_head_tilt_rad").as_double();
+    head_angle_threshold_deg_ = this->get_parameter("head_angle_threshold_deg").as_double();
+    head_publish_interval_ms_ = this->get_parameter("head_publish_interval_ms").as_int();
     joy_timeout_ms_ = this->get_parameter("joy_timeout_ms").as_int();
     check_timer_ms_ = this->get_parameter("check_timer_ms").as_int();
     chassis_keepalive_ms_ = this->get_parameter("chassis_keepalive_ms").as_int();
@@ -123,6 +127,7 @@ public:
     last_left_joy_time_ = this->now();
     last_right_joy_time_ = this->now();
     last_manual_publish_time_ = this->now();
+    last_head_publish_time_ = this->now();
 
     // timer to check joy timeouts and issue stops
     check_timer_ = this->create_wall_timer(
@@ -383,11 +388,27 @@ private:
     // pitch -> tilt (上下点头，注意方向可能需要取反)
     // roll -> 忽略
     
-    current_head_pan_ = std::max(-max_head_pan_rad_, std::min(max_head_pan_rad_, yaw));
-    current_head_tilt_ = std::max(-max_head_tilt_rad_, std::min(max_head_tilt_rad_, -pitch));  // 取反以匹配舵机方向
+    double new_pan = std::max(-max_head_pan_rad_, std::min(max_head_pan_rad_, yaw));
+    double new_tilt = std::max(-max_head_tilt_rad_, std::min(max_head_tilt_rad_, -pitch));  // 取反以匹配舵机方向
     
-    head_returned_to_center_ = false;
-    publishHeadCommand();
+    // 节流控制：只在角度变化足够大或时间间隔足够长时才发布
+    auto now = this->now();
+    auto dt_ms = (now - last_head_publish_time_).nanoseconds() / 1000000;
+    
+    double pan_change_deg = std::abs(new_pan - current_head_pan_) * 180.0 / M_PI;
+    double tilt_change_deg = std::abs(new_tilt - current_head_tilt_) * 180.0 / M_PI;
+    double max_change_deg = std::max(pan_change_deg, tilt_change_deg);
+    
+    bool angle_changed_enough = max_change_deg > head_angle_threshold_deg_;
+    bool time_elapsed_enough = dt_ms > head_publish_interval_ms_;
+    
+    if (angle_changed_enough || time_elapsed_enough) {
+      current_head_pan_ = new_pan;
+      current_head_tilt_ = new_tilt;
+      head_returned_to_center_ = false;
+      publishHeadCommand();
+      last_head_publish_time_ = now;
+    }
   }
 
   void enableHeadFollowCallback(
@@ -450,6 +471,8 @@ private:
   std::string head_follow_service_;
   double max_vx_, max_w_;
   double max_head_pan_rad_, max_head_tilt_rad_;
+  double head_angle_threshold_deg_;
+  int head_publish_interval_ms_;
   std::string waist_state_topic_;
   double waist_current_angle_ = 0.0;
   double last_sent_waist_angle_ = -9999.0;
@@ -472,6 +495,7 @@ private:
   bool head_returned_to_center_ = false;
   double current_head_pan_ = 0.0;
   double current_head_tilt_ = 0.0;
+  rclcpp::Time last_head_publish_time_;
 
   // subs/pubs/clients
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr left_joy_sub_;
