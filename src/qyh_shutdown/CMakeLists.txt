@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(qyh_shutdown_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
 # Detect architecture
@@ -41,6 +42,7 @@ ament_target_dependencies(qyh_shutdown_node
   rclcpp
   std_msgs
   std_srvs
+  qyh_shutdown_msgs
 )
 
 target_link_libraries(qyh_shutdown_node

@@ -47,6 +47,12 @@ def generate_launch_description():
         description='启用头部控制'
     )
     
+    declare_enable_shutdown = DeclareLaunchArgument(
+        'enable_shutdown', default_value='true',
+        description='启用关机控制'
+    )
+    
+    
     declare_enable_vr = DeclareLaunchArgument(
         'enable_vr', default_value='true',
         description='启用VR遥操作'
@@ -154,7 +160,19 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_head'))
     )
     
-    # 8. VR Bridge节点
+    # 8. 关机控制节点
+    shutdown_control_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('qyh_shutdown'),
+                'launch',
+                'qyh_shutdown.launch.py'
+            ])
+        ]),
+        condition=IfCondition(LaunchConfiguration('enable_shutdown'))
+    )
+    
+    # 9. VR Bridge节点
     vr_bridge_node = Node(
         package='qyh_vr_bridge',
         executable='vr_bridge_node',
@@ -163,7 +181,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_vr'))
     )
     
-    # 9. VR Teleop启动
+    # 10. VR Teleop启动
     vr_teleop_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([
@@ -175,7 +193,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_vr'))
     )
     
-    # 10. VR Button Event启动
+    # 11. VR Button Event启动
     vr_button_event_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([
@@ -187,7 +205,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_vr'))
     )
     
-    # 11. Bag录制节点
+    # 12. Bag录制节点
     bag_recorder_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([
@@ -202,7 +220,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_bag_recorder'))
     )
     
-    # 12. 摄像头节点
+    # 13. 摄像头节点
     camera_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([
@@ -214,7 +232,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_camera'))
     )
     
-    # 13. Web视频服务节点
+    # 14. Web视频服务节点
     web_video_server_node = Node(
         package='web_video_server',
         executable='web_video_server',
@@ -239,6 +257,7 @@ def generate_launch_description():
     ld.add_action(declare_enable_gripper)
     ld.add_action(declare_enable_waist)
     ld.add_action(declare_enable_head)
+    ld.add_action(declare_enable_shutdown)
     ld.add_action(declare_enable_vr)
     ld.add_action(declare_enable_bag_recorder)
     ld.add_action(declare_enable_camera)
@@ -252,6 +271,7 @@ def generate_launch_description():
     ld.add_action(gripper_control_launch)     # 夹爪
     ld.add_action(waist_control_launch)       # 腰部
     ld.add_action(head_control_launch)        # 头部
+    ld.add_action(shutdown_control_launch)    # 关机控制
     
     # 任务引擎
     ld.add_action(task_engine_launch)
