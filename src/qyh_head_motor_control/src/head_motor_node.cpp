@@ -97,6 +97,7 @@ bool HeadMotorNode::initCommunication()
     // 尝试读取所有电机位置
     for (size_t i = 0; i < motor_ids_.size(); i++) {
         uint16_t pos;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
         if (protocol_->readPosition(static_cast<uint8_t>(motor_ids_[i]), pos)) {
             current_positions_[i] = pos;
             RCLCPP_INFO(this->get_logger(), "Motor %ld initial position: %u", 
@@ -147,6 +148,8 @@ void HeadMotorNode::publishCallback()
     // 读取所有电机位置
     for (size_t i = 0; i < motor_ids_.size(); i++) {
         uint16_t pos;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
         if (protocol_->readPosition(static_cast<uint8_t>(motor_ids_[i]), pos)) {
             current_positions_[i] = pos;
         }
@@ -277,8 +280,8 @@ uint16_t HeadMotorNode::radianToRaw(double radian, size_t motor_index) const
     int raw_pos;
     if (radian <= 0.0) {
         // 负角度: [min_rad, 0] -> [min_raw, center_raw]
-        double ratio = (min_rad != 0.0) ? (radian / min_rad) : 0.0;
-        raw_pos = center_raw + static_cast<int>(ratio * (center_raw - min_raw));
+        double t = (min_rad != 0.0) ? ((radian - min_rad) / (-min_rad)) : 0.0;
+        raw_pos = min_raw + static_cast<int>(t * (center_raw - min_raw));
     } else {
         // 正角度: [0, max_rad] -> [center_raw, max_raw]
         double ratio = (max_rad != 0.0) ? (radian / max_rad) : 0.0;
@@ -322,8 +325,8 @@ double HeadMotorNode::rawToRadian(uint16_t raw, size_t motor_index) const
     if (raw <= center_raw) {
         // 原始位置 <= 中心: [min_raw, center_raw] -> [min_rad, 0]
         if (center_raw != min_raw) {
-            double ratio = static_cast<double>(raw - center_raw) / (center_raw - min_raw);
-            radian = ratio * min_rad;
+            double t = static_cast<double>(raw - min_raw) / (center_raw - min_raw);
+            radian = min_rad + t * (0.0 - min_rad);  // 从min_rad到0
         } else {
             radian = 0.0;
         }

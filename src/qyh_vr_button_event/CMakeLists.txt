@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -43,7 +44,8 @@ ament_target_dependencies(qyh_vr_button_event
   qyh_gripper_msgs
   qyh_lift_msgs
   qyh_waist_msgs
-  qyh_standard_robot_msgs)
+  qyh_standard_robot_msgs
+  std_srvs)
 
 install(TARGETS
   qyh_vr_button_event

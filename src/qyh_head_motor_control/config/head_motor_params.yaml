@@ -31,8 +31,8 @@ head_motor_node:
     # ID 1 (tilt): 前倾45° → 375, 中间0° → 580, 后仰45° → 785
     # ID 2 (pan): 最右边90° → 70, 中间0° → 440, 最左边90° → 820
     position_center_raw: [580, 440]       # 中间位置 (0°对应的原始值)
-    position_min_raw: [375, 820]          # 最小角度对应的原始值
-    position_max_raw: [785, 70]           # 最大角度对应的原始值
+    position_min_raw: [375, 820]          # min_rad(负角度)对应原始值：电机1=375(前倾-45°)，电机2=820(最左-90°)
+    position_max_raw: [785, 70]           # max_rad(正角度)对应原始值：电机1=785(后仰+45°)，电机2=70(最右+90°)
     
     # Control parameters
     # 控制参数

@@ -50,7 +50,7 @@ def generate_launch_description():
         ],
         remappings=[
             # Remap topics if needed
-            # ('~/joint_states', '/head/joint_states'),
+            ('~/joint_states', '/head/joint_states'),
         ]
     )
     

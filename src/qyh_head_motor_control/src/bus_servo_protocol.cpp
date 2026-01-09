@@ -179,6 +179,10 @@ bool BusServoProtocol::recvFrame(std::vector<uint8_t>& data, int timeout_ms)
     uint8_t header[4];
     ssize_t n = read(fd_, header, 4);
     if (n != 4 || header[0] != 0xAA || header[1] != 0x55) {
+        // 帧头错误，刷新缓冲区
+        if (n > 0) {
+            tcflush(fd_, TCIFLUSH);
+        }
         return false;
     }
     
@@ -189,6 +193,8 @@ bool BusServoProtocol::recvFrame(std::vector<uint8_t>& data, int timeout_ms)
     std::vector<uint8_t> buffer(len + 1);
     n = read(fd_, buffer.data(), len + 1);
     if (n != static_cast<ssize_t>(len + 1)) {
+        // 数据长度错误，刷新缓冲区
+        tcflush(fd_, TCIFLUSH);
         return false;
     }
     
@@ -201,6 +207,8 @@ bool BusServoProtocol::recvFrame(std::vector<uint8_t>& data, int timeout_ms)
     
     if (crc != buffer[len]) {
         std::cerr << "CRC mismatch" << std::endl;
+        // CRC错误，刷新缓冲区
+        tcflush(fd_, TCIFLUSH);
         return false;
     }
     
@@ -273,12 +281,14 @@ bool BusServoProtocol::readPosition(uint8_t servo_id, uint16_t& position)
     
     // 回包结构: [ID, SubCmd(0x05), Status, PosLo, PosHi]
     // response[0] 是 ID，response[1] 才是命令字
-    if (response.size() >= 5 && response[1] == CMD_READ_POSITION) {
-        // 还可以验证 response[0] == servo_id 和 response[2] == 0 (Status)
+    if (response.size() >= 5 && response[1] == CMD_READ_POSITION && response[0] == servo_id) {
+        // 验证ID匹配，防止读到其他电机的响应
         position = response[3] | (response[4] << 8);
         return true;
     }
     
+    // ID不匹配或其他错误，刷新缓冲区
+    tcflush(fd_, TCIFLUSH);
     return false;
 }
 
