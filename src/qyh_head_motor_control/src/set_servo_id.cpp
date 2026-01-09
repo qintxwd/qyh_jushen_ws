@@ -3,7 +3,7 @@
  * @brief 舵机ID设置工具
  * 
  * 使用方法:
- *   ros2 run qyh_head_motor_control set_servo_id --ros-args -p new_id:=2 -p port:=/dev/ttyUSB0
+ *   ros2 run qyh_head_motor_control set_servo_id --ros-args -p new_id:=2 -p port:=/dev/ttyACM_steering_gear
  * 
  * 注意: 使用此工具时，必须只连接一个舵机，否则会报错退出
  */
@@ -22,7 +22,7 @@ public:
     {
         // 声明参数
         this->declare_parameter<int>("new_id", -1);
-        this->declare_parameter<std::string>("port", "/dev/ttyACM0");
+        this->declare_parameter<std::string>("port", "/dev/ttyACM_steering_gear");
         this->declare_parameter<int>("baudrate", 1000000);
         
         // 获取参数

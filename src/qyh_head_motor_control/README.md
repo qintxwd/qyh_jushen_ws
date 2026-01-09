@@ -166,7 +166,7 @@ sudo usermod -a -G dialout $USER
 # 将舵机ID设置为 2
 ros2 run qyh_head_motor_control set_servo_id --ros-args -p new_id:=2
 
-# 指定串口（默认 /dev/ttyUSB0）
+# 指定串口（默认 /dev/ttyACM_steering_gear
 ros2 run qyh_head_motor_control set_servo_id --ros-args \
     -p new_id:=2 \
     -p port:=/dev/ttyACM0
@@ -183,7 +183,7 @@ ros2 run qyh_head_motor_control set_servo_id --ros-args \
 | 参数 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
 | `new_id` | int | 必填 | 新的舵机ID (0-253) |
-| `port` | string | `/dev/ttyUSB0` | 串口设备路径 |
+| `port` | string | `/dev/ttyACM_steering_gear` | 串口设备路径 |
 | `baudrate` | int | `1000000` | 波特率 |
 
 ### 操作流程

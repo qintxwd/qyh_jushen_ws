@@ -5,7 +5,7 @@ head_motor_node:
   ros__parameters:
     # Serial port configuration
     # 串口配置
-    serial_port: "/dev/ttyACM0"
+    serial_port: "/dev/ttyACM_steering_gear"
     baudrate: 1000000
     
     # Motor configuration

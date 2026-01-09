@@ -22,7 +22,7 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   right_is_activated_(false)
 {
   // Declare parameters
-  this->declare_parameter<std::string>("device_port", "/dev/ttyUSB0");
+  this->declare_parameter<std::string>("device_port", "/dev/ttyUSB_gripper");
   this->declare_parameter<int>("baudrate", 115200);
   this->declare_parameter<int>("left_slave_id", 2);
   this->declare_parameter<int>("right_slave_id", 1);

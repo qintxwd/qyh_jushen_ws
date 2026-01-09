@@ -32,7 +32,7 @@ HeadMotorNode::~HeadMotorNode()
 void HeadMotorNode::initParameters()
 {
     // 串口参数
-    this->declare_parameter("serial_port", "/dev/ttyACM0");
+    this->declare_parameter("serial_port", "/dev/ttyACM_steering_gear");
     this->declare_parameter("baudrate", 1000000);
     
     // 电机配置
