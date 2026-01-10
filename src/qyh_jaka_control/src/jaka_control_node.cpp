@@ -143,6 +143,17 @@ JakaControlNode::JakaControlNode()
         std::bind(&qyh_jaka_control::JakaServiceHandlers::handleGetPayload, service_handlers_.get(), 
                     std::placeholders::_1, std::placeholders::_2));
     
+    // Jog 点动控制服务
+    srv_jog_ = create_service<qyh_jaka_control_msgs::srv::Jog>(
+        "/jaka/jog",
+        std::bind(&qyh_jaka_control::JakaServiceHandlers::handleJog, service_handlers_.get(), 
+                    std::placeholders::_1, std::placeholders::_2));
+    
+    srv_jog_stop_ = create_service<qyh_jaka_control_msgs::srv::JogStop>(
+        "/jaka/jog_stop",
+        std::bind(&qyh_jaka_control::JakaServiceHandlers::handleJogStop, service_handlers_.get(), 
+                    std::placeholders::_1, std::placeholders::_2));
+    
     // Initialization
     connected_ = false;
     powered_ = false;

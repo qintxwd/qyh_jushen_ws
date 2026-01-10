@@ -288,95 +288,90 @@ void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::Get
     }
 }
 
-// // ==================== 点动控制服务 ====================
-// void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res)
-// {
-//     RCLCPP_INFO(node_->get_logger(), "Jog: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
-//         req->robot_id, req->axis_num, req->move_mode, req->coord_type, req->velocity, req->position);
+// ==================== 点动控制服务 ====================
+// 使用 INCR MoveJ 实现关节点动（因为SDK没有专门的jog函数）
+void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res)
+{
+    RCLCPP_INFO(node_->get_logger(), "Jog: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
+        req->robot_id, req->axis_num, req->move_mode, req->coord_type, req->velocity, req->position);
     
-//     // 检查机器人状态
-//     if (!connected_) {
-//         res->success = false;
-//         res->message = "Robot not connected";
-//         return;
-//     }
+    // 检查机器人状态
+    if (!connected_) {
+        res->success = false;
+        res->message = "Robot not connected";
+        return;
+    }
     
-//     if (!enabled_) {
-//         res->success = false;
-//         res->message = "Robot not enabled";
-//         return;
-//     }
+    if (!enabled_) {
+        res->success = false;
+        res->message = "Robot not enabled";
+        return;
+    }
     
-//     if (servo_running_) {
-//         res->success = false;
-//         res->message = "Cannot jog while servo is running";
-//         return;
-//     }
+    if (servo_running_) {
+        res->success = false;
+        res->message = "Cannot jog while servo is running";
+        return;
+    }
     
-//     // 将 1-based 索引转换为 0-based
-//     int axis_index = req->axis_num - 1;
+    // 将 1-based 索引转换为 0-based
+    int axis_index = req->axis_num - 1;
     
-//     bool success = false;
+    if (axis_index < 0 || axis_index > 6) {
+        res->success = false;
+        res->message = "Invalid axis number (must be 1-7)";
+        return;
+    }
     
-//     // 根据坐标系类型选择点动方式
-//     if (req->coord_type == 1) {  // COORD_JOINT=1 关节空间
-//         if (req->move_mode == 0) {  // MOVE_CONTINUOUS 连续运动
-//             int direction = (req->velocity > 0) ? 1 : -1;
-//             success = robot_->jogJointContinuous(
-//                 req->robot_id, 
-//                 axis_index, 
-//                 direction,
-//                 std::abs(req->velocity) * 30.0  // 将 rad/s 转换为速度百分比近似值
-//             );
-//         } else {  // MOVE_STEP 步进运动
-//             success = robot_->jogJoint(
-//                 req->robot_id,
-//                 axis_index,
-//                 req->position * 180.0 / M_PI,  // 弧度转角度
-//                 std::abs(req->velocity) * 30.0
-//             );
-//         }
-//     } else {  // 笛卡尔空间 (COORD_BASE=0, COORD_TOOL=2)
-//         // coord_type 直接使用请求值，已经与 JAKA SDK CoordType 枚举对齐
-//         int coord_type = req->coord_type;
+    errno_t ret = ERR_FUCTION_CALL_ERROR;
+    
+    // 目前只支持关节空间点动（COORD_JOINT=1）
+    if (req->coord_type == 1) {
+        // 使用 INCR MoveJ 实现点动
+        JointValue delta_joints;
+        memset(&delta_joints, 0, sizeof(delta_joints));
         
-//         if (req->move_mode == 0) {  // MOVE_CONTINUOUS 连续运动
-//             int direction = (req->velocity > 0) ? 1 : -1;
-//             success = robot_->jogCartesianContinuous(
-//                 req->robot_id,
-//                 axis_index,
-//                 direction,
-//                 std::abs(req->velocity) * 10.0,  // 将 mm/s 转换为速度百分比近似值
-//                 coord_type
-//             );
-//         } else {  // MOVE_STEP 步进运动
-//             double step = req->position;
-//             // 对于旋转轴 (3,4,5)，需要转换为角度
-//             if (axis_index >= 3) {
-//                 step = req->position * 180.0 / M_PI;
-//             }
-//             success = robot_->jogCartesian(
-//                 req->robot_id,
-//                 axis_index,
-//                 step,
-//                 std::abs(req->velocity) * 10.0,
-//                 coord_type
-//             );
-//         }
-//     }
-    
-//     res->success = success;
-//     res->message = success ? "Jog command sent" : "Jog command failed";
-// }
+        // 设置要移动的关节增量
+        if (req->move_mode == 1) {  // MOVE_STEP 步进模式
+            delta_joints.jVal[axis_index] = req->position;
+        } else {  // MOVE_CONTINUOUS 连续模式（模拟为小步距）
+            // 连续模式：根据速度和固定时间步长计算增量
+            // 假设每次调用间隔 100ms = 0.1s
+            double time_step = 0.1;  // 秒
+            delta_joints.jVal[axis_index] = req->velocity * time_step;
+        }
+        
+        MoveMode modes[2] = {MoveMode::INCR, MoveMode::INCR};
+        double vel[2] = {std::abs(req->velocity), std::abs(req->velocity)};
+        double acc[2] = {2.0, 2.0};  // 默认加速度
+        
+        // 非阻塞执行，允许快速响应下一次jog命令
+        ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, &delta_joints, vel, acc);
+        
+        res->success = (ret == ERR_SUCC);
+        if (!res->success) {
+            RCLCPP_ERROR(node_->get_logger(), "Jog failed with error code: %d", ret);
+            res->message = "Jog command failed";
+        } else {
+            res->message = "Jog command sent";
+        }
+    } else {
+        // 笛卡尔空间点动暂未实现（需要逆解）
+        res->success = false;
+        res->message = "Cartesian jog not implemented yet (only joint space supported)";
+        RCLCPP_WARN(node_->get_logger(), "Cartesian jog not supported, use joint space (coord_type=1)");
+    }
+}
 
-// void JakaServiceHandlers::handleJogStop(const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req, qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res)
-// {
-//     RCLCPP_INFO(node_->get_logger(), "Jog Stop: robot=%d axis=%d", req->robot_id, req->axis_num);
+void JakaServiceHandlers::handleJogStop(const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req, qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res)
+{
+    RCLCPP_INFO(node_->get_logger(), "Jog Stop: robot=%d axis=%d", req->robot_id, req->axis_num);
     
-//     bool success = robot_->jogStop(req->robot_id);
+    // 使用 motion_abort 停止当前运动
+    errno_t ret = robot_->motion_abort();
     
-//     res->success = success;
-//     res->message = success ? "Jog stopped" : "Jog stop failed";
-// }
+    res->success = (ret == ERR_SUCC);
+    res->message = res->success ? "Jog stopped" : "Jog stop failed";
+}
 
 } // namespace qyh_jaka_control
