@@ -1,0 +1,50 @@
+# ACT 推理配置文件
+# 用于 act_inference_node
+
+# ==================== 模型配置 ====================
+model_path: ""                           # 模型文件路径 (policy.pt)
+normalization_path: ""                   # normalization 参数路径
+device: "cuda"                           # cuda 或 cpu
+
+# ==================== 控制参数 ====================
+observation_horizon: 10                  # N - 历史帧数
+action_horizon: 20                       # K - 预测未来步数
+action_steps: 3                          # M - 每次执行几步
+
+# ==================== 频率配置 ====================
+control_frequency: 20.0                  # 控制频率 (Hz)
+inference_frequency: 10.0                # 推理频率 (Hz)
+
+# ==================== 动作缩放与平滑（关键调参项！） ====================
+# 初始部署建议从保守值开始，稳定后逐步提高
+action_scale: 0.4                        # 动作缩放 (0.2-1.0)
+smoothing_alpha: 0.3                     # 平滑系数 (0.2-0.5)
+
+# ==================== 安全限制 ====================
+max_joint_velocity: 1.0                  # 最大关节速度 (rad/s)
+max_joint_delta: 0.05                    # 单步最大变化 (rad)
+gripper_threshold: 0.6                   # 夹爪阈值
+gripper_hysteresis: 0.1                  # 夹爪滞后
+
+# ==================== 使用的设备 ====================
+use_left_arm: false
+use_right_arm: true
+use_left_gripper: false
+use_right_gripper: true
+use_head_camera: true
+use_wrist_cameras: false
+use_depth: false
+
+# ==================== 动作类型 ====================
+action_type: "delta"                     # delta (增量) 或 absolute (绝对)
+
+# ==================== 话题配置 ====================
+left_arm_state_topic: "/left_arm/joint_states"
+right_arm_state_topic: "/right_arm/joint_states"
+head_camera_topic: "/camera/head/color/image_raw"
+left_wrist_camera_topic: "/camera/left_wrist/color/image_raw"
+right_wrist_camera_topic: "/camera/right_wrist/color/image_raw"
+
+# ==================== 调试 ====================
+verbose: false
+visualize: false

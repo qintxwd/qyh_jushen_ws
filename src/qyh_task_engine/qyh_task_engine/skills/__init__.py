@@ -42,7 +42,20 @@ __all__ = [
     'WaitNode',
     'CheckConditionNode',
     'SubTaskNode',
+    # ACT 推理
+    'ACTExecuteNode',
+    'ACTLoadModelNode',
 ]
+
+# 尝试导入 ACT 技能节点
+try:
+    from qyh_act_inference.act_skill_node import ACTExecuteNode, ACTLoadModelNode
+    _HAS_ACT = True
+except ImportError:
+    # ACT 包未安装，使用占位
+    ACTExecuteNode = None
+    ACTLoadModelNode = None
+    _HAS_ACT = False
 
 # 节点类型注册表（用于 JSON 解析）
 SKILL_REGISTRY = {
@@ -63,3 +76,9 @@ SKILL_REGISTRY = {
     'CheckCondition': CheckConditionNode,
     'SubTask': SubTaskNode,
 }
+
+# 如果 ACT 包可用，添加 ACT 技能
+if _HAS_ACT:
+    SKILL_REGISTRY['ACTExecute'] = ACTExecuteNode
+    SKILL_REGISTRY['ACTLoadModel'] = ACTLoadModelNode
+
