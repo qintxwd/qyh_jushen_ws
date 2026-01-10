@@ -107,13 +107,20 @@ class ACTPolicy:
             
             # 判断是完整模型还是 state_dict
             if isinstance(checkpoint, dict):
-                if 'model' in checkpoint:
+                # 获取配置
+                model_config = checkpoint.get('config', {})
+                
+                # 尝试多种 state_dict 键名
+                state_dict = None
+                for key in ['model_state_dict', 'model', 'state_dict']:
+                    if key in checkpoint:
+                        state_dict = checkpoint[key]
+                        break
+                
+                if state_dict is not None:
                     # 需要先构建模型架构
-                    self.model = self._build_model(checkpoint.get('config', {}))
-                    self.model.load_state_dict(checkpoint['model'])
-                elif 'state_dict' in checkpoint:
-                    self.model = self._build_model(checkpoint.get('config', {}))
-                    self.model.load_state_dict(checkpoint['state_dict'])
+                    self.model = self._build_model(model_config)
+                    self.model.load_state_dict(state_dict)
                 else:
                     # 假设整个 dict 就是 state_dict
                     self.model = self._build_model({})
@@ -142,18 +149,14 @@ class ACTPolicy:
         """
         构建 ACT 模型架构
         
-        注意：这里需要根据你训练时使用的具体架构来实现
+        使用 model_builder 模块，自动尝试从 qyh_act_training 导入模型架构
         """
-        # TODO: 根据实际训练代码实现模型构建
-        # 这里提供一个占位实现
-        
         try:
-            # 尝试导入项目的 ACT 模型定义
-            from .models.act_model import ACTModel
-            return ACTModel(**model_config)
-        except ImportError:
-            # 如果没有自定义模型，使用简单占位
-            print("[ACTPolicy] Warning: Using placeholder model, please implement _build_model()")
+            from .model_builder import build_act_model
+            return build_act_model(model_config)
+        except ImportError as e:
+            print(f"[ACTPolicy] Cannot import model_builder: {e}")
+            print("[ACTPolicy] Warning: Using placeholder model")
             return PlaceholderModel(self.config)
     
     def _load_normalization(self):
@@ -167,15 +170,27 @@ class ACTPolicy:
         try:
             # 尝试加载 npz 格式
             if norm_path.endswith('.npz'):
-                data = np.load(norm_path)
-                self.state_mean = data.get('state_mean', None)
-                self.state_std = data.get('state_std', None)
+                data = np.load(norm_path, allow_pickle=True)
+                
+                # 兼容两种键名格式:
+                # - qyh_act_training 导出: qpos_mean, qpos_std
+                # - 旧格式: state_mean, state_std
+                if 'qpos_mean' in data:
+                    self.state_mean = data['qpos_mean']
+                    self.state_std = data['qpos_std']
+                elif 'state_mean' in data:
+                    self.state_mean = data.get('state_mean', None)
+                    self.state_std = data.get('state_std', None)
+                
                 self.action_mean = data.get('action_mean', None)
                 self.action_std = data.get('action_std', None)
             else:
                 # 尝试加载目录下的多个文件
                 norm_dir = norm_path
-                if os.path.exists(os.path.join(norm_dir, 'state_mean.npy')):
+                if os.path.exists(os.path.join(norm_dir, 'qpos_mean.npy')):
+                    self.state_mean = np.load(os.path.join(norm_dir, 'qpos_mean.npy'))
+                    self.state_std = np.load(os.path.join(norm_dir, 'qpos_std.npy'))
+                elif os.path.exists(os.path.join(norm_dir, 'state_mean.npy')):
                     self.state_mean = np.load(os.path.join(norm_dir, 'state_mean.npy'))
                     self.state_std = np.load(os.path.join(norm_dir, 'state_std.npy'))
                 if os.path.exists(os.path.join(norm_dir, 'action_mean.npy')):
