@@ -1,6 +1,8 @@
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
+#include <mutex>
+#include <chrono>
 #include <std_srvs/srv/trigger.hpp>
 #include "qyh_jaka_control_msgs/srv/start_servo.hpp"
 #include "qyh_jaka_control_msgs/srv/stop_servo.hpp"
@@ -12,8 +14,29 @@
 #include "qyh_jaka_control_msgs/srv/jog.hpp"
 #include "qyh_jaka_control_msgs/srv/jog_stop.hpp"
 #include "JAKAZuRobot.h"
+#include <array>
 
 namespace qyh_jaka_control {
+
+// JAKA ZU7 关节限位结构
+struct JointLimits {
+    double min_pos;    // 最小位置 (rad)
+    double max_pos;    // 最大位置 (rad)
+    double max_vel;    // 最大速度 (rad/s)
+};
+
+// JAKA ZU7 各关节限位 (7轴)
+static const std::array<JointLimits, 7> JAKA_ZU7_LIMITS = {{
+    {-6.2832, 6.2832, 1.5708},   // 关节1: ±360°, 90°/s
+    {-1.8326, 1.8326, 1.5708},   // 关节2: ±105°, 90°/s
+    {-6.2832, 6.2832, 2.0944},   // 关节3: ±360°, 120°/s
+    {-2.5307, 0.5236, 2.0944},   // 关节4: -145°~30°, 120°/s
+    {-6.2832, 6.2832, 2.6180},   // 关节5: ±360°, 150°/s
+    {-1.8326, 1.8326, 2.6180},   // 关节6: ±105°, 150°/s
+    {-6.2832, 6.2832, 2.6180}    // 关节7: ±360°, 150°/s
+}};
+
+static constexpr double JOG_SAFETY_MARGIN = 0.0873;  // 5° 安全裕度
 
 /**
  * @brief 服务处理器类 - 封装所有ROS服务的回调逻辑
@@ -58,6 +81,10 @@ public:
     void handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res);
     void handleJogStop(const qyh_jaka_control_msgs::srv::JogStop::Request::SharedPtr req, qyh_jaka_control_msgs::srv::JogStop::Response::SharedPtr res);
 
+    // 连续Jog心跳检测
+    void checkJogTimeout();
+    void stopContinuousJog();
+    
 private:
     rclcpp::Node* node_;
     // JakaInterface& jaka_interface_;
@@ -68,6 +95,13 @@ private:
     std::atomic<bool>& servo_running_;
     std::function<bool()> start_servo_callback_;
     std::function<bool()> stop_servo_callback_;
+    
+    // 连续Jog状态管理
+    std::atomic<bool> continuous_jog_active_{false};
+    std::chrono::steady_clock::time_point last_jog_heartbeat_;
+    rclcpp::TimerBase::SharedPtr jog_timeout_timer_;
+    std::mutex jog_mutex_;
+    static constexpr int JOG_TIMEOUT_MS = 300;  // 2帧超时 (150ms * 2)
 };
 
 } // namespace qyh_jaka_control

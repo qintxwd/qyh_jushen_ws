@@ -289,11 +289,37 @@ void JakaServiceHandlers::handleGetPayload(const qyh_jaka_control_msgs::srv::Get
 }
 
 // ==================== 点动控制服务 ====================
-// 使用 INCR MoveJ 实现关节点动（因为SDK没有专门的jog函数）
+
+// 连续Jog心跳超时检测
+void JakaServiceHandlers::checkJogTimeout() {
+    std::lock_guard<std::mutex> lock(jog_mutex_);
+    if (!continuous_jog_active_) return;
+    
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - last_jog_heartbeat_).count();
+    
+    if (elapsed > JOG_TIMEOUT_MS) {
+        RCLCPP_WARN(node_->get_logger(), "Jog heartbeat timeout (%ld ms), stopping motion", elapsed);
+        continuous_jog_active_ = false;
+        robot_->motion_abort();
+    }
+}
+
+// 停止连续Jog
+void JakaServiceHandlers::stopContinuousJog() {
+    std::lock_guard<std::mutex> lock(jog_mutex_);
+    if (continuous_jog_active_) {
+        continuous_jog_active_ = false;
+        robot_->motion_abort();
+        RCLCPP_INFO(node_->get_logger(), "Continuous jog stopped");
+    }
+}
+
 void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res)
 {
-    RCLCPP_INFO(node_->get_logger(), "Jog: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
-        req->robot_id, req->axis_num, req->move_mode, req->coord_type, req->velocity, req->position);
+    RCLCPP_DEBUG(node_->get_logger(), "Jog: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
+                req->robot_id, req->axis_num, req->move_mode, req->coord_type, req->velocity, req->position);
     
     // 检查机器人状态
     if (!connected_) {
@@ -327,26 +353,92 @@ void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Reque
     
     // 目前只支持关节空间点动（COORD_JOINT=1）
     if (req->coord_type == 1) {
-        // 使用 INCR MoveJ 实现点动
-        JointValue delta_joints;
-        memset(&delta_joints, 0, sizeof(delta_joints));
+        JointValue target_joints;
+        memset(&target_joints, 0, sizeof(target_joints));
         
-        // 设置要移动的关节增量
-        if (req->move_mode == 1) {  // MOVE_STEP 步进模式
-            delta_joints.jVal[axis_index] = req->position;
-        } else {  // MOVE_CONTINUOUS 连续模式（模拟为小步距）
-            // 连续模式：根据速度和固定时间步长计算增量
-            // 假设每次调用间隔 100ms = 0.1s
-            double time_step = 0.1;  // 秒
-            delta_joints.jVal[axis_index] = req->velocity * time_step;
+        if (req->move_mode == 1) {
+            // ========== 步进模式: 移动固定距离 ==========
+            target_joints.jVal[axis_index] = req->position;
+            
+            MoveMode modes[2] = {MoveMode::INCR, MoveMode::INCR};
+            double vel[2] = {std::abs(req->velocity), std::abs(req->velocity)};
+            double acc[2] = {5.0, 5.0};
+            
+            ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, &target_joints, vel, acc);
+            
+        } else {
+            // ========== 连续模式: 发送大目标 + 心跳机制 ==========
+            std::lock_guard<std::mutex> lock(jog_mutex_);
+            
+            // 更新心跳时间
+            last_jog_heartbeat_ = std::chrono::steady_clock::now();
+            
+            // 如果已经在连续运动中
+            if (continuous_jog_active_) {
+                // 检测是否已到位，如果到位则发送新目标继续运动
+                int inpos[2] = {0, 0};
+                robot_->robot_is_inpos(inpos);
+                bool robot_stopped = (req->robot_id == 0) ? inpos[0] : 
+                                     (req->robot_id == 1) ? inpos[1] : (inpos[0] && inpos[1]);
+                
+                if (robot_stopped) {
+                    // 机械臂已到位，需要发送新目标继续运动
+                    RCLCPP_DEBUG(node_->get_logger(), "Robot in position, sending new target");
+                    continuous_jog_active_ = false;  // 重置标志，让下面的代码发送新目标
+                } else {
+                    // 机械臂仍在运动，只更新心跳
+                    res->success = true;
+                    res->message = "Jog heartbeat received";
+                    return;
+                }
+            }
+            
+            // 首次启动连续Jog：发送目标到关节限位
+            continuous_jog_active_ = true;
+            
+            // 获取当前关节位置
+            JointValue current_joints[2];
+            CartesianPose current_pose[2];
+            robot_->edg_get_stat(req->robot_id, current_joints, current_pose);
+            
+            // 根据方向计算目标位置（到限位减去安全裕度）
+            double current_pos = current_joints[0].jVal[axis_index];
+            const auto& limits = JAKA_ZU7_LIMITS[axis_index];
+            double target_pos;
+            
+            if (req->velocity > 0) {
+                // 正方向：目标为最大限位 - 安全裕度
+                target_pos = limits.max_pos - JOG_SAFETY_MARGIN;
+            } else {
+                // 负方向：目标为最小限位 + 安全裕度
+                target_pos = limits.min_pos + JOG_SAFETY_MARGIN;
+            }
+            
+            // 计算增量（目标位置 - 当前位置）
+            double increment = target_pos - current_pos;
+            target_joints.jVal[axis_index] = increment;
+            
+            RCLCPP_INFO(node_->get_logger(), "Continuous jog: axis=%d, current=%.3f, target=%.3f, incr=%.3f",
+                        axis_index + 1, current_pos, target_pos, increment);
+            
+            MoveMode modes[2] = {MoveMode::INCR, MoveMode::INCR};
+            double vel[2] = {std::abs(req->velocity), std::abs(req->velocity)};
+            double acc[2] = {3.0, 3.0};  // 适中的加速度
+            
+            ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, &target_joints, vel, acc);
+            
+            // 启动超时检测定时器 (如果尚未启动)
+            if (!jog_timeout_timer_) {
+                jog_timeout_timer_ = node_->create_wall_timer(
+                    std::chrono::milliseconds(100),  // 每100ms检测一次
+                    std::bind(&JakaServiceHandlers::checkJogTimeout, this)
+                );
+            }
+            
+            if (ret != ERR_SUCC) {
+                continuous_jog_active_ = false;
+            }
         }
-        
-        MoveMode modes[2] = {MoveMode::INCR, MoveMode::INCR};
-        double vel[2] = {std::abs(req->velocity), std::abs(req->velocity)};
-        double acc[2] = {2.0, 2.0};  // 默认加速度
-        
-        // 非阻塞执行，允许快速响应下一次jog命令
-        ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, &delta_joints, vel, acc);
         
         res->success = (ret == ERR_SUCC);
         if (!res->success) {
@@ -356,7 +448,6 @@ void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Reque
             res->message = "Jog command sent";
         }
     } else {
-        // 笛卡尔空间点动暂未实现（需要逆解）
         res->success = false;
         res->message = "Cartesian jog not implemented yet (only joint space supported)";
         RCLCPP_WARN(node_->get_logger(), "Cartesian jog not supported, use joint space (coord_type=1)");
@@ -367,11 +458,11 @@ void JakaServiceHandlers::handleJogStop(const qyh_jaka_control_msgs::srv::JogSto
 {
     RCLCPP_INFO(node_->get_logger(), "Jog Stop: robot=%d axis=%d", req->robot_id, req->axis_num);
     
-    // 使用 motion_abort 停止当前运动
-    errno_t ret = robot_->motion_abort();
+    // 停止连续Jog
+    stopContinuousJog();
     
-    res->success = (ret == ERR_SUCC);
-    res->message = res->success ? "Jog stopped" : "Jog stop failed";
+    res->success = true;
+    res->message = "Jog stopped";
 }
 
 } // namespace qyh_jaka_control
