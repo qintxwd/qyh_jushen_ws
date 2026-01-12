@@ -10,19 +10,19 @@ def generate_launch_description():
     config_file_dir = os.path.join(package_dir, 'config')
     config_file_path = os.path.join(config_file_dir, 'camera_params.yaml')
 
-    # head_camera = IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource(
-    #         os.path.join(launch_file_dir, "gemini_330_series.launch.py")
-    #     ),
-    #     launch_arguments={                     
-    #         'enumerate_net_device': 'true',
-    #         'camera_name': 'head_camera',
-    #         'device_num': '1',
-    #         'sync_mode': 'hardware_triggering',
-    #         'config_file_path': config_file_path,
-    #         'camera_serial': 'CPE895300029',
-    #     }.items(),
-    # )
+    head_camera = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(launch_file_dir, "gemini_330_series.launch.py")
+        ),
+        launch_arguments={                     
+            'enumerate_net_device': 'true',
+            'camera_name': 'head_camera',
+            'device_num': '1',
+            'sync_mode': 'hardware_triggering',
+            'config_file_path': config_file_path,
+            'camera_serial': 'CPE895300029',
+        }.items(),
+    )
 
     right_camera = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -54,9 +54,9 @@ def generate_launch_description():
     )
     
     ld = LaunchDescription([
-        # TimerAction(period=1.0, actions=[GroupAction([head_camera])]), # The primary camera should be launched at last
-        TimerAction(period=5.0, actions=[GroupAction([right_camera])]), # The primary camera should be launched at last
-        TimerAction(period=10.0, actions=[GroupAction([left_camera])]), # The primary camera should be launched at last
+        TimerAction(period=1.0, actions=[GroupAction([head_camera])]), # The primary camera should be launched at last
+        # TimerAction(period=5.0, actions=[GroupAction([right_camera])]), # The primary camera should be launched at last
+        # TimerAction(period=10.0, actions=[GroupAction([left_camera])]), # The primary camera should be launched at last
     ])
 
     return ld

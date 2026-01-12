@@ -176,11 +176,20 @@ void HeadMotorNode::cmdPositionCallback(const std_msgs::msg::Float64MultiArray::
         return;
     }
     
-    if (msg->data.size() != motor_ids_.size()) {
+    // 支持两种格式:
+    // 1. [tilt, pan] - 使用默认 duration
+    // 2. [tilt, pan, duration_ms] - 使用指定 duration
+    if (msg->data.size() < motor_ids_.size()) {
         RCLCPP_WARN(this->get_logger(), 
-            "Position command size (%zu) != motor count (%zu)",
+            "Position command size (%zu) < motor count (%zu)",
             msg->data.size(), motor_ids_.size());
         return;
+    }
+    
+    // 获取 duration，如果提供了第三个参数则使用它
+    uint16_t duration = static_cast<uint16_t>(move_duration_ms_);
+    if (msg->data.size() > motor_ids_.size()) {
+        duration = static_cast<uint16_t>(std::max(10.0, std::min(5000.0, msg->data[motor_ids_.size()])));
     }
     
     // 转换为原始位置并发送
@@ -192,7 +201,7 @@ void HeadMotorNode::cmdPositionCallback(const std_msgs::msg::Float64MultiArray::
         positions.push_back(normalizedToRaw(msg->data[i], i));
     }
     
-    if (!protocol_->setPositions(ids, positions, static_cast<uint16_t>(move_duration_ms_))) {
+    if (!protocol_->setPositions(ids, positions, duration)) {
         RCLCPP_WARN(this->get_logger(), "Failed to set positions");
     }
 }
