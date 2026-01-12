@@ -33,15 +33,16 @@ use_left_gripper: false
 use_right_gripper: true
 use_head_camera: true
 use_wrist_cameras: false
-use_depth: false
+use_depth: true                              # 使用深度图像
 
 # ==================== 动作类型 ====================
-action_type: "delta"                     # delta (增量) 或 absolute (绝对)
+action_type: "absolute"                      # 跟训练配置保持一致！
 
 # ==================== 话题配置 ====================
 left_arm_state_topic: "/left_arm/joint_states"
 right_arm_state_topic: "/right_arm/joint_states"
 head_camera_topic: "/camera/head/color/image_raw"
+head_camera_depth_topic: "/camera/head/depth/image_raw"
 left_wrist_camera_topic: "/camera/left_wrist/color/image_raw"
 right_wrist_camera_topic: "/camera/right_wrist/color/image_raw"
 

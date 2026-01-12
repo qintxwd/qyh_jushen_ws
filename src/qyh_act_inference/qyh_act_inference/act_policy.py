@@ -277,34 +277,38 @@ class ACTPolicy:
         准备模型输入
         
         Returns:
-            (state_tensor, image_tensor)
+            (state_tensor, image_dict_tensor)
         """
         # 收集状态序列
         states = []
-        images = []
+        images_by_camera = {}  # {camera_name: [frames]}
         
         for obs in self.obs_buffer:
             # 构建状态向量
             state = self._build_state_vector(obs)
             states.append(state)
             
-            # 处理图像
-            img = self._process_image(obs)
-            if img is not None:
-                images.append(img)
+            # 处理图像（返回字典）
+            img_dict = self._process_image(obs)
+            if img_dict is not None:
+                for cam_name, img in img_dict.items():
+                    if cam_name not in images_by_camera:
+                        images_by_camera[cam_name] = []
+                    images_by_camera[cam_name].append(img)
         
         # 转换为 tensor
         state_seq = np.stack(states, axis=0)  # (N, state_dim)
         state_seq = self._normalize_state(state_seq)
         state_tensor = torch.from_numpy(state_seq).float().unsqueeze(0).to(self.device)  # (1, N, state_dim)
         
-        if images:
-            image_seq = np.stack(images, axis=0)  # (N, C, H, W)
-            image_tensor = torch.from_numpy(image_seq).float().unsqueeze(0).to(self.device)  # (1, N, C, H, W)
-        else:
-            image_tensor = None
+        # 构建图像 tensor 字典
+        image_tensors = {}
+        for cam_name, frames in images_by_camera.items():
+            if len(frames) == len(states):  # 确保帧数匹配
+                image_seq = np.stack(frames, axis=0)  # (N, C, H, W)
+                image_tensors[cam_name] = torch.from_numpy(image_seq).float().unsqueeze(0).to(self.device)
         
-        return state_tensor, image_tensor
+        return state_tensor, image_tensors if image_tensors else None
     
     def _build_state_vector(self, obs: Observation) -> np.ndarray:
         """
@@ -331,38 +335,51 @@ class ACTPolicy:
         else:
             return np.zeros(self.config.action_dim)
     
-    def _process_image(self, obs: Observation) -> Optional[np.ndarray]:
+    def _process_image(self, obs: Observation) -> Optional[Dict[str, np.ndarray]]:
         """
         处理图像：resize + normalize
         
+        支持多相机输入（RGB + 深度）
+        
         Returns:
-            (C, H, W) 归一化后的图像，或 None
+            {camera_name: (C, H, W)} 归一化后的图像字典，或 None
         """
         import cv2
         
-        image = None
+        images = {}
         
-        # 根据配置选择图像
+        # 处理 RGB 图像
         if self.config.use_head_camera and obs.head_image is not None:
-            image = obs.head_image
-        elif self.config.use_wrist_cameras:
+            rgb_image = obs.head_image
+            rgb_image = cv2.resize(rgb_image, self.image_size)
+            # Normalize: (H, W, C) -> (C, H, W), [0, 255] -> [0, 1] -> normalized
+            rgb_image = rgb_image.astype(np.float32) / 255.0
+            rgb_image = (rgb_image - self.image_mean) / self.image_std
+            rgb_image = rgb_image.transpose(2, 0, 1)  # (C, H, W)
+            images['head_rgb'] = rgb_image
+        
+        # 处理深度图像
+        if self.config.use_depth and obs.head_depth is not None:
+            depth_image = obs.head_depth
+            depth_image = cv2.resize(depth_image, self.image_size, interpolation=cv2.INTER_NEAREST)
+            # 深度归一化：MinMax 到 [0, 1]
+            max_depth = 3000.0  # 毫米
+            depth_image = np.clip(depth_image, 0, max_depth)
+            depth_image = depth_image / max_depth
+            # 单通道 -> (1, H, W)
+            depth_image = depth_image[np.newaxis, :, :]
+            images['head_depth'] = depth_image
+        
+        # 腕部相机（可选）
+        if self.config.use_wrist_cameras:
             if obs.right_wrist_image is not None:
-                image = obs.right_wrist_image
-            elif obs.left_wrist_image is not None:
-                image = obs.left_wrist_image
+                wrist_img = cv2.resize(obs.right_wrist_image, self.image_size)
+                wrist_img = wrist_img.astype(np.float32) / 255.0
+                wrist_img = (wrist_img - self.image_mean) / self.image_std
+                wrist_img = wrist_img.transpose(2, 0, 1)
+                images['right_wrist'] = wrist_img
         
-        if image is None:
-            return None
-        
-        # Resize
-        image = cv2.resize(image, self.image_size)
-        
-        # Normalize: (H, W, C) -> (C, H, W), [0, 255] -> [0, 1] -> normalized
-        image = image.astype(np.float32) / 255.0
-        image = (image - self.image_mean) / self.image_std
-        image = image.transpose(2, 0, 1)  # (C, H, W)
-        
-        return image
+        return images if images else None
     
     def _normalize_state(self, state: np.ndarray) -> np.ndarray:
         """归一化状态"""

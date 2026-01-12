@@ -163,6 +163,17 @@ class ACTInferenceNode(Node):
                 10,
                 callback_group=self.sensor_cb_group
             )
+        
+        # 头部深度相机（可选）
+        if self.config.use_depth and HAS_CV_BRIDGE:
+            self._head_depth_sub = self.create_subscription(
+                Image,
+                self.config.head_camera_depth_topic,
+                self._head_depth_callback,
+                10,
+                callback_group=self.sensor_cb_group
+            )
+            self.get_logger().info(f"Subscribed to depth: {self.config.head_camera_depth_topic}")
     
     def _create_publishers(self):
         """创建命令发布者"""
@@ -300,6 +311,29 @@ class ACTInferenceNode(Node):
                 self._current_obs.right_wrist_image = cv_image
         except Exception as e:
             pass
+    
+    def _head_depth_callback(self, msg: Image):
+        """头部深度相机回调"""
+        if not self.cv_bridge:
+            return
+        try:
+            # 深度图像通常是 16UC1（毫米）或 32FC1（米）
+            if msg.encoding == '16UC1':
+                depth_image = self.cv_bridge.imgmsg_to_cv2(msg, "16UC1")
+                # 转换为 float32，单位毫米
+                depth_image = depth_image.astype(np.float32)
+            elif msg.encoding == '32FC1':
+                depth_image = self.cv_bridge.imgmsg_to_cv2(msg, "32FC1")
+                # 米转毫米
+                depth_image = depth_image * 1000.0
+            else:
+                depth_image = self.cv_bridge.imgmsg_to_cv2(msg, "passthrough")
+                depth_image = depth_image.astype(np.float32)
+            
+            with self._obs_lock:
+                self._current_obs.head_depth = depth_image
+        except Exception as e:
+            self.get_logger().warn(f"Failed to convert depth image: {e}")
     
     # ==================== 控制循环 ====================
     
