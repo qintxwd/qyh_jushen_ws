@@ -318,7 +318,7 @@ void JakaServiceHandlers::stopContinuousJog() {
 
 void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Request::SharedPtr req, qyh_jaka_control_msgs::srv::Jog::Response::SharedPtr res)
 {
-    RCLCPP_DEBUG(node_->get_logger(), "Jog: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
+    RCLCPP_INFO(node_->get_logger(), "Jog request: robot=%d axis=%d mode=%d coord=%d vel=%.3f pos=%.3f",
                 req->robot_id, req->axis_num, req->move_mode, req->coord_type, req->velocity, req->position);
     
     // 检查机器人状态
@@ -353,18 +353,23 @@ void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Reque
     
     // 目前只支持关节空间点动（COORD_JOINT=1）
     if (req->coord_type == 1) {
-        JointValue target_joints;
-        memset(&target_joints, 0, sizeof(target_joints));
+        JointValue target_joints[2];  // 双臂数组
+        memset(target_joints, 0, sizeof(target_joints));
         
         if (req->move_mode == 1) {
             // ========== 步进模式: 移动固定距离 ==========
-            target_joints.jVal[axis_index] = req->position;
+            // 根据robot_id决定设置哪个臂的关节
+            int arm_idx = (req->robot_id == 1) ? 1 : 0;
+            target_joints[arm_idx].jVal[axis_index] = req->position;
             
             MoveMode modes[2] = {MoveMode::INCR, MoveMode::INCR};
             double vel[2] = {std::abs(req->velocity), std::abs(req->velocity)};
             double acc[2] = {5.0, 5.0};
             
-            ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, &target_joints, vel, acc);
+            RCLCPP_INFO(node_->get_logger(), "Step jog: arm=%d axis=%d pos=%.4f vel=%.3f", 
+                        arm_idx, axis_index + 1, req->position, req->velocity);
+            
+            ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, target_joints, vel, acc);
             
         } else {
             // ========== 连续模式: 发送大目标 + 心跳机制 ==========
@@ -397,35 +402,53 @@ void JakaServiceHandlers::handleJog(const qyh_jaka_control_msgs::srv::Jog::Reque
             continuous_jog_active_ = true;
             
             // 获取当前关节位置
-            JointValue current_joints[2];
-            CartesianPose current_pose[2];
-            robot_->edg_get_stat(req->robot_id, current_joints, current_pose);
+            JointValue current_joint;
+            CartesianPose current_pose;
+            unsigned char arm_idx = (req->robot_id == 1) ? 1 : 0;  // 0=左臂, 1=右臂
+            errno_t stat_ret = robot_->edg_get_stat(arm_idx, &current_joint, &current_pose);
             
-            // 根据方向计算目标位置（到限位减去安全裕度）
-            double current_pos = current_joints[0].jVal[axis_index];
             const auto& limits = JAKA_ZU7_LIMITS[axis_index];
-            double target_pos;
+            MoveMode modes[2];
             
-            if (req->velocity > 0) {
-                // 正方向：目标为最大限位 - 安全裕度
-                target_pos = limits.max_pos - JOG_SAFETY_MARGIN;
+            if (stat_ret == ERR_SUCC) {
+                // 成功获取当前位置，使用绝对模式
+                // 复制当前所有关节位置作为目标
+                for (int i = 0; i < 7; ++i) {
+                    target_joints[arm_idx].jVal[i] = current_joint.jVal[i];
+                }
+                
+                // 计算目标位置（到限位减去安全裕度）
+                double target_pos;
+                if (req->velocity > 0) {
+                    target_pos = limits.max_pos - JOG_SAFETY_MARGIN;
+                } else {
+                    target_pos = limits.min_pos + JOG_SAFETY_MARGIN;
+                }
+                
+                target_joints[arm_idx].jVal[axis_index] = target_pos;
+                modes[0] = modes[1] = MoveMode::ABS;
+                
+                RCLCPP_INFO(node_->get_logger(), "Continuous jog (ABS): axis=%d, current=%.3f, target=%.3f",
+                            axis_index + 1, current_joint.jVal[axis_index], target_pos);
             } else {
-                // 负方向：目标为最小限位 + 安全裕度
-                target_pos = limits.min_pos + JOG_SAFETY_MARGIN;
+                // 获取位置失败，回退到增量模式，使用保守的增量值
+                RCLCPP_WARN(node_->get_logger(), "edg_get_stat failed (%d), using INCR mode", stat_ret);
+                
+                // 使用较大的增量（但不超过限位范围的一半）
+                double max_range = (limits.max_pos - limits.min_pos) / 2.0;
+                double direction = (req->velocity > 0) ? 1.0 : -1.0;
+                double increment = direction * std::min(1.5, max_range);  // 最大1.5rad (~86度)
+                
+                target_joints[arm_idx].jVal[axis_index] = increment;
+                modes[0] = modes[1] = MoveMode::INCR;
+                
+                RCLCPP_INFO(node_->get_logger(), "Continuous jog (INCR): axis=%d, increment=%.3f",
+                            axis_index + 1, increment);
             }
-            
-            // 计算增量（目标位置 - 当前位置）
-            double increment = target_pos - current_pos;
-            target_joints.jVal[axis_index] = increment;
-            
-            RCLCPP_INFO(node_->get_logger(), "Continuous jog: axis=%d, current=%.3f, target=%.3f, incr=%.3f",
-                        axis_index + 1, current_pos, target_pos, increment);
-            
-            MoveMode modes[2] = {MoveMode::INCR, MoveMode::INCR};
             double vel[2] = {std::abs(req->velocity), std::abs(req->velocity)};
             double acc[2] = {3.0, 3.0};  // 适中的加速度
             
-            ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, &target_joints, vel, acc);
+            ret = robot_->robot_run_multi_movj(req->robot_id, modes, FALSE, target_joints, vel, acc);
             
             // 启动超时检测定时器 (如果尚未启动)
             if (!jog_timeout_timer_) {
