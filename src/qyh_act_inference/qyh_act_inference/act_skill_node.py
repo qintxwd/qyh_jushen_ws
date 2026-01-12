@@ -73,6 +73,7 @@ class ACTExecuteNode(SkillNode):
     NODE_TYPE = "ACTExecute"
     
     PARAM_SCHEMA = {
+        'action_id': {'type': 'string', 'required': False},  # 动作 ID (优先，从 model_actions 加载)
         'model_name': {'type': 'string', 'required': False},
         'model_path': {'type': 'string', 'required': False},
         'max_duration': {'type': 'float', 'default': 30.0},
@@ -85,6 +86,7 @@ class ACTExecuteNode(SkillNode):
     
     # 模型目录
     MODELS_DIR = os.path.expanduser("~/qyh-robot-system/models")
+    MODEL_ACTIONS_DIR = os.path.expanduser("~/qyh-robot-system/model_actions")
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
@@ -228,6 +230,17 @@ class ACTExecuteNode(SkillNode):
             path = os.path.expanduser(path)
             if os.path.exists(path):
                 return path
+        
+        # 使用 action_id 从 model_actions 目录加载
+        if 'action_id' in self.params and self.params['action_id']:
+            action_id = self.params['action_id']
+            model_dir = os.path.join(self.MODEL_ACTIONS_DIR, action_id, 'model')
+            # 检查各种模型文件格式
+            for filename in ['policy_best.ckpt', 'policy.ckpt', 'policy.pt']:
+                model_path = os.path.join(model_dir, filename)
+                if os.path.exists(model_path):
+                    self.log_info(f"  Found model from action: {model_path}")
+                    return model_path
         
         # 使用模型名称
         if 'model_name' in self.params and self.params['model_name']:
@@ -407,6 +420,7 @@ class ACTLoadModelNode(SkillNode):
     预先加载模型，避免执行时的加载延迟
     
     参数:
+        action_id: 动作 ID（从 model_actions 加载）
         model_name: 模型名称
         model_path: 模型完整路径
     """
@@ -414,9 +428,12 @@ class ACTLoadModelNode(SkillNode):
     NODE_TYPE = "ACTLoadModel"
     
     PARAM_SCHEMA = {
+        'action_id': {'type': 'string', 'required': False},  # 动作 ID (优先)
         'model_name': {'type': 'string', 'required': False},
         'model_path': {'type': 'string', 'required': False},
     }
+    
+    MODEL_ACTIONS_DIR = os.path.expanduser("~/qyh-robot-system/model_actions")
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)

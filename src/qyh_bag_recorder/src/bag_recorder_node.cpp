@@ -43,10 +43,11 @@ public:
         // 获取基础路径
         std::string base_path = this->get_parameter("base_path").as_string();
         if (base_path.empty()) {
-            // 默认使用 ~/qyh-robot-system/DATA/
+            // 默认使用 ~/qyh-robot-system/model_actions/
+            // bag 数据将保存到 model_actions/{action_id}/data/bags/
             const char* home = std::getenv("HOME");
             if (home) {
-                base_path_ = std::string(home) + "/qyh-robot-system/DATA";
+                base_path_ = std::string(home) + "/qyh-robot-system/model_actions";
             } else {
                 base_path_ = "/tmp/qyh_bag_data";
             }
@@ -182,15 +183,15 @@ private:
         
         current_topics_ = topics;
         
-        // 创建动作目录
-        std::string action_dir = base_path_ + "/" + action_name;
-        if (!ensureDirectoryExists(action_dir)) {
+        // 创建动作数据目录: model_actions/{action_id}/data/bags/
+        std::string action_data_dir = base_path_ + "/" + action_name + "/data/bags";
+        if (!ensureDirectoryExists(action_data_dir)) {
             return false;
         }
         
         // 生成包名和完整路径
         std::string bag_name = generateBagName(user_name, version);
-        current_bag_path_ = action_dir + "/" + bag_name;
+        current_bag_path_ = action_data_dir + "/" + bag_name;
         current_action_name_ = action_name;
         
         RCLCPP_INFO(this->get_logger(), "开始录制:");
