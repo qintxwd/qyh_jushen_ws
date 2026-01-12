@@ -18,7 +18,7 @@ def generate_launch_description():
             'enumerate_net_device': 'true',
             'camera_name': 'head_camera',
             'device_num': '1',
-            'sync_mode': 'hardware_triggering',
+            'sync_mode': 'standalone',  # 单相机使用 standalone 模式，无需硬件触发
             'config_file_path': config_file_path,
             'camera_serial': 'CPE895300029',
         }.items(),
@@ -47,7 +47,7 @@ def generate_launch_description():
             'camera_name': 'left_camera',
             'usb_port': '2-3.4.1',
             'device_num': '2',
-            'sync_mode': 'hardware_triggering',
+            'sync_mode': 'standalone',  # 单相机使用 standalone 模式，无需硬件触发
             'config_file_path': config_file_path,
             'camera_serial': 'CP0BB53000AT'
         }.items()
