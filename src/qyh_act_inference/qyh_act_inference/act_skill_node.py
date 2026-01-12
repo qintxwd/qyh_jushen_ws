@@ -74,6 +74,8 @@ class ACTExecuteNode(SkillNode):
     
     PARAM_SCHEMA = {
         'action_id': {'type': 'string', 'required': False},  # 动作 ID (优先，从 model_actions 加载)
+        'robot_name': {'type': 'string', 'required': False},  # 机器人类型
+        'robot_version': {'type': 'string', 'required': False},  # 机器人版本
         'model_name': {'type': 'string', 'required': False},
         'model_path': {'type': 'string', 'required': False},
         'max_duration': {'type': 'float', 'default': 30.0},
@@ -84,9 +86,13 @@ class ACTExecuteNode(SkillNode):
         'use_external_node': {'type': 'bool', 'default': True},  # 是否使用外部推理节点
     }
     
-    # 模型目录
+    # 模型目录基础路径
     MODELS_DIR = os.path.expanduser("~/qyh-robot-system/models")
-    MODEL_ACTIONS_DIR = os.path.expanduser("~/qyh-robot-system/model_actions")
+    MODEL_ACTIONS_BASE = os.path.expanduser("~/qyh-robot-system/model_actions")
+    
+    # 默认机器人信息（从环境变量获取）
+    DEFAULT_ROBOT_NAME = os.environ.get('GLOBAL_ROBOT_NAME', 'general')
+    DEFAULT_ROBOT_VERSION = os.environ.get('GLOBAL_ROBOT_VERSION', '1.0')
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
@@ -105,6 +111,12 @@ class ACTExecuteNode(SkillNode):
         self._is_executing = False
         self._start_time: Optional[float] = None
         self._inference_status = "unknown"
+    
+    def _get_model_actions_dir(self) -> str:
+        """获取当前机器人的 model_actions 目录"""
+        robot_name = self.params.get('robot_name') or self.DEFAULT_ROBOT_NAME
+        robot_version = self.params.get('robot_version') or self.DEFAULT_ROBOT_VERSION
+        return os.path.join(self.MODEL_ACTIONS_BASE, robot_name, robot_version)
     
     def log_info(self, msg):
         if self.ros_node:
@@ -231,10 +243,11 @@ class ACTExecuteNode(SkillNode):
             if os.path.exists(path):
                 return path
         
-        # 使用 action_id 从 model_actions 目录加载
+        # 使用 action_id 从 model_actions/{robot}/{version}/ 目录加载
         if 'action_id' in self.params and self.params['action_id']:
             action_id = self.params['action_id']
-            model_dir = os.path.join(self.MODEL_ACTIONS_DIR, action_id, 'model')
+            model_actions_dir = self._get_model_actions_dir()
+            model_dir = os.path.join(model_actions_dir, action_id, 'model')
             # 检查各种模型文件格式
             for filename in ['policy_best.ckpt', 'policy.ckpt', 'policy.pt']:
                 model_path = os.path.join(model_dir, filename)
@@ -421,6 +434,8 @@ class ACTLoadModelNode(SkillNode):
     
     参数:
         action_id: 动作 ID（从 model_actions 加载）
+        robot_name: 机器人类型
+        robot_version: 机器人版本
         model_name: 模型名称
         model_path: 模型完整路径
     """
@@ -429,15 +444,25 @@ class ACTLoadModelNode(SkillNode):
     
     PARAM_SCHEMA = {
         'action_id': {'type': 'string', 'required': False},  # 动作 ID (优先)
+        'robot_name': {'type': 'string', 'required': False},  # 机器人类型
+        'robot_version': {'type': 'string', 'required': False},  # 机器人版本
         'model_name': {'type': 'string', 'required': False},
         'model_path': {'type': 'string', 'required': False},
     }
     
-    MODEL_ACTIONS_DIR = os.path.expanduser("~/qyh-robot-system/model_actions")
+    MODEL_ACTIONS_BASE = os.path.expanduser("~/qyh-robot-system/model_actions")
+    DEFAULT_ROBOT_NAME = os.environ.get('GLOBAL_ROBOT_NAME', 'general')
+    DEFAULT_ROBOT_VERSION = os.environ.get('GLOBAL_ROBOT_VERSION', '1.0')
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
         self._load_client = None
+    
+    def _get_model_actions_dir(self) -> str:
+        """获取当前机器人的 model_actions 目录"""
+        robot_name = self.params.get('robot_name') or self.DEFAULT_ROBOT_NAME
+        robot_version = self.params.get('robot_version') or self.DEFAULT_ROBOT_VERSION
+        return os.path.join(self.MODEL_ACTIONS_BASE, robot_name, robot_version)
     
     def setup(self) -> bool:
         if not self.ros_node:

@@ -39,12 +39,13 @@ public:
     {
         // 声明参数
         this->declare_parameter<std::string>("base_path", "");
+        this->declare_parameter<std::string>("robot_name", "");
+        this->declare_parameter<std::string>("robot_version", "");
         
         // 获取基础路径
         std::string base_path = this->get_parameter("base_path").as_string();
         if (base_path.empty()) {
-            // 默认使用 ~/qyh-robot-system/model_actions/
-            // bag 数据将保存到 model_actions/{action_id}/data/bags/
+            // 默认使用 ~/qyh-robot-system/model_actions/{robot_name}/{version}/
             const char* home = std::getenv("HOME");
             if (home) {
                 base_path_ = std::string(home) + "/qyh-robot-system/model_actions";
@@ -55,8 +56,27 @@ public:
             base_path_ = base_path;
         }
         
+        // 获取机器人类型和版本（从参数或环境变量）
+        robot_name_ = this->get_parameter("robot_name").as_string();
+        if (robot_name_.empty()) {
+            const char* env_robot = std::getenv("GLOBAL_ROBOT_NAME");
+            robot_name_ = env_robot ? std::string(env_robot) : "general";
+        }
+        
+        robot_version_ = this->get_parameter("robot_version").as_string();
+        if (robot_version_.empty()) {
+            const char* env_version = std::getenv("GLOBAL_ROBOT_VERSION");
+            robot_version_ = env_version ? std::string(env_version) : "1.0";
+        }
+        
+        // 完整路径包含机器人类型和版本
+        // 结构: model_actions/{robot_name}/{version}/{action_id}/data/bags/
+        full_base_path_ = base_path_ + "/" + robot_name_ + "/" + robot_version_;
+        
         RCLCPP_INFO(this->get_logger(), "Bag Recorder 初始化");
         RCLCPP_INFO(this->get_logger(), "  基础路径: %s", base_path_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  机器人: %s / %s", robot_name_.c_str(), robot_version_.c_str());
+        RCLCPP_INFO(this->get_logger(), "  完整路径: %s", full_base_path_.c_str());
         RCLCPP_INFO(this->get_logger(), "  话题将通过服务请求动态指定");
         
         // 创建服务
@@ -183,8 +203,8 @@ private:
         
         current_topics_ = topics;
         
-        // 创建动作数据目录: model_actions/{action_id}/data/bags/
-        std::string action_data_dir = base_path_ + "/" + action_name + "/data/bags";
+        // 创建动作数据目录: model_actions/{robot}/{version}/{action_id}/data/bags/
+        std::string action_data_dir = full_base_path_ + "/" + action_name + "/data/bags";
         if (!ensureDirectoryExists(action_data_dir)) {
             return false;
         }
@@ -196,6 +216,7 @@ private:
         
         RCLCPP_INFO(this->get_logger(), "开始录制:");
         RCLCPP_INFO(this->get_logger(), "  动作: %s", action_name.c_str());
+        RCLCPP_INFO(this->get_logger(), "  机器人: %s / %s", robot_name_.c_str(), robot_version_.c_str());
         RCLCPP_INFO(this->get_logger(), "  用户: %s", user_name.c_str());
         RCLCPP_INFO(this->get_logger(), "  版本: %s", version.c_str());
         RCLCPP_INFO(this->get_logger(), "  路径: %s", current_bag_path_.c_str());
@@ -440,6 +461,9 @@ private:
     std::mutex mutex_;
     bool is_recording_ = false;
     std::string base_path_;
+    std::string full_base_path_;  // 包含 robot_name/version
+    std::string robot_name_;
+    std::string robot_version_;
     std::string current_bag_path_;
     std::string current_action_name_;
     std::string last_bag_path_;
