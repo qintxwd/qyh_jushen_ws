@@ -59,7 +59,7 @@ def generate_launch_description():
     )
     
     declare_enable_bag_recorder = DeclareLaunchArgument(
-        'enable_bag_recorder', default_value='false',
+        'enable_bag_recorder', default_value='true',
         description='启用Bag录制'
     )
     

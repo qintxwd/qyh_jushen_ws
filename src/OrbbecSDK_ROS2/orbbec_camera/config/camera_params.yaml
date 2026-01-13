@@ -31,7 +31,7 @@ color_exposure: 30 # 3ms
 color_gain: 16 # -1 default
 
 # depth params
-enable_depth: false
+enable_depth: true
 depth_width: 0
 depth_height: 0
 depth_fps: 0
