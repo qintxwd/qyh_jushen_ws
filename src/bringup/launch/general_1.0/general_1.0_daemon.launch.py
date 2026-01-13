@@ -74,7 +74,7 @@ def generate_launch_description():
     )
     
     # 获取环境变量
-    qyh_data_path = EnvironmentVariable('QYH_DATA_PATH', default_value='/tmp')
+    qyh_data_path = EnvironmentVariable('QYH_DATA_PATH', default_value=os.path.expanduser('~/qyh-robot-system/model_actions'))
     
     # 1. JAKA臂控制节点
     jaka_control_launch = IncludeLaunchDescription(
