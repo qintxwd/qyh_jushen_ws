@@ -74,10 +74,22 @@ class ACTInferenceNode(Node):
         self._is_running = False
         self._is_model_loaded = False
         self._last_inference_time = 0.0
+        self._current_model_name = ""  # 当前加载的模型名称
         
         # 当前观测数据
         self._current_obs = Observation()
         self._obs_lock = threading.Lock()
+        
+        # 数据时间戳（用于过期检测）
+        self._head_image_timestamp = 0.0
+        self._left_wrist_image_timestamp = 0.0
+        self._right_wrist_image_timestamp = 0.0
+        self._left_arm_timestamp = 0.0
+        self._right_arm_timestamp = 0.0
+        
+        # 数据过期阈值（秒）
+        self._image_staleness_threshold = 0.5
+        self._joint_staleness_threshold = 0.2
         
         # 当前关节状态（用于增量计算）
         self._left_arm_joints: Optional[np.ndarray] = None
@@ -263,6 +275,22 @@ class ACTInferenceNode(Node):
             self._handle_reset,
             callback_group=self.control_cb_group
         )
+        
+        # 模型路径设置话题（用于动态切换模型）
+        self._model_path_sub = self.create_subscription(
+            String,
+            '~/set_model_path',
+            self._handle_set_model_path,
+            10,
+            callback_group=self.control_cb_group
+        )
+        
+        # 当前模型名称发布
+        self._model_name_pub = self.create_publisher(
+            String,
+            '~/current_model',
+            10
+        )
     
     # ==================== 观测回调 ====================
     
@@ -271,12 +299,14 @@ class ACTInferenceNode(Node):
         with self._obs_lock:
             self._left_arm_joints = np.array(msg.position[:7])
             self._current_obs.left_arm_joints = self._left_arm_joints.copy()
+            self._left_arm_timestamp = time.time()
     
     def _right_arm_callback(self, msg: JointState):
         """右臂关节状态回调"""
         with self._obs_lock:
             self._right_arm_joints = np.array(msg.position[:7])
             self._current_obs.right_arm_joints = self._right_arm_joints.copy()
+            self._right_arm_timestamp = time.time()
     
     def _head_camera_callback(self, msg: Image):
         """头部相机回调"""
@@ -287,6 +317,7 @@ class ACTInferenceNode(Node):
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg, "rgb8")
             with self._obs_lock:
                 self._current_obs.head_image = cv_image
+                self._head_image_timestamp = time.time()
         except Exception as e:
             self.get_logger().warn(f"Failed to convert image: {e}")
     
@@ -298,6 +329,7 @@ class ACTInferenceNode(Node):
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg, "rgb8")
             with self._obs_lock:
                 self._current_obs.left_wrist_image = cv_image
+                self._left_wrist_image_timestamp = time.time()
         except Exception as e:
             pass
     
@@ -309,6 +341,7 @@ class ACTInferenceNode(Node):
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg, "rgb8")
             with self._obs_lock:
                 self._current_obs.right_wrist_image = cv_image
+                self._right_wrist_image_timestamp = time.time()
         except Exception as e:
             pass
     
@@ -337,9 +370,54 @@ class ACTInferenceNode(Node):
     
     # ==================== 控制循环 ====================
     
+    def _check_data_staleness(self) -> bool:
+        """
+        检查观测数据是否过期
+        
+        Returns:
+            True: 数据新鲜可用
+            False: 数据过期，不应进行推理
+        """
+        now = time.time()
+        
+        # 检查头部相机（如果启用）
+        if self.config.use_head_camera and self._head_image_timestamp > 0:
+            staleness = now - self._head_image_timestamp
+            if staleness > self._image_staleness_threshold:
+                self.get_logger().error(
+                    f"Head camera STALE! Last update: {staleness:.2f}s ago. Safety stop."
+                )
+                return False
+        
+        # 检查左臂关节（如果启用）
+        if self.config.use_left_arm and self._left_arm_timestamp > 0:
+            staleness = now - self._left_arm_timestamp
+            if staleness > self._joint_staleness_threshold:
+                self.get_logger().error(
+                    f"Left arm joints STALE! Last update: {staleness:.2f}s ago. Safety stop."
+                )
+                return False
+        
+        # 检查右臂关节（如果启用）
+        if self.config.use_right_arm and self._right_arm_timestamp > 0:
+            staleness = now - self._right_arm_timestamp
+            if staleness > self._joint_staleness_threshold:
+                self.get_logger().error(
+                    f"Right arm joints STALE! Last update: {staleness:.2f}s ago. Safety stop."
+                )
+                return False
+        
+        return True
+    
     def _inference_loop(self):
         """推理循环（低频）"""
         if not self._is_running or not self._is_model_loaded:
+            return
+        
+        # 安全检查：数据是否过期
+        if not self._check_data_staleness():
+            # 数据过期，清空动作队列，停止执行
+            self.executor.reset()
             return
         
         # 添加当前观测到缓冲区
@@ -350,7 +428,7 @@ class ACTInferenceNode(Node):
                 left_gripper=self._left_gripper_state,
                 right_gripper=self._right_gripper_state,
                 head_image=self._current_obs.head_image.copy() if self._current_obs.head_image is not None else None,
-                timestamp=time.time()
+                timestamp=self._head_image_timestamp  # 使用实际的图像时间戳
             )
         
         self.policy.add_observation(obs)
@@ -474,6 +552,15 @@ class ACTInferenceNode(Node):
     
     # ==================== 服务处理 ====================
     
+    def _handle_set_model_path(self, msg: String):
+        """处理模型路径设置"""
+        new_path = msg.data.strip()
+        if new_path:
+            self.get_logger().info(f"Setting model path to: {new_path}")
+            self.config.model_path = new_path
+            # 提取模型名称（用于标识）
+            self._current_model_name = os.path.basename(os.path.dirname(new_path))
+    
     def _handle_start(self, request, response):
         """处理启动/停止请求"""
         from std_srvs.srv import SetBool
@@ -485,15 +572,23 @@ class ACTInferenceNode(Node):
                 response.message = "Model not loaded. Call /act_inference/load_model first."
                 return response
             
+            # 重置数据时间戳，确保新启动时需要新鲜数据
+            self._head_image_timestamp = 0.0
+            self._left_wrist_image_timestamp = 0.0
+            self._right_wrist_image_timestamp = 0.0
+            self._left_arm_timestamp = 0.0
+            self._right_arm_timestamp = 0.0
+            
             self._is_running = True
             self.policy.reset()
             self.executor.reset()
             response.success = True
-            response.message = "ACT inference started"
-            self.get_logger().info("Inference STARTED")
+            response.message = f"ACT inference started (model: {self._current_model_name})"
+            self.get_logger().info(f"Inference STARTED with model: {self._current_model_name}")
         else:
             # 停止
             self._is_running = False
+            self.executor.reset()  # 清空动作队列，防止残留动作
             response.success = True
             response.message = "ACT inference stopped"
             self.get_logger().info("Inference STOPPED")
@@ -515,11 +610,19 @@ class ACTInferenceNode(Node):
         
         if success:
             self._is_model_loaded = True
+            self._current_model_name = os.path.basename(os.path.dirname(self.config.model_path))
             response.success = True
-            response.message = f"Model loaded: {self.config.model_path}"
+            response.message = f"Model loaded: {self._current_model_name}"
+            
+            # 发布当前模型名称
+            model_msg = String()
+            model_msg.data = self._current_model_name
+            self._model_name_pub.publish(model_msg)
+            
+            self.get_logger().info(f"Model loaded successfully: {self._current_model_name}")
         else:
             response.success = False
-            response.message = "Failed to load model"
+            response.message = f"Failed to load model from: {self.config.model_path}"
         
         return response
     

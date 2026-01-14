@@ -103,6 +103,11 @@ class ACTExecuteNode(SkillNode):
         self._load_model_client = None
         self._status_sub = None
         
+        # 模型路径发布者和当前模型订阅者
+        self._model_path_pub = None
+        self._current_model_sub = None
+        self._current_loaded_model = ""
+        
         # 内嵌推理（如果不使用外部节点）
         self._policy = None
         self._executor = None
@@ -111,6 +116,7 @@ class ACTExecuteNode(SkillNode):
         self._is_executing = False
         self._start_time: Optional[float] = None
         self._inference_status = "unknown"
+        self._model_load_pending = False
     
     def _get_model_actions_dir(self) -> str:
         """获取当前机器人的 model_actions 目录"""
@@ -175,6 +181,21 @@ class ACTExecuteNode(SkillNode):
             self._stop_client = self.ros_node.create_client(
                 SetBool,
                 '/act_inference_node/start'
+            )
+            
+            # 模型路径发布者（用于动态切换模型）
+            self._model_path_pub = self.ros_node.create_publisher(
+                String,
+                '/act_inference_node/set_model_path',
+                10
+            )
+            
+            # 订阅当前加载的模型名称
+            self._current_model_sub = self.ros_node.create_subscription(
+                String,
+                '/act_inference_node/current_model',
+                self._current_model_callback,
+                10
             )
             
             # 订阅状态
@@ -273,6 +294,11 @@ class ACTExecuteNode(SkillNode):
         """推理节点状态回调"""
         self._inference_status = msg.data
     
+    def _current_model_callback(self, msg):
+        """当前加载模型名称回调"""
+        self._current_loaded_model = msg.data
+        self.log_info(f"[ACTExecute] Current loaded model: {self._current_loaded_model}")
+    
     def execute(self) -> SkillResult:
         """执行 ACT 推理"""
         max_duration = self.params.get('max_duration', 30.0)
@@ -318,11 +344,57 @@ class ACTExecuteNode(SkillNode):
             # 首次调用：加载模型并启动
             self._is_executing = True
             self._start_time = time.time()
+            self._model_load_pending = True
             
-            # 先加载模型（如果需要）
-            # TODO: 实现动态模型加载
+            # === 关键修复：先设置并加载模型 ===
+            target_model_path = self._resolve_model_path()
+            if target_model_path:
+                # 检查是否需要重新加载模型
+                target_model_name = os.path.basename(os.path.dirname(target_model_path))
+                
+                if self._current_loaded_model != target_model_name:
+                    self.log_info(f"[ACTExecute] Need to load model: {target_model_name}")
+                    self.log_info(f"  Current loaded: {self._current_loaded_model or 'None'}")
+                    
+                    # 1. 发布模型路径
+                    if self._model_path_pub:
+                        from std_msgs.msg import String
+                        path_msg = String()
+                        path_msg.data = target_model_path
+                        self._model_path_pub.publish(path_msg)
+                        time.sleep(0.1)  # 等待消息处理
+                    
+                    # 2. 调用加载模型服务
+                    if not self._load_model_client.wait_for_service(timeout_sec=2.0):
+                        self.log_error("Load model service not available")
+                        return SkillResult(
+                            status=SkillStatus.FAILURE,
+                            message="Load model service not available"
+                        )
+                    
+                    from std_srvs.srv import Trigger
+                    request = Trigger.Request()
+                    future = self._load_model_client.call_async(request)
+                    
+                    while not future.done():
+                        time.sleep(0.01)
+                    
+                    load_result = future.result()
+                    if not load_result.success:
+                        self.log_error(f"Failed to load model: {load_result.message}")
+                        return SkillResult(
+                            status=SkillStatus.FAILURE,
+                            message=f"Failed to load model: {load_result.message}"
+                        )
+                    
+                    self.log_info(f"[ACTExecute] Model loaded: {target_model_name}")
+                    self._current_loaded_model = target_model_name
+                else:
+                    self.log_info(f"[ACTExecute] Model already loaded: {target_model_name}")
             
-            # 启动推理
+            self._model_load_pending = False
+            
+            # === 启动推理 ===
             from std_srvs.srv import SetBool
             
             if not self._start_client.wait_for_service(timeout_sec=2.0):
