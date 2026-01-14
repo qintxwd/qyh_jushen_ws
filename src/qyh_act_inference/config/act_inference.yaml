@@ -17,12 +17,16 @@ inference_frequency: 10.0                # 推理频率 (Hz)
 
 # ==================== 动作缩放与平滑（关键调参项！） ====================
 # 初始部署建议从保守值开始，稳定后逐步提高
-action_scale: 0.4                        # 动作缩放 (0.2-1.0)
-smoothing_alpha: 0.3                     # 平滑系数 (0.2-0.5)
+# 调参策略：
+#   极保守: action_scale=0.2, smoothing_alpha=0.5, max_joint_delta=0.03
+#   保守:   action_scale=0.3, smoothing_alpha=0.4, max_joint_delta=0.04
+#   正常:   action_scale=0.4, smoothing_alpha=0.3, max_joint_delta=0.05
+action_scale: 0.25                       # 动作缩放 (0.2-1.0) - 首次测试用25%幅度
+smoothing_alpha: 0.5                     # 平滑系数 (0.2-0.5) - 强平滑，70%旧动作+30%新预测
 
 # ==================== 安全限制 ====================
-max_joint_velocity: 1.0                  # 最大关节速度 (rad/s)
-max_joint_delta: 0.05                    # 单步最大变化 (rad)
+max_joint_velocity: 1.0                  # 最大关节速度 (rad/s) - 驱动层限制，ACT层未使用
+max_joint_delta: 0.03                    # 单步最大变化 (rad) - 硬限制≈1.7°/步，防止突变
 gripper_threshold: 0.6                   # 夹爪阈值
 gripper_hysteresis: 0.1                  # 夹爪滞后
 
@@ -47,5 +51,21 @@ left_wrist_camera_topic: "/camera/left_wrist/color/image_raw"
 right_wrist_camera_topic: "/camera/right_wrist/color/image_raw"
 
 # ==================== 调试 ====================
-verbose: false
+verbose: true                            # 开启详细日志，观察执行情况
 visualize: false
+
+
+# # 阶段1（当前）：极保守 - 速度约25%
+# action_scale: 0.25
+# smoothing_alpha: 0.5
+# max_joint_delta: 0.03
+
+# # 阶段2：保守 - 速度约40%  
+# action_scale: 0.3
+# smoothing_alpha: 0.4
+# max_joint_delta: 0.04
+
+# # 阶段3：正常 - 速度约70%
+# action_scale: 0.4
+# smoothing_alpha: 0.3
+# max_joint_delta: 0.05
