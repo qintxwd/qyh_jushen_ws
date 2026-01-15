@@ -7,7 +7,8 @@ normalization_path: ""                   # normalization 参数路径
 device: "cuda"                           # cuda 或 cpu
 
 # ==================== 控制参数 ====================
-observation_horizon: 10                  # N - 历史帧数
+# 重要：必须与训练配置保持一致！
+observation_horizon: 1                   # N - 历史帧数 (训练时用 1)
 action_horizon: 20                       # K - 预测未来步数
 action_steps: 3                          # M - 每次执行几步
 

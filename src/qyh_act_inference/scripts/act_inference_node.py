@@ -479,6 +479,9 @@ class ACTInferenceNode(Node):
                 left_gripper=self._left_gripper_state,
                 right_gripper=self._right_gripper_state,
                 head_image=self._current_obs.head_image.copy() if self._current_obs.head_image is not None else None,
+                left_wrist_image=self._current_obs.left_wrist_image.copy() if self._current_obs.left_wrist_image is not None else None,
+                right_wrist_image=self._current_obs.right_wrist_image.copy() if self._current_obs.right_wrist_image is not None else None,
+                head_depth=self._current_obs.head_depth.copy() if self._current_obs.head_depth is not None else None,
                 timestamp=self._head_image_timestamp  # 使用实际的图像时间戳
             )
         
