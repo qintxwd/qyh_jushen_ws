@@ -9,7 +9,11 @@ import sys
 from typing import Dict, Any, Optional
 
 # 尝试从训练包导入模型
-_ACT_TRAINING_PATH = os.path.expanduser("~/qyh-robot-system/qyh_act_training")
+# 优先使用环境变量，否则使用默认路径
+_ACT_TRAINING_PATH = os.getenv(
+    "ACT_TRAINING_PATH", 
+    os.path.expanduser("~/qyh-robot-system/qyh_act_training")
+)
 if os.path.exists(_ACT_TRAINING_PATH):
     sys.path.insert(0, _ACT_TRAINING_PATH)
 
