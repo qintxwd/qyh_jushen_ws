@@ -43,12 +43,27 @@ use_depth: true                              # 使用深度图像
 action_type: "absolute"                      # 跟训练配置保持一致！
 
 # ==================== 话题配置 ====================
+# 输入话题 - 关节状态
 left_arm_state_topic: "/left_arm/joint_states"
 right_arm_state_topic: "/right_arm/joint_states"
-head_camera_topic: "/camera/head/color/image_raw"
-head_camera_depth_topic: "/camera/head/depth/image_raw"
-left_wrist_camera_topic: "/camera/left_wrist/color/image_raw"
-right_wrist_camera_topic: "/camera/right_wrist/color/image_raw"
+
+# 输入话题 - 相机 (与 action.yaml 中 collection.cameras 保持一致)
+head_camera_topic: "/head_camera/color/image_raw"
+head_camera_depth_topic: "/head_camera/depth/image_raw"
+left_wrist_camera_topic: "/left_camera/color/image_raw"
+right_wrist_camera_topic: "/right_camera/color/image_raw"
+
+# 输入话题 - 夹爪状态 (与 action.yaml 中 collection.grippers 保持一致)
+left_gripper_state_topic: "/left/gripper_state"
+right_gripper_state_topic: "/right/gripper_state"
+
+# 输出话题 - 机械臂 servo_j 命令 (Float64MultiArray, 7 joints)
+left_arm_servo_j_topic: "/teleop/left/servo_j"
+right_arm_servo_j_topic: "/teleop/right/servo_j"
+
+# 输出服务 - 夹爪控制
+left_gripper_service: "/left/move_gripper"
+right_gripper_service: "/right/move_gripper"
 
 # ==================== 调试 ====================
 verbose: true                            # 开启详细日志，观察执行情况

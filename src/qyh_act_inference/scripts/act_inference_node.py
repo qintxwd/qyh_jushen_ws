@@ -24,7 +24,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
 # ROS2 消息类型
-from std_msgs.msg import Float32, Bool, String
+from std_msgs.msg import Float32, Bool, String, Float64MultiArray
 from sensor_msgs.msg import JointState, Image
 from geometry_msgs.msg import Pose
 
@@ -186,6 +186,35 @@ class ACTInferenceNode(Node):
                 callback_group=self.sensor_cb_group
             )
             self.get_logger().info(f"Subscribed to depth: {self.config.head_camera_depth_topic}")
+        
+        # 夹爪状态订阅（用于观测输入）
+        if self.config.use_left_gripper:
+            try:
+                from qyh_gripper_msgs.msg import GripperState
+                self._left_gripper_state_sub = self.create_subscription(
+                    GripperState,
+                    self.config.left_gripper_state_topic,
+                    self._left_gripper_state_callback,
+                    10,
+                    callback_group=self.sensor_cb_group
+                )
+                self.get_logger().info(f"Subscribed to: {self.config.left_gripper_state_topic}")
+            except ImportError:
+                self.get_logger().warn("qyh_gripper_msgs not found, left gripper state disabled")
+        
+        if self.config.use_right_gripper:
+            try:
+                from qyh_gripper_msgs.msg import GripperState
+                self._right_gripper_state_sub = self.create_subscription(
+                    GripperState,
+                    self.config.right_gripper_state_topic,
+                    self._right_gripper_state_callback,
+                    10,
+                    callback_group=self.sensor_cb_group
+                )
+                self.get_logger().info(f"Subscribed to: {self.config.right_gripper_state_topic}")
+            except ImportError:
+                self.get_logger().warn("qyh_gripper_msgs not found, right gripper state disabled")
     
     def _create_publishers(self):
         """创建命令发布者"""
@@ -197,55 +226,53 @@ class ACTInferenceNode(Node):
             10
         )
         
-        # 夹爪命令发布
-        if self.config.use_left_gripper:
-            # 使用项目的夹爪消息类型
-            try:
-                from qyh_gripper_msgs.msg import GripperCommand
-                self._left_gripper_pub = self.create_publisher(
-                    GripperCommand,
-                    self.config.left_gripper_command_topic,
-                    10
-                )
-            except ImportError:
-                self.get_logger().warn("qyh_gripper_msgs not found, using Float32")
-                self._left_gripper_pub = self.create_publisher(
-                    Float32,
-                    self.config.left_gripper_command_topic,
-                    10
-                )
+        # 机械臂 servo_j 命令发布 (Float64MultiArray, 7 joints)
+        if self.config.use_left_arm:
+            self._left_arm_pub = self.create_publisher(
+                Float64MultiArray,
+                self.config.left_arm_servo_j_topic,
+                10
+            )
+            self.get_logger().info(f"Created left arm servo_j publisher: {self.config.left_arm_servo_j_topic}")
         
-        if self.config.use_right_gripper:
-            try:
-                from qyh_gripper_msgs.msg import GripperCommand
-                self._right_gripper_pub = self.create_publisher(
-                    GripperCommand,
-                    self.config.right_gripper_command_topic,
-                    10
-                )
-            except ImportError:
-                self._right_gripper_pub = self.create_publisher(
-                    Float32,
-                    self.config.right_gripper_command_topic,
-                    10
-                )
+        if self.config.use_right_arm:
+            self._right_arm_pub = self.create_publisher(
+                Float64MultiArray,
+                self.config.right_arm_servo_j_topic,
+                10
+            )
+            self.get_logger().info(f"Created right arm servo_j publisher: {self.config.right_arm_servo_j_topic}")
     
     def _create_service_clients(self):
-        """创建机械臂控制服务客户端"""
+        """创建夹爪控制服务客户端"""
         
         try:
-            from qyh_jaka_control_msgs.srv import ServoJ
+            from qyh_gripper_msgs.srv import MoveGripper
             
-            self._servo_j_client = self.create_client(
-                ServoJ,
-                self.config.left_arm_command_service,
-                callback_group=self.control_cb_group
-            )
-            self.get_logger().info(f"Created ServoJ client: {self.config.left_arm_command_service}")
+            if self.config.use_left_gripper:
+                self._left_gripper_client = self.create_client(
+                    MoveGripper,
+                    self.config.left_gripper_service,
+                    callback_group=self.control_cb_group
+                )
+                self.get_logger().info(f"Created left gripper service client: {self.config.left_gripper_service}")
+            else:
+                self._left_gripper_client = None
             
+            if self.config.use_right_gripper:
+                self._right_gripper_client = self.create_client(
+                    MoveGripper,
+                    self.config.right_gripper_service,
+                    callback_group=self.control_cb_group
+                )
+                self.get_logger().info(f"Created right gripper service client: {self.config.right_gripper_service}")
+            else:
+                self._right_gripper_client = None
+                
         except ImportError:
-            self.get_logger().warn("qyh_jaka_control_msgs not found, arm control disabled")
-            self._servo_j_client = None
+            self.get_logger().warn("qyh_gripper_msgs not found, gripper control disabled")
+            self._left_gripper_client = None
+            self._right_gripper_client = None
     
     def _create_control_interface(self):
         """创建外部控制接口（启动/停止推理）"""
@@ -368,6 +395,30 @@ class ACTInferenceNode(Node):
         except Exception as e:
             self.get_logger().warn(f"Failed to convert depth image: {e}")
     
+    def _left_gripper_state_callback(self, msg):
+        """左夹爪状态回调"""
+        try:
+            # GripperState.current_position 是 0-255，需要归一化到 0.0-1.0
+            # 0 = 张开, 255 = 闭合
+            normalized_position = float(msg.current_position) / 255.0
+            with self._obs_lock:
+                self._left_gripper_state = normalized_position
+                self._current_obs.left_gripper = normalized_position
+        except Exception as e:
+            self.get_logger().warn(f"Failed to process left gripper state: {e}")
+    
+    def _right_gripper_state_callback(self, msg):
+        """右夹爪状态回调"""
+        try:
+            # GripperState.current_position 是 0-255，需要归一化到 0.0-1.0
+            # 0 = 张开, 255 = 闭合
+            normalized_position = float(msg.current_position) / 255.0
+            with self._obs_lock:
+                self._right_gripper_state = normalized_position
+                self._current_obs.right_gripper = normalized_position
+        except Exception as e:
+            self.get_logger().warn(f"Failed to process right gripper state: {e}")
+
     # ==================== 控制循环 ====================
     
     def _check_data_staleness(self) -> bool:
@@ -475,80 +526,114 @@ class ACTInferenceNode(Node):
         Args:
             command: RobotCommand 对象
         """
-        # 执行右臂命令
-        if command.right_arm is not None and self._servo_j_client:
-            self._send_arm_command(
-                command.right_arm,
-                robot_id=2,  # 右臂
-                current_joints=self._right_arm_joints
-            )
-        
-        # 执行左臂命令
-        if command.left_arm is not None and self._servo_j_client:
+        # 执行左臂命令 (通过话题发布 servo_j)
+        if command.left_arm is not None and hasattr(self, '_left_arm_pub'):
             self._send_arm_command(
                 command.left_arm,
-                robot_id=1,  # 左臂
+                side='left',
                 current_joints=self._left_arm_joints
             )
         
-        # 执行右夹爪命令
-        if command.right_gripper is not None:
-            self._send_gripper_command(command.right_gripper, 'right')
+        # 执行右臂命令 (通过话题发布 servo_j)
+        if command.right_arm is not None and hasattr(self, '_right_arm_pub'):
+            self._send_arm_command(
+                command.right_arm,
+                side='right',
+                current_joints=self._right_arm_joints
+            )
         
-        # 执行左夹爪命令
+        # 执行左夹爪命令 (通过服务调用)
         if command.left_gripper is not None:
             self._send_gripper_command(command.left_gripper, 'left')
+        
+        # 执行右夹爪命令 (通过服务调用)
+        if command.right_gripper is not None:
+            self._send_gripper_command(command.right_gripper, 'right')
     
-    def _send_arm_command(self, arm_cmd, robot_id: int, current_joints: Optional[np.ndarray]):
-        """发送机械臂命令"""
+    def _send_arm_command(self, arm_cmd, side: str, current_joints: Optional[np.ndarray]):
+        """
+        发送机械臂命令 - 通过话题发布到 servo_j
+        
+        Args:
+            arm_cmd: ArmCommand 对象
+            side: 'left' 或 'right'
+            current_joints: 当前关节位置
+        """
         if current_joints is None:
-            self.get_logger().warn(f"No current joint state for robot {robot_id}")
+            self.get_logger().warn(f"No current joint state for {side} arm")
             return
         
         try:
-            from qyh_jaka_control_msgs.srv import ServoJ
-            
             # 计算目标位置
             if arm_cmd.is_delta:
                 target_joints = current_joints + arm_cmd.joint_positions
             else:
                 target_joints = arm_cmd.joint_positions
             
-            # 创建请求
-            request = ServoJ.Request()
-            request.robot_id = robot_id
-            request.joint_positions = target_joints.tolist()
+            # 创建 Float64MultiArray 消息
+            msg = Float64MultiArray()
+            msg.data = target_joints.tolist()
             
-            # 异步调用（不等待结果）
-            self._servo_j_client.call_async(request)
+            # 发布到对应的话题
+            if side == 'left' and hasattr(self, '_left_arm_pub'):
+                self._left_arm_pub.publish(msg)
+            elif side == 'right' and hasattr(self, '_right_arm_pub'):
+                self._right_arm_pub.publish(msg)
             
+            if self.config.verbose:
+                self.get_logger().debug(f"Published {side} arm servo_j: {target_joints}")
+                
         except Exception as e:
-            self.get_logger().error(f"Failed to send arm command: {e}")
+            self.get_logger().error(f"Failed to send {side} arm command: {e}")
     
     def _send_gripper_command(self, gripper_cmd, side: str):
-        """发送夹爪命令"""
+        """
+        发送夹爪命令 - 通过服务调用
+        
+        Args:
+            gripper_cmd: GripperCommand 对象
+            side: 'left' 或 'right'
+        """
         try:
-            from qyh_gripper_msgs.msg import GripperCommand
+            from qyh_gripper_msgs.srv import MoveGripper
             
-            msg = GripperCommand()
-            msg.position = gripper_cmd.position
+            # 获取对应的服务客户端
+            client = None
+            if side == 'left' and hasattr(self, '_left_gripper_client') and self._left_gripper_client:
+                client = self._left_gripper_client
+            elif side == 'right' and hasattr(self, '_right_gripper_client') and self._right_gripper_client:
+                client = self._right_gripper_client
             
-            if side == 'left' and hasattr(self, '_left_gripper_pub'):
-                self._left_gripper_pub.publish(msg)
+            if client is None:
+                return
+            
+            # 将归一化位置 (0.0-1.0) 转换为夹爪位置 (0-255)
+            # 0.0 = 张开 (position=0), 1.0 = 闭合 (position=255)
+            position_normalized = gripper_cmd.position
+            gripper_position = int(np.clip(position_normalized * 255, 0, 255))
+            
+            # 创建服务请求
+            request = MoveGripper.Request()
+            request.position = gripper_position
+            request.speed = 255      # 最大速度
+            request.force = 150      # 中等夹持力
+            
+            # 异步调用（不等待结果）
+            client.call_async(request)
+            
+            # 更新内部状态
+            if side == 'left':
                 self._left_gripper_state = gripper_cmd.position
-            elif side == 'right' and hasattr(self, '_right_gripper_pub'):
-                self._right_gripper_pub.publish(msg)
+            else:
                 self._right_gripper_state = gripper_cmd.position
+            
+            if self.config.verbose:
+                self.get_logger().debug(f"Sent {side} gripper command: pos={gripper_position}")
                 
         except ImportError:
-            # 降级为 Float32
-            msg = Float32()
-            msg.data = gripper_cmd.position
-            
-            if side == 'left' and hasattr(self, '_left_gripper_pub'):
-                self._left_gripper_pub.publish(msg)
-            elif side == 'right' and hasattr(self, '_right_gripper_pub'):
-                self._right_gripper_pub.publish(msg)
+            self.get_logger().warn_once("qyh_gripper_msgs not available, gripper control disabled")
+        except Exception as e:
+            self.get_logger().error(f"Failed to send gripper command: {e}")
     
     # ==================== 服务处理 ====================
     

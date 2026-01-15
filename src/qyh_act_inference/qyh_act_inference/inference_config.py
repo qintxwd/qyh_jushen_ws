@@ -75,19 +75,27 @@ class InferenceConfig:
     ])
     
     # ==================== 话题配置 ====================
-    # 输入话题
+    # 输入话题 - 关节状态
     left_arm_state_topic: str = "/left_arm/joint_states"
     right_arm_state_topic: str = "/right_arm/joint_states"
-    head_camera_topic: str = "/camera/head/color/image_raw"
-    left_wrist_camera_topic: str = "/camera/left_wrist/color/image_raw"
-    right_wrist_camera_topic: str = "/camera/right_wrist/color/image_raw"
-    head_camera_depth_topic: str = "/camera/head/depth/image_raw"
     
-    # 输出话题/服务
-    left_arm_command_service: str = "/jaka/servo_j"
-    right_arm_command_service: str = "/jaka/servo_j"
-    left_gripper_command_topic: str = "/left_gripper/command"
-    right_gripper_command_topic: str = "/right_gripper/command"
+    # 输入话题 - 相机 (与 action.yaml 中 collection.cameras 保持一致)
+    head_camera_topic: str = "/head_camera/color/image_raw"
+    head_camera_depth_topic: str = "/head_camera/depth/image_raw"
+    left_wrist_camera_topic: str = "/left_camera/color/image_raw"
+    right_wrist_camera_topic: str = "/right_camera/color/image_raw"
+    
+    # 输入话题 - 夹爪状态 (与 action.yaml 中 collection.grippers 保持一致)
+    left_gripper_state_topic: str = "/left/gripper_state"
+    right_gripper_state_topic: str = "/right/gripper_state"
+    
+    # 输出话题 - 机械臂 servo_j 命令 (Float64MultiArray, 7 joints)
+    left_arm_servo_j_topic: str = "/teleop/left/servo_j"
+    right_arm_servo_j_topic: str = "/teleop/right/servo_j"
+    
+    # 输出服务 - 夹爪控制 (qyh_gripper_msgs/srv/MoveGripper)
+    left_gripper_service: str = "/left/move_gripper"
+    right_gripper_service: str = "/right/move_gripper"
     
     # ==================== 模式配置 ====================
     # 使用哪些输入
