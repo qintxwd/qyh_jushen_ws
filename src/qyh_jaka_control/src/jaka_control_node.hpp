@@ -75,11 +75,12 @@ private:
 
     // ==================== ServoJ (Joint Stream) ====================
     void command_j_timer_callback();
-    void command_j_input_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
 
     // void jog_timer_callback();
 
     void command_p_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
+    
+    void command_j_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
 
     void publishStatus();
 
@@ -87,6 +88,13 @@ private:
     void leftServoPCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
     
     void rightServoPCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+
+    void leftServoJCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+    
+    void rightServoJCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+
+    // ==================== 伺服模式切换 ====================
+    void updateServoMode();
 
     // ==================== 负载配置加载 ====================
     bool loadAndSetPayloadFromConfig();    
@@ -104,6 +112,11 @@ private:
     double cycle_time_{0.008};               // 控制周期 (s)
 
     enum class ServoInputState { NEVER_RECEIVED, ACTIVE, HOLD, TIMEOUT };
+    
+    // 伺服模式：SERVO_P 优先，只有没有 servo_p 输入时才使用 servo_j
+    enum class ServoMode { SERVO_P, SERVO_J };
+    ServoMode current_servo_mode_ = ServoMode::SERVO_P;
+    
     //记录收到的左右手servo p指令，用于合并后发送【当收到时，状态变为ACTIVE】
     CartesianPose left_command_servo_p_val;
     CartesianPose right_command_servo_p_val;
@@ -122,14 +135,21 @@ private:
     rclcpp::Duration command_timeout_ = rclcpp::Duration::from_seconds(0.2);
 
     // ServoJ 输入缓存（双臂合并：14维 = 左7 + 右7）
-    std::array<double, 14> dual_command_servo_j_val_{};
-    std::array<double, 14> dual_last_target_servo_j_{};
-    rclcpp::Time dual_last_command_j_time_{};
-    ServoInputState joint_input_state_ = ServoInputState::NEVER_RECEIVED;
+    // std::array<double, 14> dual_command_servo_j_val_{}; // Removed
+    // std::array<double, 14> dual_last_target_servo_j_{}; // Removed
+    // rclcpp::Time dual_last_command_j_time_{}; // Removed
+    // ServoInputState joint_input_state_ = ServoInputState::NEVER_RECEIVED; // Removed
 
-    // 当 ServoJ 活跃时，禁止 ServoP 下发，避免两套伺服打架
-    std::atomic<bool> servo_j_override_{false};
-    bool servo_j_override_prev_{false};
+    // ServoJ (Separate L/R)
+    std::array<double, 7> left_command_servo_j_val_{};
+    std::array<double, 7> right_command_servo_j_val_{};
+    rclcpp::Time left_last_command_j_time_;
+    rclcpp::Time right_last_command_j_time_;
+    ServoInputState left_joint_input_state_ = ServoInputState::NEVER_RECEIVED;
+    ServoInputState right_joint_input_state_ = ServoInputState::NEVER_RECEIVED;
+    std::array<double, 7> left_last_target_servo_j_{};
+    std::array<double, 7> right_last_target_servo_j_{};
+
 
     // 状态
     std::atomic<bool> connected_;
@@ -165,12 +185,17 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_vr_servo_p_sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr right_vr_servo_p_sub_;
     
+    // ServoJ L/R subscription
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_vr_servo_j_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr right_vr_servo_j_sub_;
+
     //自订自发的topic，用于合并左右手的数据
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_p_publisher_; //用定时器发送servo p指令[以固定的8ms频率发送]，将收到的左右手指令合并后发送出去
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_p_subscriber_; //接收上面的8ms频率的servo p指令，具体进行执行
 
-    // ServoJ 输入：外部可直接发布 14 维关节目标到该 topic
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_j_subscriber_;
+    // ServoJ 自订自发 topic（与 ServoP 保持一致的架构）
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_j_publisher_; //用定时器发送servo j指令[以固定的8ms频率发送]，将收到的左右手指令合并后发送出去
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr dual_arm_command_j_subscriber_; //接收上面的8ms频率的servo j指令，具体进行执行
 
     // 服务
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_power_on_;
