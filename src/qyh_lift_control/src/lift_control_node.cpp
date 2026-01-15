@@ -32,6 +32,12 @@ LiftControlNode::LiftControlNode(const rclcpp::NodeOptions & options)
   if (!connect_modbus()) {
     RCLCPP_ERROR(this->get_logger(), "Failed to connect to PLC");
   }
+  // 启动时关闭电磁铁
+  if (is_connected_) {
+    if (!write_coil(ModbusAddress::COIL_ELECTROMAGNET, false)) {
+      RCLCPP_WARN(this->get_logger(), "Failed to turn off electromagnet on startup");
+    }
+  }
 
   // 创建发布者
   state_pub_ = this->create_publisher<qyh_lift_msgs::msg::LiftState>(
@@ -151,6 +157,17 @@ bool LiftControlNode::read_lift_state()
     current_state_.enabled = (coils[ModbusAddress::COIL_ENABLE] != 0);
     current_state_.alarm = (coils[ModbusAddress::COIL_ALARM] != 0);
     current_state_.position_reached = (coils[ModbusAddress::COIL_POSITION_REACHED] != 0);
+
+    // 单独读取电磁铁线圈（地址较大）
+    try {
+      auto em_coil = modbus_ctx_->read_coils(
+        ModbusAddress::COIL_BASE + ModbusAddress::COIL_ELECTROMAGNET, 1);
+      current_state_.electromagnet_on = (em_coil[0] != 0);
+    } catch (const modbus::Exception & e) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                           "Failed to read electromagnet coil: %s", e.what());
+      current_state_.electromagnet_on = false;
+    }
     
 
     is_enabled_ = current_state_.enabled;
