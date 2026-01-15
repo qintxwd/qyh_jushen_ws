@@ -33,8 +33,7 @@ class HeadLookAtNode(SkillNode):
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
-        self._pan_pub = None
-        self._tilt_pub = None
+        self._cmd_pub = None
         self._command_sent = False
         self._wait_start = None
     
@@ -49,18 +48,16 @@ class HeadLookAtNode(SkillNode):
             return True
         
         try:
-            from std_msgs.msg import Float64
-            self._pan_pub = self.ros_node.create_publisher(
-                Float64, '/head/pan_normalized', 10
+            from std_msgs.msg import Float64MultiArray
+            # 头部驱动订阅 ~/cmd_position (Float64MultiArray [tilt, pan])
+            self._cmd_pub = self.ros_node.create_publisher(
+                Float64MultiArray, '/head_motor_node/cmd_position', 10
             )
-            self._tilt_pub = self.ros_node.create_publisher(
-                Float64, '/head/tilt_normalized', 10
-            )
-            self.log_info("  Head publishers created")
+            self.log_info("  Head publisher created: /head_motor_node/cmd_position")
             self.log_info("="*40)
             return True
         except Exception as e:
-            self.log_error(f"  Failed to create head publishers: {e}")
+            self.log_error(f"  Failed to create head publisher: {e}")
             return False
     
     def execute(self) -> SkillResult:
@@ -80,7 +77,7 @@ class HeadLookAtNode(SkillNode):
         self.log_info(f"[Head] Looking at pitch={pitch:.2f}, yaw={yaw:.2f}")
         
         # Mock 模式
-        if not self._pan_pub:
+        if not self._cmd_pub:
             time.sleep(0.3)
             self.log_info(f"[Head] Position reached (mock)")
             return SkillResult(
@@ -90,17 +87,14 @@ class HeadLookAtNode(SkillNode):
         
         # 发送命令
         if not self._command_sent:
-            from std_msgs.msg import Float64
+            from std_msgs.msg import Float64MultiArray
             
-            pan_msg = Float64()
-            pan_msg.data = yaw
-            self._pan_pub.publish(pan_msg)
+            # 头部驱动期望 [tilt, pan] 格式，归一化值 [-1, 1]
+            cmd_msg = Float64MultiArray()
+            cmd_msg.data = [float(pitch), float(yaw)]
+            self._cmd_pub.publish(cmd_msg)
             
-            tilt_msg = Float64()
-            tilt_msg.data = pitch
-            self._tilt_pub.publish(tilt_msg)
-            
-            self.log_info(f"   Head command sent: pan={yaw:.2f}, tilt={pitch:.2f}")
+            self.log_info(f"   Head command sent: tilt={pitch:.2f}, pan={yaw:.2f}")
             self._command_sent = True
             self._wait_start = time.time()
             
@@ -174,8 +168,7 @@ class HeadScanNode(SkillNode):
     
     def __init__(self, node_id: str, params: Dict[str, Any] = None, **kwargs):
         super().__init__(node_id, params, **kwargs)
-        self._pan_pub = None
-        self._tilt_pub = None
+        self._cmd_pub = None
         self._scan_step = 0
         self._current_repeat = 0
         self._step_start_time = None
@@ -186,30 +179,19 @@ class HeadScanNode(SkillNode):
             return True
         
         try:
-            from std_msgs.msg import Float64
-            self._pan_pub = self.ros_node.create_publisher(
-                Float64, '/head/pan_normalized', 10
-            )
-            self._tilt_pub = self.ros_node.create_publisher(
-                Float64, '/head/tilt_normalized', 10
+            from std_msgs.msg import Float64MultiArray
+            self._cmd_pub = self.ros_node.create_publisher(
+                Float64MultiArray, '/head_motor_node/cmd_position', 10
             )
             return True
         except Exception as e:
-            self.log_error(f"Failed to create head publishers: {e}")
+            self.log_error(f"Failed to create head publisher: {e}")
             return False
     
     def execute(self) -> SkillResult:
         pattern = self.params.get('pattern', 'left_right')
         speed = self.params.get('speed', 0.5)
         repeat = self.params.get('repeat', 1)
-        
-        # Mock 模式
-        if not self._pan_pub:
-            time.sleep(1.0 / speed)
-            return SkillResult(
-                status=SkillStatus.SUCCESS,
-                message=f"Head scan {pattern} completed (mock mode)"
-            )
         
         # 定义扫描序列
         scan_patterns = {
@@ -220,6 +202,14 @@ class HeadScanNode(SkillNode):
         
         steps = scan_patterns.get(pattern, scan_patterns['left_right'])
         step_duration = 0.5 / speed
+        
+        # Mock 模式
+        if not self._cmd_pub:
+            time.sleep(1.0 / speed)
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                message=f"Head scan {pattern} completed (mock mode)"
+            )
         
         # 初始化步骤
         if self._step_start_time is None:
@@ -258,12 +248,8 @@ class HeadScanNode(SkillNode):
     
     def _publish_head_position(self, pitch: float, yaw: float):
         """发布头部位置"""
-        from std_msgs.msg import Float64
+        from std_msgs.msg import Float64MultiArray
         
-        pan_msg = Float64()
-        pan_msg.data = yaw
-        self._pan_pub.publish(pan_msg)
-        
-        tilt_msg = Float64()
-        tilt_msg.data = pitch
-        self._tilt_pub.publish(tilt_msg)
+        cmd_msg = Float64MultiArray()
+        cmd_msg.data = [float(pitch), float(yaw)]
+        self._cmd_pub.publish(cmd_msg)
