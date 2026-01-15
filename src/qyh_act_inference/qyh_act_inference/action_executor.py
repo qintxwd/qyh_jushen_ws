@@ -145,6 +145,13 @@ class ActionExecutor:
         
         这是部署调参最关键的地方之一！
         """
+        if hasattr(self.config, 'action_type') and self.config.action_type == 'absolute':
+            # 对于绝对位置控制，直接缩放会导致位置错误 (e.g. 1.0 -> 0.4)
+            # 因此禁用直接缩放
+            if self.config.action_scale < 0.99:
+                 pass  # 可以添加日志，但在高频循环中避免打印
+            return action
+            
         return action * self.config.action_scale
     
     def _smooth_action(self, action: np.ndarray) -> np.ndarray:
@@ -209,28 +216,59 @@ class ActionExecutor:
         应用安全限制，生成最终命令
         """
         command = RobotCommand()
+        is_absolute = (self.config.action_type == "absolute")
         
         # 处理左臂
         if parsed['left_arm'] is not None:
-            joint_delta = self._clamp_joint_delta(
-                parsed['left_arm'],
-                self.config.left_arm_joint_limits
-            )
-            command.left_arm = ArmCommand(
-                joint_positions=joint_delta,
-                is_delta=(self.config.action_type == "delta")
-            )
+            if is_absolute:
+                target_pos = parsed['left_arm']
+                # 如果有当前状态，应用速度限制 (max_delta)
+                if self._current_left_joints is not None:
+                    diff = target_pos - self._current_left_joints
+                    clamped_diff = np.clip(diff, -self.config.max_joint_delta, self.config.max_joint_delta)
+                    safe_pos = self._current_left_joints + clamped_diff
+                else:
+                    safe_pos = target_pos
+                
+                command.left_arm = ArmCommand(
+                    joint_positions=safe_pos,
+                    is_delta=False
+                )
+            else:
+                joint_delta = self._clamp_joint_delta(
+                    parsed['left_arm'],
+                    self.config.left_arm_joint_limits
+                )
+                command.left_arm = ArmCommand(
+                    joint_positions=joint_delta,
+                    is_delta=True
+                )
         
         # 处理右臂
         if parsed['right_arm'] is not None:
-            joint_delta = self._clamp_joint_delta(
-                parsed['right_arm'],
-                self.config.right_arm_joint_limits
-            )
-            command.right_arm = ArmCommand(
-                joint_positions=joint_delta,
-                is_delta=(self.config.action_type == "delta")
-            )
+            if is_absolute:
+                target_pos = parsed['right_arm']
+                # 如果有当前状态，应用速度限制 (max_delta)
+                if self._current_right_joints is not None:
+                    diff = target_pos - self._current_right_joints
+                    clamped_diff = np.clip(diff, -self.config.max_joint_delta, self.config.max_joint_delta)
+                    safe_pos = self._current_right_joints + clamped_diff
+                else:
+                    safe_pos = target_pos
+                    
+                command.right_arm = ArmCommand(
+                    joint_positions=safe_pos,
+                    is_delta=False
+                )
+            else:
+                joint_delta = self._clamp_joint_delta(
+                    parsed['right_arm'],
+                    self.config.right_arm_joint_limits
+                )
+                command.right_arm = ArmCommand(
+                    joint_positions=joint_delta,
+                    is_delta=True
+                )
         
         # 处理左夹爪
         if parsed['left_gripper'] is not None:

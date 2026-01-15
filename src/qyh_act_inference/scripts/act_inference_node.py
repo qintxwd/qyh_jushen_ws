@@ -327,6 +327,9 @@ class ACTInferenceNode(Node):
             self._left_arm_joints = np.array(msg.position[:7])
             self._current_obs.left_arm_joints = self._left_arm_joints.copy()
             self._left_arm_timestamp = time.time()
+        
+        # 更新执行器状态
+        self.executor.update_state(left_joints=self._left_arm_joints)
     
     def _right_arm_callback(self, msg: JointState):
         """右臂关节状态回调"""
@@ -334,6 +337,9 @@ class ACTInferenceNode(Node):
             self._right_arm_joints = np.array(msg.position[:7])
             self._current_obs.right_arm_joints = self._right_arm_joints.copy()
             self._right_arm_timestamp = time.time()
+            
+        # 更新执行器状态
+        self.executor.update_state(right_joints=self._right_arm_joints)
     
     def _head_camera_callback(self, msg: Image):
         """头部相机回调"""
