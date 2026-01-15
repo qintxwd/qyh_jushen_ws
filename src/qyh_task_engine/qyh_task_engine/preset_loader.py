@@ -20,10 +20,10 @@ class PresetLoader:
     
     FILE_MAP = {
         "location": "locations.json",
-        "arm_pose": "arm_points.json",  # 机械臂点位
-        "lift_height": "lift_heights.json",
-        "waist_angle": "waist_angles.json",  # 腰部角度
-        "head_position": "head_positions.json",
+        "arm_pose": "arm_points.json",       # 机械臂点位
+        "lift_height": "lift_points.json",   # 升降点位
+        "waist_angle": "waist_points.json",  # 腰部角度
+        "head_position": "head_points.json", # 头部点位
         "gripper_position": "gripper_positions.json",
         "task_template": "task_templates.json",
     }
@@ -59,9 +59,12 @@ class PresetLoader:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     
-                    # 获取数据字段名（默认为 items）
-                    data_field = self.DATA_FIELD_MAP.get(preset_type, 'items')
-                    items = data.get(data_field, data.get('items', []))
+                    # 支持两种格式：直接数组 或 带有 items/points 字段的对象
+                    if isinstance(data, list):
+                        items = data
+                    else:
+                        data_field = self.DATA_FIELD_MAP.get(preset_type, 'items')
+                        items = data.get(data_field, data.get('items', []))
                     
                     for item in items:
                         item_id = item.get('id')
