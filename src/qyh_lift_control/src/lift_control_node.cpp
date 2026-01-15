@@ -384,6 +384,12 @@ bool LiftControlNode::stop_move()
   return true;  // 只要保障1成功就返回 true
 }
 
+bool LiftControlNode::set_electromagnet(bool enable)
+{
+  RCLCPP_INFO(this->get_logger(), "Setting electromagnet: %s", enable ? "ON" : "OFF");
+  return write_coil(ModbusAddress::COIL_ELECTROMAGNET, enable);
+}
+
 void LiftControlNode::handle_control(
   const qyh_lift_msgs::srv::LiftControl::Request::SharedPtr request,
   qyh_lift_msgs::srv::LiftControl::Response::SharedPtr response)
@@ -434,6 +440,15 @@ void LiftControlNode::handle_control(
       response->success = stop_move();
       response->message = response->success ? "Movement stopped" : "Failed to stop movement";
       break;
+
+    case LiftControl::Request::CMD_ELECTROMAGNET: {
+      const bool enable = request->value >= 0.5f;
+      response->success = set_electromagnet(enable);
+      response->message = response->success ?
+        (enable ? "Electromagnet enabled" : "Electromagnet disabled") :
+        "Failed to set electromagnet";
+      break;
+    }
 
 
     default:

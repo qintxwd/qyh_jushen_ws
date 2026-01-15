@@ -10,6 +10,7 @@ uint8 CMD_MOVE_UP = 5         # 手动上升 (hold=true开始, hold=false停止)
 uint8 CMD_MOVE_DOWN = 6       # 手动下降 (hold=true开始, hold=false停止)
 uint8 CMD_RESET_ALARM = 7     # 复位报警
 uint8 CMD_STOP = 8            # 停止运动 (取消去目标位置)
+uint8 CMD_ELECTROMAGNET = 9   # 电磁铁开关 (value=1开启, 0关闭)
 
 uint8 command                 # 命令类型
 float32 value                 # 参数值 (速度或目标位置)

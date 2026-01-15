@@ -42,6 +42,9 @@ struct ModbusAddress
   static constexpr int REG_TARGET_POSITION = 0;   // 目标绝对位置
   static constexpr int REG_SPEED = 20;            // 绝对速度
   static constexpr int REG_CURRENT_POSITION = 40; // 当前绝对位置
+
+  // 增加一个电磁铁的开关线圈，地址是64518
+  static constexpr int COIL_ELECTROMAGNET = 64518 - 1000; // 电磁铁控制线圈
 };
 
 class LiftControlNode : public rclcpp::Node
@@ -81,6 +84,7 @@ private:
   bool manual_move(bool up, bool hold);
   bool reset_alarm();
   bool stop_move();
+  bool set_electromagnet(bool enable);
   // 服务回调
   void handle_control(
     const qyh_lift_msgs::srv::LiftControl::Request::SharedPtr request,
