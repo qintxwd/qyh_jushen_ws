@@ -11,7 +11,7 @@ namespace qyh_head_motor_control
 {
 
 // 调试开关 - 设为 true 打印所有收发数据
-static bool g_debug_enabled = true;
+static bool g_debug_enabled = false;
 
 // 辅助函数：打印十六进制数据
 static void printHex(const char* prefix, const uint8_t* data, size_t len)
