@@ -34,6 +34,7 @@ struct ModbusAddress
   static constexpr int COIL_RESET = 4;            // 复位
   static constexpr int COIL_ALARM = 5;            // 报警 (PLC通知)
   static constexpr int COIL_GO_STOP = 6;          // 绝对位置GO_STOP
+  static constexpr int COIL_MOTOR_GOING = 7;          // 电机转动中
   static constexpr int COIL_GO_POSITION = 10;     // 绝对位置GO
   static constexpr int COIL_POSITION_REACHED = 20; // 绝对位置到达 (PLC通知)
 
