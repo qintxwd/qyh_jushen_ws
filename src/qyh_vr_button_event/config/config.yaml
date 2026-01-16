@@ -6,6 +6,7 @@ qyh_vr_button_event:
     right_move_service: '/right/move_gripper'
     lift_control_service: '/lift/control'
     waist_control_service: '/waist/control'
+    left_electromagnet_service: '/lift/control'
     waist_state_topic: '/waist/state'
     manual_velocity_topic: '/manual_velocity_cmd'
     max_vx: 0.6

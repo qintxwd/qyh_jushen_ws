@@ -34,6 +34,7 @@ public:
     this->declare_parameter<std::string>("right_move_service", "/right/move_gripper");
     this->declare_parameter<std::string>("lift_control_service", "/lift/control");
     this->declare_parameter<std::string>("waist_control_service", "/waist/control");
+    this->declare_parameter<std::string>("left_electromagnet_service", "/lift/control");  // 电磁铁通过升降控制服务
     this->declare_parameter<std::string>("waist_state_topic", "/waist/state");
     this->declare_parameter<std::string>("manual_velocity_topic", "/manual_velocity_cmd");
     this->declare_parameter<std::string>("vr_head_pose_topic", "/vr/head/pose");
@@ -57,6 +58,7 @@ public:
     right_move_service_ = this->get_parameter("right_move_service").as_string();
     lift_control_service_ = this->get_parameter("lift_control_service").as_string();
     waist_control_service_ = this->get_parameter("waist_control_service").as_string();
+    left_electromagnet_service_ = this->get_parameter("left_electromagnet_service").as_string();
     manual_velocity_topic_ = this->get_parameter("manual_velocity_topic").as_string();
     waist_state_topic_ = this->get_parameter("waist_state_topic").as_string();
     vr_head_pose_topic_ = this->get_parameter("vr_head_pose_topic").as_string();
@@ -95,6 +97,7 @@ public:
     right_move_client_ = this->create_client<qyh_gripper_msgs::srv::MoveGripper>(right_move_service_);
     lift_client_ = this->create_client<qyh_lift_msgs::srv::LiftControl>(lift_control_service_);
     waist_client_ = this->create_client<qyh_waist_msgs::srv::WaistControl>(waist_control_service_);
+    left_electromagnet_client_ = this->create_client<qyh_lift_msgs::srv::LiftControl>(left_electromagnet_service_);
 
     RCLCPP_INFO(this->get_logger(), "Created service clients (may be unavailable until services come up)");
 
@@ -138,7 +141,7 @@ public:
   }
 
 private:
-  // Left controller: buttons X(bit2)/Y(bit3) -> open/close left gripper
+  // Left controller: X -> toggle left gripper, Y -> toggle left electromagnet
   void leftJoyCallback(const sensor_msgs::msg::Joy::SharedPtr msg)
   {
     last_left_joy_time_ = this->now();
@@ -151,25 +154,30 @@ private:
     if (buttons.size() > 2) x_pressed = buttons[2] != 0; // X
     if (buttons.size() > 3) y_pressed = buttons[3] != 0; // Y
 
-    // edge detection
-    // 只在按下和松开时发送命令
+    // X 按钮：toggle 左手夹爪（按一次切换状态）
     if (x_pressed && !prev_left_x_) {
-      RCLCPP_INFO(this->get_logger(), "Left X pressed -> opening left gripper");
-      callMoveGripper(left_move_client_, 0, 255, 150); // open
-    }
-    if (!x_pressed && prev_left_x_) {
-      RCLCPP_INFO(this->get_logger(), "Left X released -> stop left gripper");
-      // 可选：松开时发送停止命令，若协议支持
-    }
-    if (y_pressed && !prev_left_y_) {
-      RCLCPP_INFO(this->get_logger(), "Left Y pressed -> closing left gripper");
-      callMoveGripper(left_move_client_, 255, 255, 150); // close
-    }
-    if (!y_pressed && prev_left_y_) {
-      RCLCPP_INFO(this->get_logger(), "Left Y released -> stop left gripper");
-      // 可选：松开时发送停止命令，若协议支持
+      left_gripper_open_ = !left_gripper_open_;  // 切换状态
+      if (left_gripper_open_) {
+        RCLCPP_INFO(this->get_logger(), "Left X pressed -> OPENING left gripper (toggle)");
+        callMoveGripper(left_move_client_, 0, 255, 150); // open
+      } else {
+        RCLCPP_INFO(this->get_logger(), "Left X pressed -> CLOSING left gripper (toggle)");
+        callMoveGripper(left_move_client_, 255, 255, 150); // close
+      }
     }
     prev_left_x_ = x_pressed;
+
+    // Y 按钮：toggle 左手电磁铁（按一次切换状态）
+    if (y_pressed && !prev_left_y_) {
+      left_electromagnet_on_ = !left_electromagnet_on_;  // 切换状态
+      if (left_electromagnet_on_) {
+        RCLCPP_INFO(this->get_logger(), "Left Y pressed -> TURNING ON left electromagnet (toggle)");
+        sendElectromagnetCommand(true);
+      } else {
+        RCLCPP_INFO(this->get_logger(), "Left Y pressed -> TURNING OFF left electromagnet (toggle)");
+        sendElectromagnetCommand(false);
+      }
+    }
     prev_left_y_ = y_pressed;
 
     // joystick axes: axes[0]=x (left/right), axes[1]=y (forward/back)
@@ -196,24 +204,24 @@ private:
     bool a_pressed = buttons.size() > 0 && buttons[0] != 0;
     bool b_pressed = buttons.size() > 1 && buttons[1] != 0;
 
-    // 只在按下和松开时发送命令
+    // A 按钮：toggle 右手夹爪（按一次切换状态）
     if (a_pressed && !prev_right_a_) {
-      RCLCPP_INFO(this->get_logger(), "Right A pressed -> opening right gripper");
-      callMoveGripper(right_move_client_, 0, 255, 150); // open
-    }
-    if (!a_pressed && prev_right_a_) {
-      RCLCPP_INFO(this->get_logger(), "Right A released -> stop right gripper");
-      // 可选：松开时发送停止命令，若协议支持
-    }
-    if (b_pressed && !prev_right_b_) {
-      RCLCPP_INFO(this->get_logger(), "Right B pressed -> closing right gripper");
-      callMoveGripper(right_move_client_, 255, 255, 150); // close
-    }
-    if (!b_pressed && prev_right_b_) {
-      RCLCPP_INFO(this->get_logger(), "Right B released -> stop right gripper");
-      // 可选：松开时发送停止命令，若协议支持
+      right_gripper_open_ = !right_gripper_open_;  // 切换状态
+      if (right_gripper_open_) {
+        RCLCPP_INFO(this->get_logger(), "Right A pressed -> OPENING right gripper (toggle)");
+        callMoveGripper(right_move_client_, 0, 255, 150); // open
+      } else {
+        RCLCPP_INFO(this->get_logger(), "Right A pressed -> CLOSING right gripper (toggle)");
+        callMoveGripper(right_move_client_, 255, 255, 150); // close
+      }
     }
     prev_right_a_ = a_pressed;
+
+    // B 按钮：预留给右手电磁铁（暂不处理）
+    if (b_pressed && !prev_right_b_) {
+      // TODO: 右手电磁铁控制（暂未实现）
+      RCLCPP_DEBUG(this->get_logger(), "Right B pressed -> reserved for right electromagnet (not implemented)");
+    }
     prev_right_b_ = b_pressed;
 
     double rx = 0.0, ry = 0.0;
@@ -366,6 +374,27 @@ private:
       });
   }
 
+  void sendElectromagnetCommand(bool enable)
+  {
+    if (!left_electromagnet_client_->wait_for_service(std::chrono::milliseconds(200))) {
+      RCLCPP_WARN(this->get_logger(), "Electromagnet service not available");
+      return;
+    }
+    RCLCPP_DEBUG(this->get_logger(), "Calling Electromagnet: enable=%d", enable);
+    auto req = std::make_shared<qyh_lift_msgs::srv::LiftControl::Request>();
+    req->command = 9;  // CMD_ELECTROMAGNET
+    req->value = enable ? 1.0f : 0.0f;
+    req->hold = false;
+    left_electromagnet_client_->async_send_request(req,
+      [this, enable](rclcpp::Client<qyh_lift_msgs::srv::LiftControl>::SharedFuture res){
+        if (!res.get()->success) {
+          RCLCPP_WARN(this->get_logger(), "Electromagnet control failed: %s", res.get()->message.c_str());
+        } else {
+          RCLCPP_INFO(this->get_logger(), "Electromagnet %s successfully", enable ? "ON" : "OFF");
+        }
+      });
+  }
+
   void vrHeadCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
   {
     if (!head_follow_enabled_) {
@@ -465,6 +494,7 @@ private:
   std::string left_joy_topic_, right_joy_topic_;
   std::string left_move_service_, right_move_service_;
   std::string lift_control_service_, waist_control_service_;
+  std::string left_electromagnet_service_;
   std::string manual_velocity_topic_;
   std::string vr_head_pose_topic_;
   std::string head_cmd_topic_;
@@ -506,6 +536,7 @@ private:
   rclcpp::Client<qyh_gripper_msgs::srv::MoveGripper>::SharedPtr right_move_client_;
   rclcpp::Client<qyh_lift_msgs::srv::LiftControl>::SharedPtr lift_client_;
   rclcpp::Client<qyh_waist_msgs::srv::WaistControl>::SharedPtr waist_client_;
+  rclcpp::Client<qyh_lift_msgs::srv::LiftControl>::SharedPtr left_electromagnet_client_;
   rclcpp::Publisher<qyh_standard_robot_msgs::msg::ManualVelocityCommand>::SharedPtr manual_vel_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr head_cmd_pub_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr head_follow_srv_;
@@ -569,6 +600,12 @@ private:
   bool lift_holding_up_ = false;
   bool lift_holding_down_ = false;
   bool waist_leanning_ = false;
+  
+  // toggle states for grippers and electromagnets (default: closed/off)
+  bool left_gripper_open_ = false;      // 左手夹爪状态，默认关闭
+  bool right_gripper_open_ = false;     // 右手夹爪状态，默认关闭
+  bool left_electromagnet_on_ = false;  // 左手电磁铁状态，默认关闭
+  bool right_electromagnet_on_ = false; // 右手电磁铁状态，默认关闭（预留）
 };
 
 } // namespace
