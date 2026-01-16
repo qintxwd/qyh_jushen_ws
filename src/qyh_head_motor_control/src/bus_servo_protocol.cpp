@@ -5,16 +5,30 @@
 #include <sys/select.h>
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 
 namespace qyh_head_motor_control
 {
 
+// 调试开关 - 设为 true 打印所有收发数据
+static bool g_debug_enabled = true;
+
+// 辅助函数：打印十六进制数据
+static void printHex(const char* prefix, const uint8_t* data, size_t len)
+{
+    if (!g_debug_enabled) return;
+    std::cerr << prefix << " (" << len << " bytes): ";
+    for (size_t i = 0; i < len; i++) {
+        std::cerr << std::hex << std::setfill('0') << std::setw(2) << (int)data[i] << " ";
+    }
+    std::cerr << std::dec << std::endl;
+}
+
 // CRC8-MAXIM 计算 (polynomial 0x31反转=0x8C, init 0x00, RefIn=True, RefOut=True)
-// 使用非查表实现，与Python调试代码保持100%一致
 uint8_t crc8_maxim(const uint8_t* data, size_t len)
 {
-    uint8_t crc = 0x00;  // 初始值必须为 0x00 (已通过Python调试验证)
-    uint8_t polynomial = 0x8C;  // 0x31 的反转值
+    uint8_t crc = 0x00;
+    uint8_t polynomial = 0x8C;
     
     for (size_t i = 0; i < len; i++) {
         crc ^= data[i];
@@ -26,7 +40,7 @@ uint8_t crc8_maxim(const uint8_t* data, size_t len)
             }
         }
     }
-    return crc;  // 不需要取反
+    return crc;
 }
 
 BusServoProtocol::BusServoProtocol(const std::string& port, int baudrate)
@@ -47,14 +61,11 @@ bool BusServoProtocol::open()
         return false;
     }
     
-    // 保存旧配置
     tcgetattr(fd_, &old_tio_);
     
-    // 新配置
     struct termios tio;
     memset(&tio, 0, sizeof(tio));
     
-    // 波特率
     speed_t speed;
     switch (baudrate_) {
         case 9600:   speed = B9600;   break;
@@ -81,7 +92,6 @@ bool BusServoProtocol::open()
     cfsetispeed(&tio, speed);
     cfsetospeed(&tio, speed);
     
-    // 8N1, no flow control
     tio.c_cflag |= (CLOCAL | CREAD);
     tio.c_cflag &= ~CSIZE;
     tio.c_cflag |= CS8;
@@ -89,17 +99,14 @@ bool BusServoProtocol::open()
     tio.c_cflag &= ~CSTOPB;
     tio.c_cflag &= ~CRTSCTS;
     
-    // Raw input
     tio.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
     tio.c_iflag &= ~(IXON | IXOFF | IXANY);
     tio.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
     
-    // Raw output
     tio.c_oflag &= ~OPOST;
     
-    // Timeout settings
     tio.c_cc[VMIN] = 0;
-    tio.c_cc[VTIME] = 1;  // 100ms timeout
+    tio.c_cc[VTIME] = 1;
     
     tcflush(fd_, TCIOFLUSH);
     if (tcsetattr(fd_, TCSANOW, &tio) != 0) {
@@ -124,13 +131,12 @@ void BusServoProtocol::close()
 std::vector<uint8_t> BusServoProtocol::buildFrame(uint8_t func, const std::vector<uint8_t>& data)
 {
     std::vector<uint8_t> frame;
-    frame.push_back(0xAA);  // Header 1
-    frame.push_back(0x55);  // Header 2
-    frame.push_back(func);  // Function code
-    frame.push_back(static_cast<uint8_t>(data.size()));  // Data length
-    frame.insert(frame.end(), data.begin(), data.end());  // Data
+    frame.push_back(0xAA);
+    frame.push_back(0x55);
+    frame.push_back(func);
+    frame.push_back(static_cast<uint8_t>(data.size()));
+    frame.insert(frame.end(), data.begin(), data.end());
     
-    // CRC (从 func 开始计算)
     uint8_t crc = crc8_maxim(&frame[2], frame.size() - 2);
     frame.push_back(crc);
     
@@ -145,13 +151,16 @@ bool BusServoProtocol::sendFrame(uint8_t func, const std::vector<uint8_t>& data)
     
     std::vector<uint8_t> frame = buildFrame(func, data);
     
+    // 打印发送的数据
+    printHex("[TX]", frame.data(), frame.size());
+    
     ssize_t written = write(fd_, frame.data(), frame.size());
     if (written != static_cast<ssize_t>(frame.size())) {
         std::cerr << "Failed to write to serial port" << std::endl;
         return false;
     }
     
-    tcdrain(fd_);  // 等待发送完成
+    tcdrain(fd_);
     return true;
 }
 
@@ -172,15 +181,22 @@ bool BusServoProtocol::recvFrame(std::vector<uint8_t>& data, int timeout_ms)
     
     int ret = select(fd_ + 1, &readfds, nullptr, nullptr, &tv);
     if (ret <= 0) {
-        return false;  // Timeout or error
+        if (g_debug_enabled) {
+            std::cerr << "[RX] select timeout or error, ret=" << ret << std::endl;
+        }
+        return false;
     }
     
-    // 读取帧头
     uint8_t header[4];
     ssize_t n = read(fd_, header, 4);
+    
+    if (n > 0) {
+        printHex("[RX header]", header, n);
+    }
+    
     if (n != 4 || header[0] != 0xAA || header[1] != 0x55) {
-        // 帧头错误，刷新缓冲区
         if (n > 0) {
+            std::cerr << "[RX] Invalid header, flushing..." << std::endl;
             tcflush(fd_, TCIFLUSH);
         }
         return false;
@@ -189,25 +205,29 @@ bool BusServoProtocol::recvFrame(std::vector<uint8_t>& data, int timeout_ms)
     uint8_t func = header[2];
     uint8_t len = header[3];
     
-    // 读取数据和CRC
     std::vector<uint8_t> buffer(len + 1);
     n = read(fd_, buffer.data(), len + 1);
+    
+    if (n > 0) {
+        printHex("[RX data+crc]", buffer.data(), n);
+    }
+    
     if (n != static_cast<ssize_t>(len + 1)) {
-        // 数据长度错误，刷新缓冲区
+        std::cerr << "[RX] Data length mismatch, expected " << (len+1) << ", got " << n << std::endl;
         tcflush(fd_, TCIFLUSH);
         return false;
     }
     
-    // 验证CRC
     std::vector<uint8_t> crc_data;
     crc_data.push_back(func);
     crc_data.push_back(len);
     crc_data.insert(crc_data.end(), buffer.begin(), buffer.begin() + len);
-    uint8_t crc = crc8_maxim(crc_data.data(), crc_data.size());
+    uint8_t calc_crc = crc8_maxim(crc_data.data(), crc_data.size());
+    uint8_t recv_crc = buffer[len];
     
-    if (crc != buffer[len]) {
-        std::cerr << "CRC mismatch" << std::endl;
-        // CRC错误，刷新缓冲区
+    if (calc_crc != recv_crc) {
+        std::cerr << "[RX] CRC mismatch! calc=0x" << std::hex << (int)calc_crc 
+                  << " recv=0x" << (int)recv_crc << std::dec << std::endl;
         tcflush(fd_, TCIFLUSH);
         return false;
     }
@@ -218,20 +238,18 @@ bool BusServoProtocol::recvFrame(std::vector<uint8_t>& data, int timeout_ms)
 
 bool BusServoProtocol::setPosition(uint8_t servo_id, uint16_t position, uint16_t duration_ms)
 {
-    // 限制位置范围
     if (position > 1000) {
         position = 1000;
     }
     
     std::vector<uint8_t> data;
-    data.push_back(CMD_SET_POSITION);  // 子命令 0x01
-    // 协议要求: 先放时间(2字节), 再放数量(1字节)
-    data.push_back(static_cast<uint8_t>(duration_ms & 0xFF));         // 时间低字节
-    data.push_back(static_cast<uint8_t>((duration_ms >> 8) & 0xFF));  // 时间高字节
-    data.push_back(1);                  // 舵机数量
-    data.push_back(servo_id);           // 舵机ID
-    data.push_back(static_cast<uint8_t>(position & 0xFF));            // 位置低字节
-    data.push_back(static_cast<uint8_t>((position >> 8) & 0xFF));     // 位置高字节
+    data.push_back(CMD_SET_POSITION);
+    data.push_back(static_cast<uint8_t>(duration_ms & 0xFF));
+    data.push_back(static_cast<uint8_t>((duration_ms >> 8) & 0xFF));
+    data.push_back(1);
+    data.push_back(servo_id);
+    data.push_back(static_cast<uint8_t>(position & 0xFF));
+    data.push_back(static_cast<uint8_t>((position >> 8) & 0xFF));
     
     return sendFrame(FUNC_BUS_SERVO, data);
 }
@@ -245,11 +263,10 @@ bool BusServoProtocol::setPositions(const std::vector<uint8_t>& ids,
     }
     
     std::vector<uint8_t> data;
-    data.push_back(CMD_SET_POSITION);  // 子命令 0x01
-    // 协议要求: 先放时间(2字节), 再放数量(1字节)
-    data.push_back(static_cast<uint8_t>(duration_ms & 0xFF));         // 时间低字节
-    data.push_back(static_cast<uint8_t>((duration_ms >> 8) & 0xFF));  // 时间高字节
-    data.push_back(static_cast<uint8_t>(ids.size()));  // 舵机数量
+    data.push_back(CMD_SET_POSITION);
+    data.push_back(static_cast<uint8_t>(duration_ms & 0xFF));
+    data.push_back(static_cast<uint8_t>((duration_ms >> 8) & 0xFF));
+    data.push_back(static_cast<uint8_t>(ids.size()));
     
     for (size_t i = 0; i < ids.size(); i++) {
         uint16_t pos = positions[i];
@@ -266,29 +283,123 @@ bool BusServoProtocol::setPositions(const std::vector<uint8_t>& ids,
 
 bool BusServoProtocol::readPosition(uint8_t servo_id, uint16_t& position)
 {
+    if (g_debug_enabled) {
+        std::cerr << "\n=== readPosition(id=" << (int)servo_id << ") ===" << std::endl;
+    }
+    
+    // 清空缓冲区
+    tcflush(fd_, TCIOFLUSH);
+    
     std::vector<uint8_t> data;
     data.push_back(CMD_READ_POSITION);  // 0x05
-    data.push_back(servo_id);  // 协议只需要子命令+ID，无需数量参数
+    data.push_back(servo_id);
     
     if (!sendFrame(FUNC_BUS_SERVO, data)) {
         return false;
     }
     
-    std::vector<uint8_t> response;
-    if (!recvFrame(response, 100)) {
+    // 等待舵机响应
+    usleep(5000);  // 5ms
+    
+    // 读取所有可用数据
+    uint8_t raw_buf[64];
+    ssize_t total_read = 0;
+    
+    fd_set readfds;
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;  // 100ms
+    
+    FD_ZERO(&readfds);
+    FD_SET(fd_, &readfds);
+    
+    if (select(fd_ + 1, &readfds, nullptr, nullptr, &tv) > 0) {
+        total_read = read(fd_, raw_buf, sizeof(raw_buf));
+    }
+    
+    if (total_read <= 0) {
+        if (g_debug_enabled) {
+            std::cerr << "[RX] No data received!" << std::endl;
+        }
         return false;
     }
     
-    // 回包结构: [ID, SubCmd(0x05), Status, PosLo, PosHi]
-    // response[0] 是 ID，response[1] 才是命令字
-    if (response.size() >= 5 && response[1] == CMD_READ_POSITION && response[0] == servo_id) {
-        // 验证ID匹配，防止读到其他电机的响应
-        position = response[3] | (response[4] << 8);
-        return true;
+    // 打印收到的原始数据
+    printHex("[RX raw]", raw_buf, total_read);
+    
+    // 在接收的数据中查找有效帧
+    for (ssize_t i = 0; i <= total_read - 5; i++) {
+        if (raw_buf[i] == 0xAA && raw_buf[i+1] == 0x55) {
+            uint8_t func = raw_buf[i+2];
+            uint8_t len = raw_buf[i+3];
+            
+            if (g_debug_enabled) {
+                std::cerr << "[RX] Found frame at offset " << i 
+                          << ", func=0x" << std::hex << (int)func 
+                          << ", len=" << std::dec << (int)len << std::endl;
+            }
+            
+            // 检查是否有足够的数据
+            if (i + 4 + len + 1 > total_read) {
+                std::cerr << "[RX] Incomplete frame" << std::endl;
+                continue;
+            }
+            
+            // 验证CRC
+            std::vector<uint8_t> crc_data;
+            crc_data.push_back(func);
+            crc_data.push_back(len);
+            for (uint8_t j = 0; j < len; j++) {
+                crc_data.push_back(raw_buf[i + 4 + j]);
+            }
+            uint8_t calc_crc = crc8_maxim(crc_data.data(), crc_data.size());
+            uint8_t recv_crc = raw_buf[i + 4 + len];
+            
+            if (g_debug_enabled) {
+                std::cerr << "[RX] CRC: calc=0x" << std::hex << (int)calc_crc 
+                          << " recv=0x" << (int)recv_crc << std::dec << std::endl;
+            }
+            
+            if (calc_crc != recv_crc) {
+                std::cerr << "[RX] CRC mismatch, skipping frame" << std::endl;
+                continue;
+            }
+            
+            // 打印帧数据内容
+            printHex("[RX frame data]", &raw_buf[i + 4], len);
+            
+            // 解析响应
+            // 回包结构: [0:ID, 1:SubCmd(0x05), 2:Status, 3:PosLo, 4:PosHi]
+            uint8_t* resp = &raw_buf[i + 4];
+            
+            if (g_debug_enabled) {
+                std::cerr << "[RX] resp[0]=0x" << std::hex << (int)resp[0]
+                          << " resp[1]=0x" << (int)resp[1]
+                          << " resp[2]=0x" << (int)resp[2] << std::dec << std::endl;
+            }
+            
+            if (len >= 5 && resp[1] == CMD_READ_POSITION) {
+                if (resp[0] != servo_id) {
+                    std::cerr << "[RX] ID mismatch: expected " << (int)servo_id 
+                              << ", got " << (int)resp[0] << std::endl;
+                }
+                
+                int8_t status = static_cast<int8_t>(resp[2]);
+                if (status != 0) {
+                    std::cerr << "[RX] Servo error status: " << (int)status << std::endl;
+                    return false;
+                }
+                
+                position = resp[3] | (resp[4] << 8);
+                if (g_debug_enabled) {
+                    std::cerr << "[RX] Position: " << position << std::endl;
+                }
+                return true;
+            }
+        }
     }
     
-    // ID不匹配或其他错误，刷新缓冲区
-    tcflush(fd_, TCIFLUSH);
+    std::cerr << "[RX] No valid frame found" << std::endl;
     return false;
 }
 
@@ -304,21 +415,23 @@ bool BusServoProtocol::setServoId(uint8_t old_id, uint8_t new_id)
 
 bool BusServoProtocol::readServoId(uint8_t& id)
 {
+    tcflush(fd_, TCIOFLUSH);
+    
     std::vector<uint8_t> data;
-    data.push_back(CMD_READ_ID);  // 0x12
-    data.push_back(0xFE);  // 广播参数（协议要求）
+    data.push_back(CMD_READ_ID);
+    data.push_back(0xFE);
     
     if (!sendFrame(FUNC_BUS_SERVO, data)) {
         return false;
     }
+    
+    usleep(5000);
     
     std::vector<uint8_t> response;
     if (!recvFrame(response, 100)) {
         return false;
     }
     
-    // 回包结构: [0xFE, SubCmd(0x12), Status, ID]
-    // response[1] 是命令字，response[3] 是实际ID
     if (response.size() >= 4 && response[1] == CMD_READ_ID) {
         id = response[3];
         return true;
@@ -330,10 +443,8 @@ bool BusServoProtocol::readServoId(uint8_t& id)
 bool BusServoProtocol::enableTorque(uint8_t servo_id, bool enable)
 {
     std::vector<uint8_t> data;
-    // 注意: 上电(使能) = CMD_DISABLE_TORQUE (0x0C), 掉电(失能) = CMD_ENABLE_TORQUE (0x0B)
-    // 这个命名有点反直觉,但和原始协议一致
     data.push_back(enable ? CMD_DISABLE_TORQUE : CMD_ENABLE_TORQUE);
-    data.push_back(servo_id);  // 协议只需要子命令+ID，无需数量参数
+    data.push_back(servo_id);
     
     return sendFrame(FUNC_BUS_SERVO, data);
 }
@@ -359,7 +470,7 @@ bool BusServoProtocol::setOffset(uint8_t servo_id, int8_t offset)
     std::vector<uint8_t> data;
     data.push_back(CMD_SET_OFFSET);
     data.push_back(servo_id);
-    data.push_back(static_cast<uint8_t>(offset));  // 有符号转无符号
+    data.push_back(static_cast<uint8_t>(offset));
     
     return sendFrame(FUNC_BUS_SERVO, data);
 }

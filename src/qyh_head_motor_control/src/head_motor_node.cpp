@@ -80,6 +80,14 @@ void HeadMotorNode::initParameters()
     
     // 初始化位置数组
     current_positions_.resize(motor_ids_.size(), 500);  // 中间位置
+
+    // [DEBUG] 打印加载到的关键参数，确认配置是否生效
+    RCLCPP_INFO(this->get_logger(), "=== PARAMETER CHECK ===");
+    RCLCPP_INFO(this->get_logger(), "Motor IDs size: %zu", motor_ids_.size());
+    std::string center_str = "Center Raw: ";
+    for(auto v : position_center_raw_) center_str += std::to_string(v) + " ";
+    RCLCPP_INFO(this->get_logger(), "%s", center_str.c_str());
+    RCLCPP_INFO(this->get_logger(), "======================");
 }
 
 bool HeadMotorNode::initCommunication()
@@ -144,7 +152,7 @@ void HeadMotorNode::publishCallback()
     if (!protocol_ || !protocol_->isOpen()) {
         return;
     }
-    
+    static int debug_counter = 0;
     // 读取所有电机位置
     for (size_t i = 0; i < motor_ids_.size(); i++) {
         uint16_t pos;
@@ -152,7 +160,23 @@ void HeadMotorNode::publishCallback()
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         if (protocol_->readPosition(static_cast<uint8_t>(motor_ids_[i]), pos)) {
             current_positions_[i] = pos;
+        } else {
+            // 读失败时打印警告，方便排查是否是通信问题
+            if (debug_counter == 0) { // 避免刷屏，只在打印周期才提示
+                RCLCPP_WARN(this->get_logger(), "Failed to read pos for motor ID %ld", motor_ids_[i]);
+            }
         }
+    }
+    
+    // 调试：每5秒打印一次原始位置，用于校准
+   
+    if (++debug_counter >= publish_rate_ * 5) {  // 每5秒
+        debug_counter = 0;
+        std::string raw_info = "Raw positions: ";
+        for (size_t i = 0; i < motor_ids_.size(); i++) {
+            raw_info += joint_names_[i] + "=" + std::to_string(current_positions_[i]) + " ";
+        }
+        RCLCPP_INFO(this->get_logger(), "%s", raw_info.c_str());
     }
     
     // 发布关节状态
