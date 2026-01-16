@@ -230,10 +230,12 @@ private:
             // 创建 writer
             writer_ = std::make_unique<rosbag2_cpp::Writer>();
             
-            // 配置存储选项
+            // 配置存储选项 - 优化写入性能
             rosbag2_storage::StorageOptions storage_options;
             storage_options.uri = current_bag_path_;
             storage_options.storage_id = "sqlite3";  // 使用 sqlite3 格式
+            storage_options.max_bagfile_size = 0;     // 不限制单文件大小
+            storage_options.max_cache_size = 200 * 1024 * 1024;  // 200MB 缓存，减少磁盘 IO
             
             // 打开 bag
             writer_->open(storage_options);
@@ -319,11 +321,19 @@ private:
             writer_->create_topic(topic_metadata);
             
             // 使用通用订阅（序列化消息），动态获取消息类型
+            // 注意：使用 RELIABLE + VOLATILE 以匹配 OrbbecSDK 相机的默认 QoS
+            // best_effort 会导致与 RELIABLE 发布者不兼容，造成严重丢帧！
             try {
+                // 对于图像话题，使用较大的 queue depth 以应对高帧率
+                auto qos = rclcpp::QoS(100)
+                    .reliable()  // 与相机发布者匹配
+                    .durability_volatile()
+                    .keep_last(100);  // 保持最近 100 帧
+                
                 auto subscription = this->create_generic_subscription(
                     topic,
                     topic_type,
-                    rclcpp::QoS(10).best_effort().durability_volatile(),
+                    qos,
                     [this, topic](std::shared_ptr<rclcpp::SerializedMessage> msg) {
                         this->writeMessage(topic, msg);
                     }
