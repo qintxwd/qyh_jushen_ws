@@ -240,8 +240,8 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'port': 8080,
-            'server_threads': 4,
-            'ros_threads': 4
+            'server_threads': 16,
+            'ros_threads': 16
         }],
         condition=IfCondition(LaunchConfiguration('enable_web_video'))
     )
