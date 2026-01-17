@@ -28,6 +28,13 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   this->declare_parameter<int>("right_slave_id", 1);
   this->declare_parameter<double>("publish_rate", 20.0);
   this->declare_parameter<bool>("auto_activate", true);
+  this->declare_parameter<bool>("led_enabled", true);
+  this->declare_parameter<int>("led_slave_id", 3);
+  this->declare_parameter<std::string>("led_topic", "/robot_led/set_color");
+  this->declare_parameter<int>("led_default_r", 0);
+  this->declare_parameter<int>("led_default_g", 255);
+  this->declare_parameter<int>("led_default_b", 0);
+  this->declare_parameter<int>("led_default_w", 0);
   
   // Get parameters
   device_port_ = this->get_parameter("device_port").as_string();
@@ -36,10 +43,23 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   right_slave_id_ = this->get_parameter("right_slave_id").as_int();
   double publish_rate = this->get_parameter("publish_rate").as_double();
   auto_activate_ = this->get_parameter("auto_activate").as_bool();
+  led_enabled_ = this->get_parameter("led_enabled").as_bool();
+  led_slave_id_ = this->get_parameter("led_slave_id").as_int();
+  led_topic_ = this->get_parameter("led_topic").as_string();
+  led_default_r_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_r").as_int(), 0, 255));
+  led_default_g_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_g").as_int(), 0, 255));
+  led_default_b_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_b").as_int(), 0, 255));
+  led_default_w_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_w").as_int(), 0, 255));
   
   RCLCPP_INFO(this->get_logger(), "Starting Gripper Control Node");
   RCLCPP_INFO(this->get_logger(), "Device: %s, Baudrate: %d, Left Slave ID: %d, Right Slave ID: %d",
               device_port_.c_str(), baudrate_, left_slave_id_, right_slave_id_);
+  if (led_enabled_) {
+    RCLCPP_INFO(this->get_logger(), "LED enabled on Modbus slave ID: %d, topic: %s",
+                led_slave_id_, led_topic_.c_str());
+    RCLCPP_INFO(this->get_logger(), "LED default color: R=%d, G=%d, B=%d, W=%d",
+                led_default_r_, led_default_g_, led_default_b_, led_default_w_);
+  }
   
   // Connect to gripper
   if (!connect_modbus()) {
@@ -83,6 +103,21 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
     "/right/get_gripper_state",
     std::bind(&GripperControlNode::handle_get_state_right, this,
               std::placeholders::_1, std::placeholders::_2));
+
+  // LED color subscriber (shared 485 bus)
+  if (led_enabled_) {
+    led_color_sub_ = this->create_subscription<std_msgs::msg::ColorRGBA>(
+      led_topic_, 10,
+      [this](const std_msgs::msg::ColorRGBA::SharedPtr msg) {
+        const int r_i = std::clamp(static_cast<int>(msg->r * 255.0f), 0, 255);
+        const int g_i = std::clamp(static_cast<int>(msg->g * 255.0f), 0, 255);
+        const int b_i = std::clamp(static_cast<int>(msg->b * 255.0f), 0, 255);
+        const int w_i = std::clamp(static_cast<int>(msg->a * 255.0f), 0, 255);
+        send_led_color(static_cast<uint8_t>(r_i), static_cast<uint8_t>(g_i),
+                       static_cast<uint8_t>(b_i), static_cast<uint8_t>(w_i));
+      }
+    );
+  }
   
   // Create timer for publishing state
   auto timer_period = std::chrono::duration<double>(1.0 / publish_rate);
@@ -125,6 +160,17 @@ bool GripperControlNode::connect_modbus()
         RCLCPP_INFO(this->get_logger(), "Right gripper auto-activated");
       } else {
         RCLCPP_WARN(this->get_logger(), "Right gripper auto-activation failed");
+      }
+    }
+
+    // 设置默认LED颜色
+    if (led_enabled_) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      if (send_led_color(led_default_r_, led_default_g_, led_default_b_, led_default_w_)) {
+        RCLCPP_INFO(this->get_logger(), "LED set to default color: R=%d, G=%d, B=%d, W=%d",
+                    led_default_r_, led_default_g_, led_default_b_, led_default_w_);
+      } else {
+        RCLCPP_WARN(this->get_logger(), "Failed to set LED default color");
       }
     }
 
@@ -316,6 +362,32 @@ bool GripperControlNode::move_gripper(bool left, uint8_t position, uint8_t speed
 
   } catch (const modbus::Exception & e) {
     RCLCPP_ERROR(this->get_logger(), "Failed to send move command: %s", e.what());
+    return false;
+  }
+}
+
+bool GripperControlNode::send_led_color(uint8_t r, uint8_t g, uint8_t b, uint8_t w)
+{
+  std::lock_guard<std::mutex> lock(modbus_mutex_);
+  if (!modbus_ctx_) {
+    RCLCPP_ERROR(this->get_logger(), "Modbus context not available for LED");
+    return false;
+  }
+
+  try {
+    modbus_ctx_->set_slave(led_slave_id_);
+
+    // LED 寄存器 0x0000~0x0003: R,G,B,W
+    std::vector<uint16_t> values(4);
+    values[0] = static_cast<uint16_t>(r);
+    values[1] = static_cast<uint16_t>(g);
+    values[2] = static_cast<uint16_t>(b);
+    values[3] = static_cast<uint16_t>(w);
+
+    modbus_ctx_->write_registers(0x0000, values);
+    return true;
+  } catch (const modbus::Exception & e) {
+    RCLCPP_WARN(this->get_logger(), "Failed to send LED command: %s", e.what());
     return false;
   }
 }

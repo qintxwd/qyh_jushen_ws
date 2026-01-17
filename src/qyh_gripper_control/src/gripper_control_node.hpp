@@ -6,6 +6,7 @@
 #include <qyh_gripper_msgs/srv/activate_gripper.hpp>
 #include <qyh_gripper_msgs/srv/move_gripper.hpp>
 #include <qyh_gripper_msgs/srv/get_gripper_state.hpp>
+#include <std_msgs/msg/color_rgba.hpp>
 #include <modbus/modbus.hpp>  // 使用C++封装
 #include <memory>
 #include <string>
@@ -30,6 +31,16 @@ private:
   bool is_connected_;
   bool auto_activate_;
 
+  // LED (Modbus) 控制
+  bool led_enabled_;
+  int led_slave_id_;
+  std::string led_topic_;
+  // 默认LED颜色
+  uint8_t led_default_r_;
+  uint8_t led_default_g_;
+  uint8_t led_default_b_;
+  uint8_t led_default_w_;
+
   // Gripper state
   qyh_gripper_msgs::msg::GripperState left_current_state_;
   qyh_gripper_msgs::msg::GripperState right_current_state_;
@@ -40,6 +51,8 @@ private:
   rclcpp::Publisher<qyh_gripper_msgs::msg::GripperState>::SharedPtr left_state_pub_;
   rclcpp::Publisher<qyh_gripper_msgs::msg::GripperState>::SharedPtr right_state_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
+
+  rclcpp::Subscription<std_msgs::msg::ColorRGBA>::SharedPtr led_color_sub_;
   
   rclcpp::Service<qyh_gripper_msgs::srv::ActivateGripper>::SharedPtr left_srv_activate_;
   rclcpp::Service<qyh_gripper_msgs::srv::ActivateGripper>::SharedPtr right_srv_activate_;
@@ -55,6 +68,7 @@ private:
   bool read_gripper_state(bool left);
   bool activate_gripper(bool left = true);
   bool move_gripper(bool left,uint8_t position, uint8_t speed, uint8_t force);
+  bool send_led_color(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
   
   // Service callbacks
   void handle_activate_left(
