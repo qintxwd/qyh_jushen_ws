@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, EnvironmentVariable, PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -286,6 +286,11 @@ def generate_launch_description():
     
     # 视觉系统
     ld.add_action(camera_launch)
-    ld.add_action(web_video_server_node)
+    # web_video_server 延迟15秒启动，等待所有摄像头准备好
+    # (left: 0.1s, right: 5s, head: 10s，留5秒余量)
+    ld.add_action(TimerAction(
+        period=15.0,
+        actions=[web_video_server_node]
+    ))
     
     return ld
