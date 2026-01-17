@@ -7,13 +7,23 @@
 #include <qyh_gripper_msgs/srv/move_gripper.hpp>
 #include <qyh_gripper_msgs/srv/get_gripper_state.hpp>
 #include <std_msgs/msg/color_rgba.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <modbus/modbus.hpp>  // 使用C++封装
 #include <memory>
 #include <string>
 #include <mutex>
+#include <vector>
 
 namespace qyh_gripper_control
 {
+
+// RGBW颜色结构体
+struct RGBWColor {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+  uint8_t w;
+};
 
 class GripperControlNode : public rclcpp::Node
 {
@@ -41,6 +51,13 @@ private:
   uint8_t led_default_b_;
   uint8_t led_default_w_;
 
+  // LED闪烁功能
+  std::string led_blink_topic_;
+  std::vector<RGBWColor> blink_colors_;  // 闪烁颜色序列
+  size_t blink_color_index_;              // 当前颜色索引
+  bool is_blinking_;                      // 是否正在闪烁
+  rclcpp::TimerBase::SharedPtr blink_timer_;  // 闪烁定时器
+
   // Gripper state
   qyh_gripper_msgs::msg::GripperState left_current_state_;
   qyh_gripper_msgs::msg::GripperState right_current_state_;
@@ -53,6 +70,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 
   rclcpp::Subscription<std_msgs::msg::ColorRGBA>::SharedPtr led_color_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr led_blink_sub_;
   
   rclcpp::Service<qyh_gripper_msgs::srv::ActivateGripper>::SharedPtr left_srv_activate_;
   rclcpp::Service<qyh_gripper_msgs::srv::ActivateGripper>::SharedPtr right_srv_activate_;
@@ -69,6 +87,12 @@ private:
   bool activate_gripper(bool left = true);
   bool move_gripper(bool left,uint8_t position, uint8_t speed, uint8_t force);
   bool send_led_color(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+  
+  // LED闪烁功能
+  void handle_led_blink(const std_msgs::msg::String::SharedPtr msg);
+  void blink_timer_callback();
+  void stop_blinking();
+  bool parse_blink_command(const std::string& cmd, std::vector<RGBWColor>& colors, int& interval_ms);
   
   // Service callbacks
   void handle_activate_left(

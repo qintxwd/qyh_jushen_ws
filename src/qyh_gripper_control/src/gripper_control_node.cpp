@@ -2,6 +2,7 @@
 #include <chrono>
 #include <algorithm>
 #include <thread>
+#include <sstream>
 
 // Register addresses
 #define REG_CONTROL     0x03E8
@@ -19,7 +20,9 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   modbus_ctx_(nullptr),
   is_connected_(false),
   left_is_activated_(false),
-  right_is_activated_(false)
+  right_is_activated_(false),
+  blink_color_index_(0),
+  is_blinking_(false)
 {
   // Declare parameters
   this->declare_parameter<std::string>("device_port", "/dev/ttyUSB_gripper");
@@ -35,6 +38,7 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   this->declare_parameter<int>("led_default_g", 255);
   this->declare_parameter<int>("led_default_b", 0);
   this->declare_parameter<int>("led_default_w", 0);
+  this->declare_parameter<std::string>("led_blink_topic", "/robot_led/blink");
   
   // Get parameters
   device_port_ = this->get_parameter("device_port").as_string();
@@ -50,6 +54,7 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   led_default_g_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_g").as_int(), 0, 255));
   led_default_b_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_b").as_int(), 0, 255));
   led_default_w_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_w").as_int(), 0, 255));
+  led_blink_topic_ = this->get_parameter("led_blink_topic").as_string();
   
   RCLCPP_INFO(this->get_logger(), "Starting Gripper Control Node");
   RCLCPP_INFO(this->get_logger(), "Device: %s, Baudrate: %d, Left Slave ID: %d, Right Slave ID: %d",
@@ -109,6 +114,8 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
     led_color_sub_ = this->create_subscription<std_msgs::msg::ColorRGBA>(
       led_topic_, 10,
       [this](const std_msgs::msg::ColorRGBA::SharedPtr msg) {
+        // 设置纯色时停止闪烁
+        stop_blinking();
         const int r_i = std::clamp(static_cast<int>(msg->r * 255.0f), 0, 255);
         const int g_i = std::clamp(static_cast<int>(msg->g * 255.0f), 0, 255);
         const int b_i = std::clamp(static_cast<int>(msg->b * 255.0f), 0, 255);
@@ -117,6 +124,13 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
                        static_cast<uint8_t>(b_i), static_cast<uint8_t>(w_i));
       }
     );
+    
+    // LED闪烁订阅器
+    led_blink_sub_ = this->create_subscription<std_msgs::msg::String>(
+      led_blink_topic_, 10,
+      std::bind(&GripperControlNode::handle_led_blink, this, std::placeholders::_1)
+    );
+    RCLCPP_INFO(this->get_logger(), "LED blink topic: %s", led_blink_topic_.c_str());
   }
   
   // Create timer for publishing state
@@ -450,6 +464,141 @@ std::string GripperControlNode::get_fault_message(uint8_t fault_code)
   if (fault_code & 0x40) msg += "Overtemperature; ";
   
   return msg;
+}
+
+// ============ LED闪烁功能实现 ============
+
+bool GripperControlNode::parse_blink_command(const std::string& cmd, 
+                                              std::vector<RGBWColor>& colors, 
+                                              int& interval_ms)
+{
+  // 命令格式: "interval_ms:r,g,b,w;r,g,b,w;..."
+  // 例如: "500:255,0,0,0;0,255,0,0;0,0,255,0" 表示500ms间隔，红->绿->蓝循环
+  // 发送 "stop" 停止闪烁
+  
+  colors.clear();
+  
+  if (cmd.empty() || cmd == "stop") {
+    return false;  // 停止闪烁
+  }
+  
+  size_t colon_pos = cmd.find(':');
+  if (colon_pos == std::string::npos) {
+    RCLCPP_ERROR(this->get_logger(), "Invalid blink command format, missing ':'");
+    return false;
+  }
+  
+  // 解析间隔时间
+  try {
+    interval_ms = std::stoi(cmd.substr(0, colon_pos));
+    if (interval_ms < 50) {
+      interval_ms = 50;  // 最小50ms
+      RCLCPP_WARN(this->get_logger(), "Blink interval too small, set to 50ms");
+    }
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to parse interval: %s", e.what());
+    return false;
+  }
+  
+  // 解析颜色序列
+  std::string colors_str = cmd.substr(colon_pos + 1);
+  std::istringstream color_stream(colors_str);
+  std::string color_item;
+  
+  while (std::getline(color_stream, color_item, ';')) {
+    if (color_item.empty()) continue;
+    
+    std::istringstream rgbw_stream(color_item);
+    std::string value;
+    std::vector<int> rgbw_values;
+    
+    while (std::getline(rgbw_stream, value, ',')) {
+      try {
+        int v = std::stoi(value);
+        rgbw_values.push_back(std::clamp(v, 0, 255));
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(this->get_logger(), "Failed to parse color value: %s", e.what());
+        return false;
+      }
+    }
+    
+    // 确保有4个值 (R, G, B, W)
+    while (rgbw_values.size() < 4) {
+      rgbw_values.push_back(0);
+    }
+    
+    RGBWColor color;
+    color.r = static_cast<uint8_t>(rgbw_values[0]);
+    color.g = static_cast<uint8_t>(rgbw_values[1]);
+    color.b = static_cast<uint8_t>(rgbw_values[2]);
+    color.w = static_cast<uint8_t>(rgbw_values[3]);
+    colors.push_back(color);
+  }
+  
+  if (colors.empty()) {
+    RCLCPP_ERROR(this->get_logger(), "No valid colors in blink command");
+    return false;
+  }
+  
+  return true;
+}
+
+void GripperControlNode::handle_led_blink(const std_msgs::msg::String::SharedPtr msg)
+{
+  std::vector<RGBWColor> colors;
+  int interval_ms = 500;
+  
+  if (!parse_blink_command(msg->data, colors, interval_ms)) {
+    // 停止闪烁，恢复默认颜色
+    stop_blinking();
+    send_led_color(led_default_r_, led_default_g_, led_default_b_, led_default_w_);
+    RCLCPP_INFO(this->get_logger(), "LED blink stopped, restored to default color");
+    return;
+  }
+  
+  // 停止之前的闪烁
+  stop_blinking();
+  
+  // 设置新的闪烁参数
+  blink_colors_ = colors;
+  blink_color_index_ = 0;
+  is_blinking_ = true;
+  
+  RCLCPP_INFO(this->get_logger(), "LED blink started: %zu colors, %d ms interval", 
+              colors.size(), interval_ms);
+  
+  // 立即显示第一个颜色
+  const auto& first_color = blink_colors_[0];
+  send_led_color(first_color.r, first_color.g, first_color.b, first_color.w);
+  
+  // 创建闪烁定时器
+  blink_timer_ = this->create_wall_timer(
+    std::chrono::milliseconds(interval_ms),
+    std::bind(&GripperControlNode::blink_timer_callback, this)
+  );
+}
+
+void GripperControlNode::blink_timer_callback()
+{
+  if (!is_blinking_ || blink_colors_.empty()) {
+    return;
+  }
+  
+  // 切换到下一个颜色
+  blink_color_index_ = (blink_color_index_ + 1) % blink_colors_.size();
+  const auto& color = blink_colors_[blink_color_index_];
+  send_led_color(color.r, color.g, color.b, color.w);
+}
+
+void GripperControlNode::stop_blinking()
+{
+  is_blinking_ = false;
+  if (blink_timer_) {
+    blink_timer_->cancel();
+    blink_timer_.reset();
+  }
+  blink_colors_.clear();
+  blink_color_index_ = 0;
 }
 
 }  // namespace qyh_gripper_control

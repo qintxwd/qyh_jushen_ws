@@ -10,6 +10,7 @@
     led_enabled: true
     led_slave_id: 3
     led_topic: "/robot_led/set_color"
+    led_blink_topic: "/robot_led/blink"
     # 默认LED颜色 (0-255), W是白色通道用于产生更纯净的白光
     led_default_r: 0
     led_default_g: 255
