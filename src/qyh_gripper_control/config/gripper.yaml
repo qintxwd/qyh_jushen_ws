@@ -3,7 +3,7 @@
     device_port: "/dev/ttyUSB_gripper"
     baudrate: 115200
     slave_id: 1
-    publish_rate: 20.0
+    publish_rate: 10.0
     auto_activate: true
     left_slave_id: 2
     right_slave_id: 1
@@ -12,7 +12,7 @@
     led_topic: "/robot_led/set_color"
     led_blink_topic: "/robot_led/blink"
     # 默认LED颜色 (0-255), W是白色通道用于产生更纯净的白光
-    led_default_r: 0
-    led_default_g: 255
+    led_default_r: 255
+    led_default_g: 0
     led_default_b: 0
     led_default_w: 0

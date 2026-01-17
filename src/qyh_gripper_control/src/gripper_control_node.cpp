@@ -19,10 +19,10 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
 : Node("gripper_control_node", options),
   modbus_ctx_(nullptr),
   is_connected_(false),
-  left_is_activated_(false),
-  right_is_activated_(false),
   blink_color_index_(0),
-  is_blinking_(false)
+  is_blinking_(false),
+  left_is_activated_(false),
+  right_is_activated_(false)
 {
   // Declare parameters
   this->declare_parameter<std::string>("device_port", "/dev/ttyUSB_gripper");
@@ -50,10 +50,10 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
   led_enabled_ = this->get_parameter("led_enabled").as_bool();
   led_slave_id_ = this->get_parameter("led_slave_id").as_int();
   led_topic_ = this->get_parameter("led_topic").as_string();
-  led_default_r_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_r").as_int(), 0, 255));
-  led_default_g_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_g").as_int(), 0, 255));
-  led_default_b_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_b").as_int(), 0, 255));
-  led_default_w_ = static_cast<uint8_t>(std::clamp(this->get_parameter("led_default_w").as_int(), 0, 255));
+  led_default_r_ = static_cast<uint8_t>(std::clamp(static_cast<int>(this->get_parameter("led_default_r").as_int()), 0, 255));
+  led_default_g_ = static_cast<uint8_t>(std::clamp(static_cast<int>(this->get_parameter("led_default_g").as_int()), 0, 255));
+  led_default_b_ = static_cast<uint8_t>(std::clamp(static_cast<int>(this->get_parameter("led_default_b").as_int()), 0, 255));
+  led_default_w_ = static_cast<uint8_t>(std::clamp(static_cast<int>(this->get_parameter("led_default_w").as_int()), 0, 255));
   led_blink_topic_ = this->get_parameter("led_blink_topic").as_string();
   
   RCLCPP_INFO(this->get_logger(), "Starting Gripper Control Node");
@@ -120,6 +120,7 @@ GripperControlNode::GripperControlNode(const rclcpp::NodeOptions & options)
         const int g_i = std::clamp(static_cast<int>(msg->g * 255.0f), 0, 255);
         const int b_i = std::clamp(static_cast<int>(msg->b * 255.0f), 0, 255);
         const int w_i = std::clamp(static_cast<int>(msg->a * 255.0f), 0, 255);
+        RCLCPP_INFO(this->get_logger(), "LED set to %d,%d,%d,%d",r_i,g_i,b_i,w_i);
         send_led_color(static_cast<uint8_t>(r_i), static_cast<uint8_t>(g_i),
                        static_cast<uint8_t>(b_i), static_cast<uint8_t>(w_i));
       }
@@ -382,28 +383,43 @@ bool GripperControlNode::move_gripper(bool left, uint8_t position, uint8_t speed
 
 bool GripperControlNode::send_led_color(uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
-  std::lock_guard<std::mutex> lock(modbus_mutex_);
-  if (!modbus_ctx_) {
-    RCLCPP_ERROR(this->get_logger(), "Modbus context not available for LED");
-    return false;
+  constexpr int max_retries = 3;
+  constexpr int retry_delay_ms = 50;
+
+  for (int attempt = 0; attempt < max_retries; ++attempt) {
+    {
+      std::lock_guard<std::mutex> lock(modbus_mutex_);
+      if (!modbus_ctx_) {
+        RCLCPP_ERROR(this->get_logger(), "Modbus context not available for LED");
+        return false;
+      }
+
+      try {
+        modbus_ctx_->set_slave(led_slave_id_);
+        
+        // LED 寄存器 0x0000~0x0003: R,G,B,W
+        std::vector<uint16_t> values(4);
+        values[0] = static_cast<uint16_t>(r);
+        values[1] = static_cast<uint16_t>(g);
+        values[2] = static_cast<uint16_t>(b);
+        values[3] = static_cast<uint16_t>(w);
+
+        modbus_ctx_->write_registers(0x0000, values);
+        return true;
+      } catch (const modbus::Exception & e) {
+        if (attempt < max_retries - 1) {
+          RCLCPP_DEBUG(this->get_logger(), "LED command attempt %d failed: %s, retrying...", 
+                       attempt + 1, e.what());
+        } else {
+          RCLCPP_WARN(this->get_logger(), "Failed to send LED command after %d attempts: %s", 
+                      max_retries, e.what());
+        }
+      }
+    }
+    // 释放锁后等待一段时间再重试，让timer有机会完成读取
+    std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
   }
-
-  try {
-    modbus_ctx_->set_slave(led_slave_id_);
-
-    // LED 寄存器 0x0000~0x0003: R,G,B,W
-    std::vector<uint16_t> values(4);
-    values[0] = static_cast<uint16_t>(r);
-    values[1] = static_cast<uint16_t>(g);
-    values[2] = static_cast<uint16_t>(b);
-    values[3] = static_cast<uint16_t>(w);
-
-    modbus_ctx_->write_registers(0x0000, values);
-    return true;
-  } catch (const modbus::Exception & e) {
-    RCLCPP_WARN(this->get_logger(), "Failed to send LED command: %s", e.what());
-    return false;
-  }
+  return false;
 }
 
 void GripperControlNode::handle_activate_left(
